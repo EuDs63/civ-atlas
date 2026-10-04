@@ -779,7 +779,7 @@ export function nameMaterial(civ: Civ, t: NameTarget, raster?: Raster | null): N
       const rows = d.map((x, i) => {
         const nm = p.eastern ? polityName(p, dynastyEnd(civ, p, i)) : `${x.name}王朝`;
         const until = d[i + 1]?.year ?? p.ended;
-        // 新朝从哪座城起兵不写:编年史里写着"某氏起于某州,入主某城",再写一个城名模型会当成迁都
+        // 新朝从哪座城起兵不写:编年史里写着"某某起于某州,入主某城",再写一个城名模型会当成迁都
         return `${nm}(${yearSpan(x.year, until)})`;
       });
       history.push(`${p.eastern ? '历朝' : '王室'}:${rows.join(' → ')}`);

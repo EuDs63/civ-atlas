@@ -17,7 +17,7 @@
  * 撞名(和已经起好的名字重复)时换这个键的下一个候选,谁先占按锚点地块编号从小到大 —— 也和生成先后无关。
  * 种子来自 subSeed(seed, 'civ-names…'),其余随机数用 keyed。
  */
-import { createNamer, NAME_STYLES, type GeneratedName, type Namer } from '../names';
+import { createNamer, createPersonNamer, NAME_STYLES, type GeneratedName, type Namer, type PersonNamer } from '../names';
 import { Biome } from '../biomes';
 import type { Culture, CultureKind, Polity, Settlement } from './types';
 import { polityRootAt } from './growth';
@@ -425,6 +425,20 @@ export function nameSettlements(seed: number, settlements: Settlement[], culture
     if (old && old.culture === s.culture && old.name) s.name = old.name;
     else fresh(s);
   }
+}
+
+/**
+ * 人名(people.ts 起君主、统帅的名字用):每种语感一个人名生成器(按需建)。
+ * 东方中式 = 姓 + 名,边塞、山海、西幻 = 名;按键取,同一个键永远是同一个名字(见 src/gen/names/persons.ts)
+ */
+export function personNamers(seed: number): (style: string) => PersonNamer {
+  const base = subSeed(seed, 'civ-names-person');
+  const namers = new Map<string, PersonNamer>();
+  return (style: string) => {
+    let n = namers.get(style);
+    if (!n) namers.set(style, (n = createPersonNamer(base, style)));
+    return n;
+  };
 }
 
 /** 语感的中文名(如"北境(北欧风)") */

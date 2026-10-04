@@ -733,11 +733,16 @@ describe('编年史 · 真实世界(立国、升格)', () => {
         const kind = p.parent === undefined ? 'found' : 'split';
         expect(list.some((e) => e.kind === kind && e.polities[0] === p.id), `${p.name}`).toBe(true);
       }
-      // 立国写当年的国号(第 0 档:"X部" / "X城邦")
-      for (const e of list.filter((x) => x.kind === 'found')) expect(e.text).toMatch(/^.+(部|城邦)立国,都于.+$/);
-      // 分裂:"瑞州叛大渭自立,号瑞国,都于瑞城";复国:"故昌遗民据瑞州起兵,脱大渭复国,号后昌国,都于瑞城"
+      // 立国写开国之君和当年的国号(第 0 档:"X部" / "X城邦"):"李昭建昌部,都于汾城"
+      for (const e of list.filter((x) => x.kind === 'found')) {
+        expect(e.text).toMatch(/^.+建.+(部|城邦),都于.+$/);
+        const founder = civ.people!.find((x) => x.role === 'ruler' && x.polity === e.polities[0])!;
+        expect(e.text.startsWith(`${founder.name}建`)).toBe(true);
+        expect(e.people).toEqual([founder.id]);
+      }
+      // 分裂:"瑞州守将李昭叛大渭自立,号瑞国,都于瑞城";复国:"故昌宗室李昭据瑞州起兵,脱大渭复国,号后昌国,都于瑞城"
       for (const e of list.filter((x) => x.kind === 'split')) {
-        expect(e.text).toMatch(e.tag === '复' ? /^故.+遗民据.+起兵,脱.+复国,号.+,都于.+$/ : /^.+叛.+自立,号.+,都于.+$/);
+        expect(e.text).toMatch(e.tag === '复' ? /^故.+(宗室|王室之后|旧臣).+据.+起兵,脱.+复国,号.+,都于.+$/ : /^.+(守将|领主).+叛.+自立,号.+,都于.+$/);
       }
       for (const e of list.filter((x) => x.kind === 'merge')) expect(e.text).toMatch(/^.+并入.+$/);
     });

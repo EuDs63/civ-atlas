@@ -142,6 +142,29 @@ describe('AI 写史书:材料', () => {
     expect(t.calls).toHaveLength(1);
   });
 
+  it('国史:主角的历代君主照推演写(名字、在位年份);分章时只列这一章在位的', () => {
+    const rulers = civ.people!.filter((x) => x.role === 'ruler' && x.polity === east.id).sort((a, b) => a.from! - b.from!);
+    expect(rulers.length).toBeGreaterThan(2);
+    const user = userOf(civ, { scope: { kind: 'polity', polity: east.id }, style: 'classic', length: 'medium' });
+    const line = user.split('\n').find((l) => l.includes('历代君主('))!;
+    expect(line).toBeDefined();
+    expect(line).toContain(`${rulers[0].name}(第 ${Math.floor(rulers[0].from!)}`);
+    expect(line).toContain(rulers[rulers.length - 1].name);
+    // 系统提示:材料里的人物照写
+    expect(SYSTEM_PROMPT).toMatch(/材料里写到的人物.+照材料写/);
+    // 长篇分章:第二章只列第二朝起在位的君主
+    const p = buildHistoryPrompts(civ, { scope: { kind: 'polity', polity: east.id }, style: 'classic', length: 'long' });
+    expect(p.sections.length).toBeGreaterThanOrEqual(2);
+    const s = p.sections[1];
+    const second = historyMessages(p, 1)[1].content.split('\n').find((l) => l.includes('历代君主('));
+    const inside = rulers.filter((x) => x.from! <= s.to && (x.until ?? Infinity) > s.from);
+    if (inside.length < 2) expect(second).toBeUndefined();
+    else {
+      expect(second).toContain(inside[0].name);
+      expect(second).not.toContain(`${rulers[0].name}(`);
+    }
+  });
+
   it('一段时代:只放这段年份的纪事,写开始和结束时的格局;没有史事的年代 = empty', () => {
     const p = buildHistoryPrompts(civ, { scope: { kind: 'era', from: 1500, to: 2000 }, style: 'plain', length: 'short' });
     const user = historyMessages(p, 0)[1].content;

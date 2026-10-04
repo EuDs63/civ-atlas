@@ -7,6 +7,7 @@
  *   ③ 城市成长 + 国家       polities.ts            → settlements、polities、polity
  *   ④ 道路网               routes.ts              → routes
  *   ⑤ 地理名称             places.ts              → places
+ *   ⑥ 人物                 people.ts              → people(历代君主、战争里的统帅;按推出来的历史排,不改历史)
  *
  * 阶段 4 干预(params.interventions,interventions.ts):带着干预从第 0 年整段重推;干预年份之前和不干预时逐字节一致。
  *
@@ -28,6 +29,7 @@ import { installAssimilation } from './assimilation';
 import { installCities } from './cities';
 import { warModelOf } from './wars';
 import { installInterventions, scheduleInterventions } from './interventions';
+import { buildPeople } from './people';
 
 export * from './types';
 
@@ -96,6 +98,7 @@ export function generateCiv(world: World, params: Partial<CivParams> = {}, progr
     ? buildRoutes(world, habitat, regions, { progress, cities: settlements.length ? routeCities(settlements, polities, p.endYear) : undefined })
     : [];
   const places: Place[] = findPlaces(world, regions, { cultures, culture }); // ⑤ places.ts(山海湖岛是地理,不看 viable)
+  const people = buildPeople({ seed: world.params.seed, endYear: p.endYear, polities, settlements, cultures, annals }); // ⑥ people.ts
 
   return {
     seed: world.params.seed,
@@ -116,6 +119,7 @@ export function generateCiv(world: World, params: Partial<CivParams> = {}, progr
     spreadYears: model?.spreadYears,
     polityYears: pm?.years,
     ...(iv ? { interventions: iv.list.slice() } : {}),
+    people,
   };
 }
 

@@ -4,9 +4,10 @@
  *
  * - 点一条:收起概览,时间轴跳到那一年并暂停,打开"国家"图层,地图上事发的州 / 相关国家闪约两秒
  *   (高亮在 CivLayer 画;事发地不在视野里时 App 把地图平移过去)。
- * - 战争折叠成一条(起止年份、交战双方、结果),点右边的数字展开看每一次攻占、被迫迁都;
+ * - 战争折叠成一条(起止年份、交战双方、结果),点右边的数字展开看开战、每一次攻占、没打下来的战役、被迫迁都;
  *   "大事 / 全部"(按钮上写各自的条数;按国家看时是这一国的条数);国家下拉框:只看这一国的事
  *   (别处打开:openOverview('chronicle', { polity }),见 overviewStore.ts)。
+ *   只看一国时,"全部"里按年份插进这一国的历代君主继位(全世界的继位太多,看全部国家、看"大事"时不列)。
  * - 回放 / 拖时间轴时:还没发生的事(在上面)淡显,"现在"线跟着走、列表跟着滚。这一步不经过 React
  *   (订阅时间轴,直接改行的 data-st 属性和 scrollTop),几千条也不会每帧重排。
  * - "复制全文":当前列出的纪事(含战争里的每一件事)复制成纯文本,给 OC 作者写设定用。
@@ -14,7 +15,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
-import { buildChronicle, chronicleText, filterChronicle, yearText, type ChronicleEntry } from '../gen/civ/chronicle';
+import { buildChronicle, chronicleText, filterChronicle, mergeChronicle, reignEntries, yearText, type ChronicleEntry } from '../gen/civ/chronicle';
 import { polityName } from '../gen/civ/growth';
 import { getCivTime, pickChronicleEntry, setChronicle, subscribeCivTime, useChronicle, useChroniclePick, type CivTime } from './civView';
 import { evLabel, evText, evType } from './timelineLayout';
@@ -38,8 +39,12 @@ const ST = ['past', 'live', 'future'] as const;
 export function Chronicle({ civ }: { civ: Civ | null }) {
   const view = useChronicle();
   const all = useMemo(() => (civ ? buildChronicle(civ) : []), [civ]);
-  // 按国家筛过的"全部"和"大事"(两个按钮上各写条数),当前列出的是其中之一
-  const mine = useMemo(() => filterChronicle(all, { polity: view.polity }), [all, view.polity]);
+  // 按国家筛过的"全部"和"大事"(两个按钮上各写条数),当前列出的是其中之一;只看一国时"全部"里并进这一国的君主继位
+  const mine = useMemo(() => {
+    const own = filterChronicle(all, { polity: view.polity });
+    if (!civ || view.polity === null) return own;
+    return mergeChronicle(own, filterChronicle(reignEntries(civ), { polity: view.polity }));
+  }, [civ, all, view.polity]);
   const majors = useMemo(() => filterChronicle(mine, { major: true }), [mine]);
   const list = view.major ? majors : mine;
   /** 列出来的顺序:新的在上(战争里的每一件事仍按先后) */

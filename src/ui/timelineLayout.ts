@@ -5,7 +5,7 @@
  * RecentEvents.tsx、EventPins.tsx。
  *
  * - 事件类型:史事种类(types.ts 的 AnnalKind)归成五类 + 干预,颜色用 CSS 变量(timeline.css 的 [data-ev=…]):
- *   战争(打仗、攻占、议和、洗劫、毁城、灭亡)/ 改朝(改朝换代、迁都、旧都衰落)/ 立国(立国、分裂自立、复国、重建)/
+ *   战争(打仗、战役、攻占、议和、洗劫、毁城、灭亡)/ 改朝(改朝换代、君主继位、迁都、旧都衰落)/ 立国(立国、分裂自立、复国、重建)/
  *   称帝(升格、称帝、降格、合并)/ 同化(同化、迁徙、民族消亡)/ 干预(主色)。卡片上的类型名按一字标签细分("攻占""迁都"……)。
  * - 刻度:每条纪事一个小菱形(战争画在开战那年);挨得太近(DIAMOND_GAP 像素以内)合并成一个,
  *   颜色取其中分量最重的那一件,悬停列出每一件。干预单独一种"令"标记,不和菱形合并。
@@ -24,12 +24,14 @@ export type EvType = 'war' | 'dynasty' | 'found' | 'empire' | 'assim' | 'order';
 
 const KIND_TYPE: Readonly<Record<string, EvType>> = {
   war: 'war',
+  battle: 'war',
   conquer: 'war',
   peace: 'war',
   sack: 'war',
   ruin: 'war',
   fall: 'war',
   dynasty: 'dynasty',
+  reign: 'dynasty',
   capital: 'dynasty',
   decline: 'dynasty',
   found: 'found',
@@ -54,6 +56,7 @@ const TAG_LABEL: Readonly<Record<string, string>> = {
   升: '升格',
   降: '衰微',
   战: '战争',
+  役: '战役',
   占: '攻占',
   征: '征服',
   和: '议和',
@@ -64,6 +67,7 @@ const TAG_LABEL: Readonly<Record<string, string>> = {
   复: '复国',
   合: '合并',
   朝: '改朝',
+  嗣: '继位',
   徙: '迁徙',
   化: '同化',
   湮: '消亡',

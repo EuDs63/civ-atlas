@@ -18,6 +18,7 @@
  *     打不打得下看局部国力:双方国力各按"离本国国都的路程"打折(远征越远越弱),
  *       守方再乘过界难度(翻山 / 跨河 / 渡海)、守国都、守本族的加成;胜率 = 攻² ÷ (攻² + 守²)。
  *     打不下来,守方有 COUNTER 的机会反攻,夺回被攻方占去的州(这场战争里丢的、以前丢的;同样按局部国力)。
+ *     没打下来的这一仗(攻方的、守方反攻的)记一条史事 battle(从哪种边打过去记在 via),不改归属,编年史写成"某某之战"。
  *     一州易手后 HOLD 年内不会再易手:前线有来有回,但不会闪烁。
  *   攻占 → 州归攻方(民族不变,只换国家;城可能被洗劫、被毁,见 cities.ts)。丢的是国都:还有别的州就迁都到剩下人口最多的城
  *     (剩下的国土被切成几块时,在人口最多的那一块里挑),新国都 CAPITAL_GRACE 年内攻不下;
@@ -28,7 +29,7 @@
  *     议和时两国各自被切出去、挨着对方的飞地割给对方(划清边界;割让的州数记在史事 peace 的 region 列)。
  *     攻方国力是守方 CRUSH 倍以上时是灭国之战:拿下国都、对方丢了过半国土、达成战争目标都不停,直到厌战、僵持或对方亡国。
  *
- * 同一年里的先后:宣战 → 攻占 → 灭亡 / 迁都 → 议和(史事按这个顺序记)。
+ * 同一年里的先后:宣战 → 战役(没打下来的那一仗)/ 攻占 → 灭亡 / 迁都 → 议和(史事按这个顺序记)。
  *
  * 阶段 4 干预(interventions.ts,挂在 WarModel.iv 上;没有干预时为空,只多一次判空):
  *   不许灭的国家,国都和紧挨着国都的州(京畿)攻不下,只剩 PROTECT_KEEP 州以下时一州都攻不下(pickTarget 跳过,看邻国也不挑它),
@@ -575,10 +576,17 @@ export function installWars(sim: CivSim, pm: PolityModel, wm: WarModel = newMode
     const [r, def] = pickTarget(w, i, w.a, w.b, t, false);
     if (r >= 0 && warRand(wm, w, i, U_ATTACK) < chance(w.a, w.b, r, def, t, pow)) {
       capitalFell = take(w, w.a, w.b, r, t, true);
-    } else if (warRand(wm, w, i, U_COUNTER) < COUNTER) {
-      // 守方反攻:夺回被攻方占去的州
-      const [q, qdef] = pickTarget(w, i, w.b, w.a, t, true);
-      if (q >= 0 && warRand(wm, w, i, U_RETAKE) < chance(w.b, w.a, q, qdef, t, pow)) capitalFell = take(w, w.b, w.a, q, t, true);
+    } else {
+      // 没打下来:记一条战役(不改归属;编年史写成"某某之战")
+      if (r >= 0) sim.record('battle', { a: w.a, b: w.b, region: r, settlement: pm.cityOf[r], war: w.id, via: DEFENSE.indexOf(def) });
+      if (warRand(wm, w, i, U_COUNTER) < COUNTER) {
+        // 守方反攻:夺回被攻方占去的州
+        const [q, qdef] = pickTarget(w, i, w.b, w.a, t, true);
+        if (q >= 0) {
+          if (warRand(wm, w, i, U_RETAKE) < chance(w.b, w.a, q, qdef, t, pow)) capitalFell = take(w, w.b, w.a, q, t, true);
+          else sim.record('battle', { a: w.b, b: w.a, region: q, settlement: pm.cityOf[q], war: w.id, via: DEFENSE.indexOf(qdef) });
+        }
+      }
     }
     if (w.end !== undefined) return; // 有一方亡国,已经议和
     // 议和?

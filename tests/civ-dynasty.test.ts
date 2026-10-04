@@ -257,14 +257,16 @@ describe('王朝更替', () => {
         expect(e.text).not.toMatch(/某国|undefined|NaN|-1|旧王室/);
         expect(e.text).toContain(`享国 ${n} 年`);
         if (p.eastern) {
-          // "大昌享国 312 年而亡,景氏起于青州代之,国号大景,定都青阳" / "…,权臣景氏篡位,国号大景" / "…,入主昌京,国号大景"
-          expect(e.text).toMatch(/^.+享国 \d+ 年而亡,(权臣.+氏篡位|.+氏起于.+),国号.+$/);
-          expect(e.text).toContain(`${polityRootAt(p, e.year)}氏`);
+          // "大昌享国 312 年而亡,景元起于青州代之,国号大景,定都青阳" / "…,权臣赵高废少帝自立,国号大景" / "…,入主昌京,国号大景"
+          expect(e.text).toMatch(/^.+享国 \d+ 年而亡,(权臣.+自立|.+起于.+),国号.+$/);
+          const founder = civ.people!.find((x) => x.role === 'ruler' && x.polity === p.id && x.dynasty === i)!;
+          expect(e.text).toContain(founder.name);
+          expect(e.people).toContain(founder.id);
           // 当时第 DYNASTY_TIER 档以上的是大事
           expect(e.importance).toBe(polityTierAt(p, e.year) >= DYNASTY_TIER ? MAJOR : 2);
         } else {
-          // "索拉特王国王室更迭,塞伦纳王朝享国 312 年而终,卡诺王朝兴"
-          expect(e.text).toMatch(/^.+(王室更迭|汗位易主),.+王朝享国 \d+ 年而终,.+王朝兴(,迁都.+)?$/);
+          // "索拉特王国王室更迭,塞伦纳王朝享国 312 年而终,卡诺王朝兴,阿尔德里克三世即位"
+          expect(e.text).toMatch(/^.+(王室更迭|汗位易主),.+王朝享国 \d+ 年而终,.+王朝兴,.+即位(,迁都.+)?$/);
           expect(e.text).toContain(dynastyTitle(p, i));
           expect(e.importance).toBeLessThan(MAJOR);
         }

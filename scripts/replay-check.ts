@@ -561,6 +561,35 @@ for (const style of ['realistic', 'fantasy']) {
   if (!(hl?.lit > 0)) errs.push('点编年史的一条后地图上没有高亮');
   if (!(future > 0)) errs.push('编年史里还没发生的事没有淡显');
 
+  // 只看一国(下拉框里第一个 = 最大的国):"全部"里按年份插进它的君主继位;"大事"、看全部国家时没有
+  {
+    await openOverview(page, 'chronicle');
+    const box = page.locator('.ov-root:not([hidden]) .chronicle');
+    const sel = box.locator('[data-act=chron-polity]');
+    const seg = box.locator('.chron-filters .seg button');
+    const reigns = () => box.locator('.chron-list > .chron-item > .chron-row .chron-type', { hasText: /^继位$/ }).count();
+    const first = await sel.evaluate((el: HTMLSelectElement) => el.options[1]?.value ?? '').catch(() => '');
+    let counts = [-1, -1, -1, -1];
+    if (first) {
+      await seg.nth(1).click();
+      const everyAll = await reigns();
+      await seg.nth(0).click();
+      const everyMajor = await reigns();
+      await sel.selectOption(first);
+      const oneMajor = await reigns();
+      await seg.nth(1).click();
+      const oneAll = await reigns();
+      counts = [everyAll, everyMajor, oneMajor, oneAll];
+      // 回到默认:全部国家、大事
+      await seg.nth(0).click();
+      await sel.selectOption('');
+    }
+    await closeOverview();
+    console.log(`编年史的君主继位:全部国家 全部 ${counts[0]} / 大事 ${counts[1]} 条;只看一国 大事 ${counts[2]} / 全部 ${counts[3]} 条`);
+    if (!(counts[3] > 0)) errs.push('编年史只看一国时"全部"里没有君主继位');
+    if (counts[0] || counts[1] || counts[2]) errs.push(`编年史看全部国家、看"大事"时不该列君主继位(${counts.join(' / ')})`);
+  }
+
   // 导出(阶段 4):顶栏"导出 → 地图图片",接住下载的 PNG:尺寸对、不是空白、文件名带种子和时间轴当前的年份;
   // 再导一张 16 位高度图:位深、尺寸对,海平面灰度和提示里写的一致
   {

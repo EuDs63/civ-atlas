@@ -93,12 +93,14 @@
  *   5:世界长在一颗球上:东西相连、有真正的南北极,主图是等距圆柱投影;约一半的世界有一块极地大陆。
  *      地形、历史、稳定键里的地块编号全换了一遍(旧存档照常打开,提示"来自旧版本",指不到的改名 / 干预标"暂未生效");
  *      地形修改的坐标按经纬度解释(x = 经度、y = 纬度),跨 180° 经线的笔画 x 可以超出 [0, 2048)。
+ *   6:历史里有了人物(历代君主、战争里的统帅,Civ.people)和战役(没打下来的仗,史事 battle);
+ *      疆域、兴亡、改朝换代都和 5 一样,编年史的句子里多了人名和"某某之战"。
  */
 import type { Civ, Place, Polity, Settlement } from './civ/types';
 import { polityRootAt } from './civ/growth';
 
 /** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对) */
-export const GENERATOR_VERSION = 5;
+export const GENERATOR_VERSION = 6;
 
 /** 干预的种类(见文件头的表) */
 export type InterventionKind = 'protect' | 'ally' | 'declare' | 'unity' | 'cede' | 'found' | 'move' | 'halt';

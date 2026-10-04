@@ -58,7 +58,7 @@ function fingerprint(seed: number): Record<string, string> {
 }
 
 /**
- * 期望值是 GENERATOR_VERSION 5 算的。经纬度换算、沿大圆走、球面三角形面积这些三角函数都舍入到 24 位,
+ * 期望值是 GENERATOR_VERSION 6 算的。经纬度换算、沿大圆走、球面三角形面积这些三角函数都舍入到 24 位,
  * 推演里的超越函数也一样,所以各 CPU、各浏览器逐位一致
  */
 const EXPECTED: Record<number, Record<string, string>> = {
@@ -82,13 +82,14 @@ const EXPECTED: Record<number, Record<string, string>> = {
     'world.water': 'b8b1b2dec1cc',
     'world.waterLevel': '984bd1fa82c4',
     'world.width': '2fd8ac4eb585',
-    'civ.annals': '1344d73ce093',
+    'civ.annals': '9764940600b3',
     'civ.checkpoints': '3c3dbdb1530e',
     'civ.culture': 'de207bbd6688',
     'civ.cultures': '30549c3c8d1e',
     'civ.endYear': 'c1d83dcab0a1',
     'civ.habitat': 'c62c910c517a',
     'civ.log': '9c936381c4eb',
+    'civ.people': '2c9e8d0d6cb7',
     'civ.places': '34cd99c846e4',
     'civ.polities': '5fb1e42a2fda',
     'civ.polity': '5bd50a3a2c28',
@@ -120,13 +121,14 @@ const EXPECTED: Record<number, Record<string, string>> = {
     'world.water': '9dafa02952ec',
     'world.waterLevel': '1376ef2bd877',
     'world.width': '2fd8ac4eb585',
-    'civ.annals': '92a551fab1c0',
+    'civ.annals': '0afd1171e7d9',
     'civ.checkpoints': 'bf5f70ad566a',
     'civ.culture': 'ab93c545300d',
     'civ.cultures': '4149e26f5dc7',
     'civ.endYear': 'c1d83dcab0a1',
     'civ.habitat': '282c8ad88ec7',
     'civ.log': '5a95d51dbdbe',
+    'civ.people': '38edb13af9d1',
     'civ.places': 'e206043351a6',
     'civ.polities': '64c3d39d89ee',
     'civ.polity': '6e1580ab3563',

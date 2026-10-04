@@ -17,6 +17,7 @@ import { NAME_KINDS, ZH_LEN, type Candidate, type NameKind } from './spec';
 
 export type { NameKind } from './spec';
 export { NAME_KINDS } from './spec';
+export { createPersonNamer, type PersonNamer } from './persons';
 
 export interface NameStyle {
   id: string;

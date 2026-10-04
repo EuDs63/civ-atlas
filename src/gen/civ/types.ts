@@ -229,6 +229,7 @@ export interface Place {
  * | rebuild   | 重建 | 当时的国家(−1 = 部落地带) | −1 | 州 | 新城(被毁的旧城见新城的 Settlement.rebuilds) | −1 |
  * | decline   | 旧都衰落 | 它原是哪国的国都 | −1 | 州 | 旧都(失去国都之位的年份见 Settlement.capitalSpans) | −1 |
  * | intervene | 干预(阶段 4,interventions.ts):一条干预在这一刻生效(种类、字段见 Civ.interventions 里的那一条;各种类 a / b / region / settlement 的含义见下面) | 国家 A | 见下 | 见下 | 见下 | **干预的下标**(Civ.interventions 里第几条,借用这一列) |
+ * | battle    | 战役:攻方这一仗没打下来(守方守住了;打下来的记 conquer) | 攻方(守方反攻失败时是原守方) | 守方 | 攻打的州 | 州里的城(有城 = 攻城,没有 = 野战;−1) | 战争编号 |
  *
  * 洗劫、毁城和那一次攻占同一刻,记在那条 conquer **前面**(conquer、被迫迁都、灭亡照旧紧挨着,编年史里排回攻占后面)。
  * 议和割让的州也各记一条 conquer(a = 得到的一方,b = 割出的一方),连着记在那条 peace 前面,条数记在 peace 的 region 列。
@@ -246,6 +247,8 @@ export interface Place {
  *   立国紧跟着记一条 found(新国家;编年史并进干预那一条),原主的国都在这州就再记原主迁都(capital,war = −1)或亡国(fall,b = 新国家);
  *   划州同样(原主迁都 / 亡国);迁都迁成了紧跟着记一条 capital(war = −1;编年史并进干预那一条)。
  *   国家 A 的键指不到(新历史里没有这国 / 那一刻还没立国)就不记(立国除外:立国一定记)。
+ * battle(人物与战役,wars.ts 的战役):每一仗都算过胜负,打下来的记 conquer,没打下来的(攻方败退、守方反攻没夺回)记一条 battle;
+ *   攻方从哪种边打过去记在 Annal.via。不改归属,只是让编年史写得出"某某之战"。
  * 阶段 3 以后再有新种类(瘟疫……)在末尾往下加。
  */
 export type AnnalKind =
@@ -266,7 +269,8 @@ export type AnnalKind =
   | 'ruin'
   | 'rebuild'
   | 'decline'
-  | 'intervene';
+  | 'intervene'
+  | 'battle';
 
 /**
  * 一条史事(阶段 3):推演里各事件处理函数用 CivSim.record 往 Civ.annals 里记,编年史(界面上的事件列表)只读它。
@@ -280,6 +284,8 @@ export interface Annal {
   region: number;
   settlement: number;
   war: number;
+  /** 战役(battle)才有:攻方从哪种边打过去(AdjKind:平地、跨河、翻山、海峡、航线) */
+  via?: AdjKind;
 }
 
 /** 变化日志里的"哪一层" */
@@ -349,7 +355,71 @@ export interface Civ {
    * 不改 regions 本身:画国土、国界的缓存按 civ.regions 存,改州名不用重画
    */
   regionNames?: string[];
+  /**
+   * 人物(people.ts):各国的历代君主和战争里的统帅。推演结束后按历史"贴"上去,国界、兴亡、战争胜负一个都不变。
+   * 下标 = Person.id;先是君主(按国家编号、即位先后),再是统帅(按第一次领兵的先后)。没有文明 = 空
+   */
+  people?: Person[];
 }
+
+/**
+ * 人物:君主或统帅。名字、生卒、在位都是推演结束后按国家的兴亡、王朝更替、战争排出来的(people.ts),
+ * 随机数按国家的位置锚 + 第几位取:干预某一年之前已经下台的君主和不干预时一样(称号、编号可能变,见 people.ts)。
+ */
+export interface Person {
+  id: number;
+  role: 'ruler' | 'general';
+  /** 哪国的人 */
+  polity: number;
+  /** 本名:东方中式 = 姓 + 名("李昭");东方边塞、山海和西幻 = 名("咄苾""阿尔德里克") */
+  name: string;
+  born: Year;
+  /** 卒年;到结束年份还在世 = 不给 */
+  died?: Year;
+  /** 结局(君主:怎么失去君位的;统帅:寿终还是战死)。还在位 / 还在世 = 不给 */
+  fate?: PersonFate;
+  /** 君主:即位的年份 */
+  from?: Year;
+  /** 君主:失去君位(去世、被废、亡国)的年份;到结束年份还在位 = 不给 */
+  until?: Year;
+  /** 君主:第几朝(Polity.dynasties 的下标;没改朝换代过 = 0) */
+  dynasty?: number;
+  /** 君主:怎么即位的 */
+  rise?: RulerRise;
+  /**
+   * 君主的称号(去世以后才有;还在位 = 空串):东方 = 庙号("太祖""世宗")或谥号 + 爵("穆公""庄王",亡国之君"哀帝");
+   * 西幻 = 同名君主的序数("三世")或"大帝"。称呼的写法见 peopleText.ts
+   */
+  title?: string;
+  /** 领兵打过的仗(君主亲征也记在这里) */
+  commands?: PersonCommand[];
+}
+
+/** 一次领兵:哪场战争、哪一方、任期 */
+export interface PersonCommand {
+  war: number;
+  /** 0 = 攻方(宣战的一方),1 = 守方 */
+  side: 0 | 1;
+  from: Year;
+  until: Year;
+  /**
+   * 经手的第一件、最后一件事在 Civ.annals 里的下标(宣战,或者那场战争里的战役、攻占)。
+   * 同一刻接连几件事中途换了人(上一位战死)时,靠它分清哪一件是谁打的
+   */
+  first: number;
+  last: number;
+}
+
+/**
+ * 人物的结局:
+ * - 君主:died 寿终、murdered 遇弑、deposed 被权臣所废(改朝换代)、overthrown 新朝起兵、死于兵乱、
+ *   fell 亡国殉国、surrendered 亡国出降、fled 亡国出奔(国家瓦解也算)、merged 国并入他国(归附)、retired 共和国执政官任满
+ * - 统帅:died 寿终、battle 战死
+ */
+export type PersonFate = 'died' | 'murdered' | 'deposed' | 'overthrown' | 'fell' | 'surrendered' | 'fled' | 'merged' | 'retired' | 'battle';
+
+/** 君主怎么即位的:found 立国、rebel 叛离自立(分裂)、restore 复国(故国王室之后)、usurp 权臣篡位、rise 起兵代之(改朝换代)、heir 继位 */
+export type RulerRise = 'found' | 'rebel' | 'restore' | 'usurp' | 'rise' | 'heir';
 
 export interface CivParams {
   /** 文明史长度(年),默认 3000 */

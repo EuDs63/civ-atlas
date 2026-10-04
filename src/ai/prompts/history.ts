@@ -18,6 +18,7 @@ import type { Civ, Polity, Year } from '../../gen/civ/types';
 import { buildChronicle, cnNumber, entryInvolves, entryYearLabel, yearText, type ChronicleEntry } from '../../gen/civ/chronicle';
 import { capitalAt, dynastyTitle, polityName, polityShortTitle, polityTierAt, polityTitleChain } from '../../gen/civ/growth';
 import { KIND_INFO, cultureLabel, regionLabel, regionNamed } from '../../gen/civ/display';
+import { rulerShort } from '../../gen/civ/peopleText';
 import { ownersAt, type Owners } from '../../gen/civ/timeline';
 import { polityKey, resolveKey } from '../../gen/edits';
 import type { AiMessage } from '../types';
@@ -89,7 +90,7 @@ export const HISTORY_STYLES: Record<HistoryStyle, HistoryStyleSpec> = {
     temperature: 0.7,
     rule:
       '以人和国为纲,不以年为纲。用浅近的文言。"本纪"写一国(或一朝)的兴衰,按年叙它的立国、升格、战争、迁都、改朝换代与存亡;' +
-      '"列传"每篇写一个人(君主以外的将相、使臣、谋士、叛将、遗民……,人物你来补),从出身写到结局,他经历的战事、兴亡要和材料对得上;' +
+      '"列传"每篇写一个人(君主以外的将相、使臣、谋士、叛将、遗民……,材料里写到的统帅可以立传,也可以另补人物),从出身写到结局,他经历的战事、兴亡要和材料对得上;' +
       '篇末可以有"太史公曰"式的一两句评论,写成"史臣曰"。',
   },
 };
@@ -602,7 +603,7 @@ function capitalsText(civ: Civ, p: Polity, until: Year = Infinity): string {
 
 /**
  * 历朝(东方)/ 王室(西幻)先后,只写到 until 那年。新朝从哪里起兵不写 ——
- * 编年史里写着("某氏起于某州,入主某城"),这里再写一个城名,模型会当成迁都
+ * 编年史里写着("某某起于某州,入主某城"),这里再写一个城名,模型会当成迁都
  */
 function reignsText(civ: Civ, p: Polity, until: Year = Infinity): string {
   const d = (p.dynasties ?? []).filter((x, i) => i === 0 || x.year <= until);
@@ -614,6 +615,26 @@ function reignsText(civ: Civ, p: Polity, until: Year = Infinity): string {
     return `${name}(${span(x.year, stop)})`;
   });
   return `${p.eastern ? '历朝' : '王室'}:${xs.join(' → ')}`;
+}
+
+/**
+ * 历代君主(国史的主角),只写 clip 这一段里在位的:"太祖林遥(第 120—151 年)、太宗林……"。
+ * 东方写"庙号 + 名字"(还在位的没有庙号,只写名字),西幻写名字 + 序数;共和国是"历任执政";太多就写头尾几位
+ */
+function rulersText(civ: Civ, p: Polity, clip: Clip): string {
+  const end = Math.min(lastMoment(civ, p), clip.to);
+  const rs = (civ.people ?? [])
+    .filter((x) => x.role === 'ruler' && x.polity === p.id && x.from! <= end && (x.until ?? Infinity) > clip.from)
+    .sort((a, b) => a.from! - b.from!);
+  if (rs.length < 2) return '';
+  const xs = rs.map((x) => {
+    const titled = x.title && (x.until === undefined || x.until <= end);
+    const who = p.eastern ? `${titled ? x.title : ''}${x.name}` : rulerShort(civ, x);
+    return `${who}(${span(x.from!, Math.min(x.until ?? end, end))})`;
+  });
+  const MAX = 24;
+  const list = xs.length > MAX ? [...xs.slice(0, 14), '……', ...xs.slice(-8)] : xs;
+  return `${p.lineage === 'republic' ? '历任执政' : '历代君主'}(${cnNumber(rs.length)}位):${list.join('、')}`;
 }
 
 /** 国家的来历:"第 120 年立国" / "第 900 年叛大昌自立" / "第 1100 年脱大渭复国(复故昌)" */
@@ -737,6 +758,8 @@ function polityLine(civ: Civ, p: Polity, detail: boolean, ends: ReturnType<typeo
   ];
   const reigns = reignsText(civ, p, until);
   if (reigns) lines.push(`  ${reigns}`);
+  const rulers = main ? rulersText(civ, p, clip) : '';
+  if (rulers) lines.push(`  ${rulers}`);
   const peak = peakText(civ, p, stat, true, !whole);
   if (peak) lines.push(`  疆域:${peak}`);
   const folks = folksText(civ, p, stat);
@@ -975,11 +998,12 @@ export const SYSTEM_PROMPT = [
   '2. 年份照材料写成"第 1288 年"这样的阿拉伯数字,每处都带"第"(不要写成"第一千二百八十八年""千二百八十八年"),不要换算成干支、公元、世纪或别的纪年;' +
     '不要写"三十年后""又六十六年"这类推算出来的年数,直接写年份。补写的细节不要另编年份:材料里没有的年份不要出现。',
   '3. 战事照材料写:得几州就是几州,"得某州"不等于灭国,材料没写亡的国家就还在;材料写了洗劫、纵兵大掠、夷为平地、毁城,就不要写成秋毫无犯、开仓放粮;' +
-    '"王室更迭""某氏代之"是改朝换代,不是父死子继;国家升格、称帝要等到材料里写的那一年。',
-  '4. 可以补充细节:君主、将相、使者、百姓等人物,对话、场景、民生风俗、事情的前因后果,但要合情合理,不得和材料矛盾。' +
+    '"某王朝兴""某某起于某地代之""权臣某某废某某自立"是改朝换代,不是父死子继;国家升格、称帝要等到材料里写的那一年。',
+  '4. 材料里写到的人物(君主、统帅、叛将、权臣)照材料写:谁在位、谁领兵、谁亲征、谁战死、谁出降,都不改,也不要张冠李戴。' +
+    '可以补充细节:材料没写的将相、使者、谋士、百姓等人物,对话、场景、民生风俗、事情的前因后果,但要合情合理,不得和材料矛盾。' +
     '不要虚构材料里没有的灭国、改朝换代、迁都、称帝或大战,也不要把几件事的先后写反。',
   '5. 名字一律照材料原样写 —— 有的是作者自己改过的,不要"纠正",也不要换成近音字或简称。国号随年份变化,写到哪一年就用那一年的国号。',
-  '6. 新添的人名要合所属民族的语感:东方式国家用中式姓名(材料里改朝换代写"某氏起于某地",某氏就是新朝皇族的姓);西幻式国家用音译名,风格参照这一族的地名、国名。' +
+  '6. 新添的人名要合所属民族的语感:东方式国家用中式姓名(一朝的皇族都姓开国之君的姓);西幻式国家用音译名,风格参照这一族的地名、国名。' +
     '同一部书里不同的人不要重名,也不要共用同一个字号;名字要有这一族的特色,不要千篇一律。新添人物的一生要合情理(活不过百岁),几百年间的事分给不同的人,不要让一个人横跨几百年。',
   '7. 这是架空世界:不要出现地球上真实的国家、朝代、民族、语言、宗教、神祇、人物、典籍、制度、年号和地名,也不要借用现成小说、游戏里的人名地名。' +
     '材料括号里的风格标签(东方式、西幻式、某某风)只是告诉你起名和行文的味道:正文里不要写出这些词,也不要顺着它们写出现实里的语言、神祇、制度和人名。',
@@ -1259,7 +1283,7 @@ export function buildHistoryPrompts(civ: Civ, opts: HistoryOptions): HistoryProm
       ];
       if (s.part === 'lives') {
         const when = s.name ? `${span(s.from, s.to)}间` : '这段历史里';
-        lines.push(`- 这一篇写什么:${label(i)} —— 为${when}的关键人物立传(将相、使臣、谋士、叛将、遗民……,两到四人,君主写在本纪里),人物你来补;他们经历的战事、兴亡照材料写,前面本纪里出现过的人物可以接着写,名字照前文`);
+        lines.push(`- 这一篇写什么:${label(i)} —— 为${when}的关键人物立传(将相、使臣、谋士、叛将、遗民……,两到四人,君主写在本纪里),材料里写到的统帅可以立传,也可以另补人物;他们经历的战事、兴亡照材料写,前面本纪里出现过的人物可以接着写,名字照前文`);
       } else if (s.part) {
         const who = s.polity !== undefined && s.polity >= 0 ? civ.polities[s.polity] : null;
         lines.push(`- 这一篇写什么:${label(i)} —— ${who && who.id !== info.subject?.id ? `${s.name}一国` : `${s.name}一朝`}${span(s.from, s.to)}的兴衰;别国只在和它有关时提到`);

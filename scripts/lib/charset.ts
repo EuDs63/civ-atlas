@@ -20,8 +20,8 @@ export const CHARSET_SOURCES = [
   'src/gen/civ/growth.ts', // 国号形态表:部、国、王国、帝国、汗国、城邦、共和国;东方的大 X、王朝、皇朝
 ];
 
-/** 不收的文件:屏蔽字表里的字恰恰是不会出现在地名里的 */
-const EXCLUDE = new Set(['src/gen/names/filters.ts']);
+/** 不收的文件:屏蔽字表里的字恰恰是不会出现在地名里的;人名只在编年史、面板里出现(界面字体),不上地图 */
+const EXCLUDE = new Set(['src/gen/names/filters.ts', 'src/gen/names/persons.ts']);
 
 /**
  * 额外的字:国号、行政与聚落通名(先放进来,免得以后每用到一个新字就重裁一次字体),

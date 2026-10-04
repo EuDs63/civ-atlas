@@ -300,7 +300,8 @@ describe('分与合', () => {
         if (p.restores !== undefined) {
           expect(e.tag).toBe('复');
           const F = civ.polities[p.restores];
-          expect(e.text).toContain(`故${polityRootAt(F, F.ended!)}遗民`);
+          // "故昌宗室李昭据瑞州起兵"(故国是共和国的写"旧臣";没有人物的写"遗民")
+          expect(e.text).toMatch(new RegExp(`^故${polityRootAt(F, F.ended!)}(宗室|王室之后|旧臣|遗民)`));
         } else expect(e.tag).toBe('分');
         expect(e.text).not.toMatch(/某国|undefined|NaN|-1/);
       }

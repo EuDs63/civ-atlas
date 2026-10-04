@@ -385,7 +385,7 @@ export class CivSim {
    * 只记,不改归属;改归属还是走 setOwner。
    */
   record(kind: AnnalKind, f: Partial<Omit<Annal, 'year' | 'kind'>> = {}): void {
-    this.annals.push({
+    const e: Annal = {
       year: this.now,
       kind,
       a: f.a ?? -1,
@@ -393,7 +393,9 @@ export class CivSim {
       region: f.region ?? -1,
       settlement: f.settlement ?? -1,
       war: f.war ?? -1,
-    });
+    };
+    if (f.via !== undefined) e.via = f.via;
+    this.annals.push(e);
   }
 
   /** 推演到 untilYear(含这一年的事件);途中每过一个整百年存一个检查点 */
