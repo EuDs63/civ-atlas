@@ -2,8 +2,9 @@
  * 放大后的"细节层":地图放大到 DETAIL_K 倍以上时,按视口(和屏幕像素一样细)重画地形图的矢量部分,
  * 底下垫上放大的像素层 —— 盖住视口里的地形图。
  *
- *   手绘:林块、河流、山 / 丘陵 / 沙丘 / 草丛 / 火山、图框罗盘(drawFantasyVectors)。
- *         符号按缩放倍数逐级变大、细节变多(fantasy.ts 的 glyphScale、GLYPH_TIERS),不跟着地图等比放大,也不糊
+ *   手绘:海岸墨线、湖岸描边(drawFantasyCoasts;像素层换成不带这两样的那一份,不然放大后是一格一格的台阶)、
+ *         林块、河流、山 / 丘陵 / 沙丘 / 草丛 / 火山(drawFantasyVectors)。
+ *         符号、墨线按缩放倍数逐级变大、细节变多(fantasy.ts 的 glyphScale、GLYPH_TIERS),不跟着地图等比放大,也不糊
  *   写实:河流(drawRealisticRivers):小溪逐级出现,主干放大后才显出粗
  *
  * 缩放 1 倍附近直接用铺进地形图的那一份(同一套画法、k = 1),细节层不画。
@@ -13,7 +14,7 @@
 import type { World } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import type { VecView } from './common';
-import { drawFantasyCoasts, drawFantasyVectors, fantasyBase, fantasyBaseNoInk, fantasySymbolLayerProj } from './fantasy';
+import { drawFantasyCoasts, drawFantasyVectors, fantasyBaseNoInk, fantasySymbolLayerProj } from './fantasy';
 import { drawRealisticRivers, realisticBase } from './realistic';
 import { clipOutline, projector, reprojectImage, type MapProj } from './projection';
 
@@ -24,7 +25,8 @@ export type DetailStyle = 'realistic' | 'fantasy';
 
 /** 在画布上画细节层:v = 世界坐标 → 画布像素的变换,v.k = 缩放倍数 */
 export function drawTerrainDetail(ctx: CanvasRenderingContext2D, world: World, raster: Raster, style: DetailStyle, v: VecView) {
-  const base = style === 'fantasy' ? fantasyBase(world, raster) : realisticBase(raster);
+  const fantasy = style === 'fantasy';
+  const base = fantasy ? fantasyBaseNoInk(world, raster) : realisticBase(raster);
   // 像素层按视口变换放大贴上(和地形图被 CSS 放大时一样是双线性插值;放大用不着更贵的高质量缩放)
   const ps = v.s / raster.scale;
   ctx.save();
@@ -32,8 +34,10 @@ export function drawTerrainDetail(ctx: CanvasRenderingContext2D, world: World, r
   ctx.imageSmoothingQuality = 'low';
   ctx.drawImage(base, v.ox, v.oy, raster.w * ps, raster.h * ps);
   ctx.restore();
-  if (style === 'fantasy') drawFantasyVectors(ctx, world, v);
-  else drawRealisticRivers(ctx, world, raster, v);
+  if (fantasy) {
+    drawFantasyCoasts(ctx, raster, v);
+    drawFantasyVectors(ctx, world, v);
+  } else drawRealisticRivers(ctx, world, raster, v);
 }
 
 /**

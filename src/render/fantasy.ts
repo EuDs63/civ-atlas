@@ -3,7 +3,8 @@
  * 全图时符号小而密(山脉读成一条山链、树林读成一片林区),放大后符号逐级变大、细节变多(render/detail.ts 按视口重画)。
  *
  * 分两层:
- * - 像素层(fantasyBase):纸、水彩、海(按深浅)、海冰、海岸墨线;每张地图算一次,放大后细节层拿它当底图
+ * - 像素层(fantasyBase):纸、水彩、海(按深浅)、海冰、海岸墨线;每张地图算一次。
+ *   放大后细节层拿不带海岸墨线、湖岸描边的那一份(fantasyBaseNoInk)当底图,这两样改画成矢量线(drawFantasyCoasts)
  * - 矢量层(drawFantasyVectors):林块、河流、山 / 丘陵 / 沙丘 / 草丛 / 火山。
  *   铺进地形图的是缩放 1 倍的那一份(fantasySymbolLayer,单独一张透明画布);放大后按视口、按缩放倍数重画
  * 文明层按符号层的形状给水彩"让位"(fantasyInkMask),国土、民族色块不把墨线和树林染脏。
@@ -495,34 +496,181 @@ function traceMask(r: Raster, inside: Uint8Array, byElev: boolean): Float32Array
 /** 海岸墨线、湖岸描边的投影路径(地图平面坐标,画的时候按视口变换;每个投影 + 中心一份) */
 let coastPaths: { raster: Raster; key: string; sea: Path2D; lake: Path2D } | null = null;
 
+/** 海岸墨线、湖岸描边的线宽(世界单位,缩放 GLYPH_K0 倍以下;放大后乘 glyphScale) */
+const COAST_LW = 1.45;
+const LAKE_LW = 1.05;
+
 /**
- * 弯边投影下的海岸墨线、湖岸描边(代替像素层里的那两样,线宽处处一致):逐点投影,按屏幕宽度描。
- * 放大后跟着符号一起按 glyphScale 变粗(比地图放大得慢)
+ * 放大后的海岸墨线、湖岸描边(代替像素层里的那两样:像素层放大后是一格一格的台阶,矢量线放大多少倍都顺滑),按屏幕宽度描。
+ * 放大后跟着符号一起按 glyphScale 变粗(比地图放大得慢)。
+ *   弯边投影(v.proj):逐点投影,整张图一条路径(每个投影 + 中心算一次)
+ *   等距圆柱:世界坐标的折线 × v.s + (v.ox, v.oy);只画画布附近的那几段(coastChunks),
+ *            东西相连,伸出左右边的段在另一边再画一份
  */
 export function drawFantasyCoasts(ctx: CanvasRenderingContext2D, r: Raster, v: VecView): void {
-  const pj = v.proj;
-  if (!pj) return;
-  if (!coastPaths || coastPaths.raster !== r || coastPaths.key !== pj.mp.key) {
-    const lines = fantasyCoastLines(r);
-    const unit = { s: 1, ox: 0, oy: 0 };
-    const sea = new Path2D();
-    const lake = new Path2D();
-    for (const p of lines.sea) addProjectedLine(sea, p, 2, pj, unit);
-    for (const p of lines.lake) addProjectedLine(lake, p, 2, pj, unit);
-    coastPaths = { raster: r, key: pj.mp.key, sea, lake };
-  }
   const gs = glyphScale(v.k);
+  let sea: Path2D;
+  let lake: Path2D;
+  const pj = v.proj;
+  if (pj) {
+    if (!coastPaths || coastPaths.raster !== r || coastPaths.key !== pj.mp.key) {
+      const lines = fantasyCoastLines(r);
+      const unit = { s: 1, ox: 0, oy: 0 };
+      const sea = new Path2D();
+      const lake = new Path2D();
+      for (const p of lines.sea) addProjectedLine(sea, p, 2, pj, unit);
+      for (const p of lines.lake) addProjectedLine(lake, p, 2, pj, unit);
+      coastPaths = { raster: r, key: pj.mp.key, sea, lake };
+    }
+    ({ sea, lake } = coastPaths);
+  } else {
+    if (flatCoasts?.raster !== r) {
+      const lines = fantasyCoastLines(r);
+      flatCoasts = { raster: r, sea: coastChunks(lines.sea), lake: coastChunks(lines.lake) };
+    }
+    // 抽稀到哪一档:偏差不到 COAST_TOL 个画布像素的最粗一档
+    let lod = 0;
+    while (lod + 1 < COAST_LOD.length && COAST_LOD[lod + 1] * v.s <= COAST_TOL) lod++;
+    // 画布盖住的世界坐标范围(外加一个线宽)
+    const pad = COAST_LW * gs + COAST_LOD[lod];
+    const x0 = -v.ox / v.s - pad;
+    const y0 = -v.oy / v.s - pad;
+    const x1 = (ctx.canvas.width - v.ox) / v.s + pad;
+    const y1 = (ctx.canvas.height - v.oy) / v.s + pad;
+    const W = r.w / r.scale;
+    sea = chunkPath(flatCoasts.sea, lod, W, x0, y0, x1, y1);
+    lake = chunkPath(flatCoasts.lake, lod, W, x0, y0, x1, y1);
+  }
   ctx.save();
   ctx.setTransform(v.s, 0, 0, v.s, v.ox, v.oy);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = INK_CSS + '0.65)';
-  ctx.lineWidth = 1.05 * gs;
-  ctx.stroke(coastPaths.lake);
+  ctx.lineWidth = LAKE_LW * gs;
+  ctx.stroke(lake);
   ctx.strokeStyle = INK_CSS + '0.9)';
-  ctx.lineWidth = 1.45 * gs;
-  ctx.stroke(coastPaths.sea);
+  ctx.lineWidth = COAST_LW * gs;
+  ctx.stroke(sea);
   ctx.restore();
+}
+
+/** 等距圆柱的海岸、湖岸(切成小段,世界坐标;每张像素图一份,换了世界就换掉) */
+let flatCoasts: { raster: Raster; sea: CoastChunks; lake: CoastChunks } | null = null;
+
+/** 一段最多几条线段:段越短,只看一小块时多画的越少;太短了段数多,挑段反而慢 */
+const COAST_CHUNK = 48;
+/**
+ * 折线抽稀的几档容差(世界单位;0 = 不抽稀)。放大不多时一屏里是整圈的海岸,点数(约四万)决定描线的耗时;
+ * 偏差不到 COAST_TOL 个画布像素(看不出来)的点去掉,放大 1.5 倍时点数减到四到六成
+ */
+const COAST_LOD = [0, 0.05, 0.12, 0.3];
+const COAST_TOL = 0.35;
+
+/**
+ * 海岸 / 湖岸折线切成的小段(世界坐标,x 和折线一样是展开的,可能伸出左右边):
+ * 放大后只看一小块,只要把视口附近的几段拼起来画。每段的路径第一次画到时才建
+ */
+export interface CoastChunks {
+  /** 每段的折线(x, y 交错;相邻两段共用接头那一点) */
+  pts: Float32Array[];
+  /** 每段的外框(x0, y0, x1, y1 交错) */
+  box: Float32Array;
+  /** 每段的路径(世界坐标),COAST_LOD 每一档各一份 */
+  path: (Path2D | undefined)[][];
+}
+
+export function coastChunks(lines: Float32Array[]): CoastChunks {
+  const pts: Float32Array[] = [];
+  const box: number[] = [];
+  for (const p of lines) {
+    const m = p.length / 2;
+    for (let a = 0; a < m - 1; a += COAST_CHUNK) {
+      const b = Math.min(m - 1, a + COAST_CHUNK);
+      const q = p.subarray(a * 2, b * 2 + 2);
+      let x0 = Infinity;
+      let y0 = Infinity;
+      let x1 = -Infinity;
+      let y1 = -Infinity;
+      for (let i = 0; i < q.length; i += 2) {
+        if (q[i] < x0) x0 = q[i];
+        if (q[i] > x1) x1 = q[i];
+        if (q[i + 1] < y0) y0 = q[i + 1];
+        if (q[i + 1] > y1) y1 = q[i + 1];
+      }
+      pts.push(q);
+      box.push(x0, y0, x1, y1);
+    }
+  }
+  return { pts, box: Float32Array.from(box), path: COAST_LOD.map(() => new Array(pts.length)) };
+}
+
+/** 折线(x, y 交错)抽稀(Douglas–Peucker):去掉离留下的折线不到 tol 的点,两端不动 */
+export function simplifyLine(p: Float32Array, tol: number): Float32Array {
+  const m = p.length / 2;
+  if (m < 3 || tol <= 0) return p;
+  const keep = new Uint8Array(m);
+  keep[0] = keep[m - 1] = 1;
+  const stack = [0, m - 1];
+  while (stack.length) {
+    const b = stack.pop()!;
+    const a = stack.pop()!;
+    const ax = p[a * 2];
+    const ay = p[a * 2 + 1];
+    const dx = p[b * 2] - ax;
+    const dy = p[b * 2 + 1] - ay;
+    const L2 = dx * dx + dy * dy;
+    let worst = tol;
+    let wi = -1;
+    for (let i = a + 1; i < b; i++) {
+      const qx = p[i * 2] - ax;
+      const qy = p[i * 2 + 1] - ay;
+      // 到弦(线段,不是整条直线)的距离:折回去、伸出弦两头的点也按真实偏差算(首尾重合的环:到起点的距离)
+      const t = L2 > 1e-18 ? Math.max(0, Math.min(1, (qx * dx + qy * dy) / L2)) : 0;
+      const d = Math.hypot(qx - t * dx, qy - t * dy);
+      if (d > worst) {
+        worst = d;
+        wi = i;
+      }
+    }
+    if (wi < 0) continue;
+    keep[wi] = 1;
+    stack.push(a, wi, wi, b);
+  }
+  const out: number[] = [];
+  for (let i = 0; i < m; i++) if (keep[i]) out.push(p[i * 2], p[i * 2 + 1]);
+  return Float32Array.from(out);
+}
+
+/**
+ * 范围 [x0, x1] × [y0, y1](世界坐标,x 可以伸出左右边)里有哪些段:每一份调一次 fn(段号, 横向平移量)。
+ * 东西相连(周期 W):一段平移整圈后落进范围的也算(挨着左右边的段在另一边再出一份;范围比一整圈宽时可能出好几份)
+ */
+export function forChunksIn(c: CoastChunks, W: number, x0: number, y0: number, x1: number, y1: number, fn: (j: number, dx: number) => void): void {
+  const b = c.box;
+  for (let j = 0; j < c.pts.length; j++) {
+    const o = j * 4;
+    if (b[o + 1] > y1 || b[o + 3] < y0) continue;
+    // 从刚好不在范围左边的那一份起,往右一份一份地挪
+    for (let dx = Math.ceil((x0 - b[o + 2]) / W) * W; b[o] + dx <= x1; dx += W) fn(j, dx);
+  }
+}
+
+/** 范围里的段(按第 lod 档抽稀)拼成一条路径(世界坐标;一次描完,接头、接缝处不会叠深) */
+function chunkPath(c: CoastChunks, lod: number, W: number, x0: number, y0: number, x1: number, y1: number): Path2D {
+  const out = new Path2D();
+  const cache = c.path[lod];
+  forChunksIn(c, W, x0, y0, x1, y1, (j, dx) => {
+    let p = cache[j];
+    if (!p) {
+      const q = simplifyLine(c.pts[j], COAST_LOD[lod]);
+      p = cache[j] = new Path2D();
+      p.moveTo(q[0], q[1]);
+      for (let i = 2; i < q.length; i += 2) p.lineTo(q[i], q[i + 1]);
+    }
+    if (dx) out.addPath(p, { e: dx });
+    else out.addPath(p);
+  });
+  return out;
 }
 
 /** 弯边投影的符号层(缩放 1 倍,和地图平面一样大;林块、河、山……,不含海岸):地形图贴它,文明层按它的形状"让位" */
@@ -580,16 +728,15 @@ export function fantasyInkProj(world: World, r: Raster, mp: MapProj, forest: num
   return projSym!.ink;
 }
 
-/** 回到等距圆柱时释放按投影重画用的缓存(符号层、遮罩、不带墨线的像素层几十 MB 显存) */
+/**
+ * 回到等距圆柱时释放按投影重画用的缓存(符号层、遮罩几十 MB 显存)。
+ * 不带墨线的像素层留着:等距圆柱放大后的细节层也用它
+ */
 export function releaseFantasyProjCaches(): void {
   if (projSym) {
     projSym.canvas.width = projSym.canvas.height = 0;
     if (projSym.ink) projSym.ink.hard.width = projSym.ink.hard.height = projSym.ink.soft.width = projSym.ink.soft.height = 0;
     projSym = null;
-  }
-  if (noInk) {
-    noInk.canvas.width = noInk.canvas.height = 0;
-    noInk = null;
   }
   coastPaths = null;
   projCellCache = null;
