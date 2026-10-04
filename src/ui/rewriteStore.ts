@@ -29,6 +29,7 @@ import {
   unmergeRewrite,
   cleanWish,
   type RewriteChange,
+  type RewriteLock,
   type RewriteItem,
   type RewriteTurn,
 } from '../ai/prompts/rewrite';
@@ -59,6 +60,8 @@ export interface RwTurn {
 export interface RewriteState {
   /** 对话属于哪个世界(saveStore 的世界编号) */
   world: string | null;
+  /** 和哪一种锁一起说的(新建中只改地形 / 建好了只改历史);锁变了,原来的提议就不能再执行 */
+  lock?: RewriteLock;
   turns: RwTurn[];
 }
 
@@ -85,13 +88,17 @@ export function useRewrite(): RewriteState {
   );
 }
 
-/** 换了世界:对话清空(打开框、换世界、发话时调) */
-export function syncRewriteWorld() {
+/**
+ * 换了世界,或者同一个世界换了锁(点了"创建世界":地形从此锁住):对话清空(打开框、换世界、发话、创建时调)。
+ * 新建时提的改地形,创建以后就不能再执行或撤销
+ */
+export function syncRewriteWorld(lock?: RewriteLock) {
   const w = currentWorld()?.id ?? null;
-  if (w === state.world) return;
+  if (w === state.world && lock === state.lock) return;
   stopWish();
   turnCiv = null;
-  set({ world: w, turns: [] });
+  note = null;
+  set({ world: w, lock, turns: [] });
 }
 
 let seq = 0;
@@ -112,6 +119,8 @@ export interface WishContext {
   civ: Civ;
   /** 时间轴现在的年份 */
   year: number;
+  /** 锁住了哪一样:世界建好了不能改地形 / 还在新建只能改地形 */
+  lock?: RewriteLock;
 }
 
 /** 前几轮(给 AI 看前情;执行过的那一轮,没勾的几条注明没执行) */
@@ -136,7 +145,7 @@ function history(): RewriteTurn[] {
 export async function sendWish(ctx: WishContext, wish: string): Promise<number> {
   const w = cleanWish(wish);
   if (!w) return -1;
-  syncRewriteWorld();
+  syncRewriteWorld(ctx.lock);
   stopWish();
   const id = ++seq;
   const year = Math.floor(ctx.year);
@@ -149,10 +158,10 @@ export async function sendWish(ctx: WishContext, wish: string): Promise<number> 
   running = id;
   try {
     const wishes = [...prev.map((t) => t.wish), w];
-    const mat = rewriteMaterial(ctx.world, ctx.civ, year, basis, wishes);
+    const mat = rewriteMaterial(ctx.world, ctx.civ, year, basis, wishes, ctx.lock);
     const r = await aiChat(rewriteRequest(mat, prev, w), { signal: c.signal });
     if (c.signal.aborted) throw new AiError('aborted', '已停止');
-    const pctx = { world: ctx.world, civ: ctx.civ, year, edits: basis };
+    const pctx = { world: ctx.world, civ: ctx.civ, year, edits: basis, lock: ctx.lock };
     const mock = isMockReply(r.text);
     const p = parseRewrite(mock ? mockRewrite(pctx, w) : r.text, pctx);
     if (!p.ok) throw new AiError('bad-response', p.message);

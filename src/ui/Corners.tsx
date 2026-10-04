@@ -2,6 +2,7 @@
  * 浮在地图上的按钮(宽屏的主体界面在左边的侧栏里,见 Sidebar.tsx):
  *
  *   右上 MapBar       图层分段按钮(政区 / 民族 / 地形 / 实景 / 更多图层)、导出、编年史;写史书时最前面是写作进度
+ *                     新建世界这一步还没有历史:只有地形 / 实景 / 高程 / 更多图层(没有政区、民族,不放导出、编年史)
  *   右下 MapControls  "地球 / 平面"切换、放大、缩小(触屏不放 + −,窄屏整个不放)
  *   窄屏(手机):
  *   右上 PhoneButtons 竖排的毛玻璃按钮:图层与投影(弹层从底部升起)、地球 / 平面;写史书时进度条在它们左边。
@@ -24,16 +25,19 @@ import './book.css';
 
 /** 右上图层分段按钮里直接列出的几个图层(其余的在"更多图层"里) */
 const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'realistic'];
+/** 新建世界时(还没有历史) */
+const DRAFT_SEG: MapLayer[] = ['terrain', 'realistic', 'elevation'];
 
 /** 宽屏右上:写作进度、图层分段按钮、导出、编年史 */
-export function MapBar({ layers, exp, civ }: { layers: LayerPopoverProps; exp: ExportMenuProps; civ: Civ | null }) {
+export function MapBar({ layers, exp, civ, draft }: { layers: LayerPopoverProps; exp: ExportMenuProps; civ: Civ | null; draft?: boolean }) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
-  const inSeg = SEG_LAYERS.includes(layers.layer);
+  const seg = draft ? DRAFT_SEG : SEG_LAYERS;
+  const inSeg = seg.includes(layers.layer);
   return (
     <div className="map-bar" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
       <BookChip />
       <div className="glass seg-bar" role="radiogroup" aria-label="图层">
-        {SEG_LAYERS.map((id) => (
+        {seg.map((id) => (
           <button
             key={id}
             className={`seg-btn${layers.layer === id ? ' on' : ''}`}
@@ -46,13 +50,15 @@ export function MapBar({ layers, exp, civ }: { layers: LayerPopoverProps; exp: E
             {layerDef(id).name}
           </button>
         ))}
-        <LayerPopover {...layers} trigger="seg" inSeg={inSeg} />
+        <LayerPopover {...layers} trigger="seg" inSeg={inSeg} draft={draft} />
       </div>
-      <ExportMenu {...exp} icon={<Icon name="export" size={16} />} />
-      <button className="glass mb-btn" data-act="chronicle" disabled={!civ || !civ.viable} onClick={() => openOverview('chronicle', { polity: null })} title="按年份看全部大事">
-        <Icon name="book" size={16} />
-        <span className="mb-label">编年史</span>
-      </button>
+      {!draft && <ExportMenu {...exp} icon={<Icon name="export" size={16} />} />}
+      {!draft && (
+        <button className="glass mb-btn" data-act="chronicle" disabled={!civ || !civ.viable} onClick={() => openOverview('chronicle', { polity: null })} title="按年份看全部大事">
+          <Icon name="book" size={16} />
+          <span className="mb-label">编年史</span>
+        </button>
+      )}
     </div>
   );
 }

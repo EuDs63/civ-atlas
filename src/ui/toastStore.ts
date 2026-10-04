@@ -43,6 +43,8 @@ export interface ToastInput {
   ttl?: number;
   /** 右边带关闭按钮(不给:warn / error 带,其余不带) */
   dismissible?: boolean;
+  /** 左边一个绿点(ok 类里要强调"办成了"的:世界创建好了) */
+  dot?: boolean;
   /** 来源;同一来源的提示互相替换。不给 = 'default' */
   id?: string;
 }

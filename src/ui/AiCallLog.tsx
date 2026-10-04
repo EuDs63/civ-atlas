@@ -26,7 +26,7 @@ function when(iso: string): string {
   return `${y}${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** 世界编号(saveStore:种子 + 参数)→ "调用时在看:种子 7" */
+/** 调用时在看的星球(种子 + 参数)→ "调用时在看:种子 7" */
 function worldText(id: string | undefined): string {
   if (!id) return '';
   const q = new URLSearchParams(id);

@@ -433,14 +433,13 @@
 .pb-btn:disabled {
   opacity: 0.45;
 }
-/* 卡片拉到顶时:盖住了大半个地图,右上的按钮藏起来(和卡片顶不打架);改地形时顶上是工具条,也让开 */
+/* 卡片拉到顶时:盖住了大半个地图,右上的按钮藏起来(和卡片顶不打架) */
 .phone-btns {
   transition:
     opacity 0.18s,
     visibility 0.18s;
 }
-.app.phone:is(.world-full, .sheet-full) .phone-btns,
-.stage.terrain-on ~ .phone-btns {
+.app.phone:is(.world-full, .sheet-full) .phone-btns {
   opacity: 0;
   visibility: hidden;
 }

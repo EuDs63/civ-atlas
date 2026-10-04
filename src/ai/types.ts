@@ -91,6 +91,6 @@ export interface AiCallRecord {
   /** 发出去的消息和收到的全文(用户可在记录里展开看;太长的截断) */
   messages: AiMessage[];
   text?: string;
-  /** 哪个世界(saveStore 的世界编号),可空 */
+  /** 调用时在看哪颗星球(种子 + 参数,同 savefile 的 worldKey),可空 */
   world?: string;
 }

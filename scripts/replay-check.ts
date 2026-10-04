@@ -2,7 +2,7 @@
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
  * 存档读档分享、导出、干预、改地形、AI、东西相连、多种投影、地球仪;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
- * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;种子、参数、回放、改地形在世界概览的"创世"页
+ * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;创建时定下的种子、参数、地形在世界概览的"世界设定"页(只能看)
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
 import { chromium, type Page } from 'playwright';
@@ -18,7 +18,7 @@ page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 
 /**
  * 打开世界概览(点侧栏顶上的世界名;窄屏是左上角的世界名),翻到某一页:countries 国家 / chronicle 编年史 /
- * interventions 我的干预 / genesis 创世(种子、新世界、参数、回放世界形成、改地形)
+ * interventions 我的干预 / genesis 世界设定(创建时定下的种子、参数、地形,只能看;以它为底稿新建、回放世界形成)
  */
 const openOverview = async (p: Page = page, tab?: string) => {
   if (!(await p.locator('.ov-root:not([hidden])').count())) await p.click('[data-act=overview]');
@@ -83,17 +83,38 @@ const projOn = async (p: Page = page) => {
   await p.keyboard.press('Escape');
   return v;
 };
-/** 进入改地形(概览"创世"页的"改地形";进入后概览收起,顶部出现工具条) */
+/**
+ * 进入改地形:只有新建世界时能改(网址 new=1,左边是新建卡片);点卡片上的"改地形",卡片里换成改地形工具(.tp)。
+ * 已经创建的世界没有这个入口(地形是创建时定下的)
+ */
 const terrainOn = async (p: Page = page) => {
-  await openOverview(p, 'genesis');
-  await p.click('.ov [data-act=terrain]');
-  await p.locator('.terrain-bar').waitFor({ timeout: 5000 });
+  await p.click('.sidebar [data-act=terrain], .psheet [data-act=terrain]');
+  await p.locator('.tp').waitFor({ timeout: 5000 });
   await p.waitForTimeout(150);
 };
-/** 回放世界形成(概览"创世"页的按钮;点了概览收起) */
+/** 回放世界形成(创建好的世界:概览"世界设定"页的按钮,点了概览收起;新建中:卡片上的"回放世界形成") */
 const replayClick = async (p: Page = page) => {
+  const nw = p.locator('.nw-body [data-act=replay], .nw-sheet [data-act=replay]');
+  if (await nw.count()) return nw.click();
   await openOverview(p, 'genesis');
   await p.click('.ov [data-act=replay]');
+};
+/**
+ * 从文件打开:"我的世界"里有"从文件打开"(藏着的文件框);别的时候把文件拖进页面(宽屏、手机都认)
+ */
+const openFile = async (p: Page, file: string) => {
+  if (await p.locator('[data-testid=save-file-input]').count()) return p.setInputFiles('[data-testid=save-file-input]', file);
+  const text = (await import('node:fs')).readFileSync(file, 'utf8');
+  const name = (await import('node:path')).basename(file);
+  await p.evaluate(
+    ([t, n]) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([t], n, { type: 'application/json' }));
+      const el = document.querySelector('.app')!;
+      for (const type of ['dragenter', 'dragover', 'drop']) el.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+    },
+    [text, name],
+  );
 };
 /** 某一点的完整读数:群落 / 海拔(水深)/ 气温降水 / 经纬度板块 / 国家 · 最近城市 / 民族 / 州(一行一条,用 " / " 连起来) */
 const probe = (p: Page, x: number, y: number) =>
@@ -214,7 +235,7 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
       `弹层「${pop.slice(0, 40)}…」缩略图 ${thumbs} 张;切实景 → 主题 ${theme1}、按钮「${label1}」、弹层收起 ${popClosed}、网址 ${url1.split('?')[1]};切回政区 → 主题 ${theme2};` +
       `叠加开关「${togs}」:点"州" ${regionsOn}、弹层不收 ${stillOpen};民族色块 ${cultureKeys} 个;` +
       `概览打开 ${ovOpen}、头部「${ovHead}」、页签「${ovTabs}」、国家 ${ovRows} 行;编年史「${pages.chronicle?.slice(0, 30)}…」;我的干预「${pages.interventions}」;` +
-      `创世「${pages.genesis?.slice(0, 40)}…」;Esc 收起 ${escClosed}、点外面收起 ${scrimClosed};国家表点「${rowName}」→ 概览收起 ${rowClosed}、面板「${rowIns.slice(0, 30)}」;` +
+      `世界设定「${pages.genesis?.slice(0, 40)}…」;Esc 收起 ${escClosed}、点外面收起 ${scrimClosed};国家表点「${rowName}」→ 概览收起 ${rowClosed}、面板「${rowIns.slice(0, 30)}」;` +
       `点「${pol?.text}」→ 侧栏里的面板 ${ins ? `${Math.round(ins.width)}×${Math.round(ins.height)} @ ${Math.round(ins.x)},${Math.round(ins.y)}` : '没出来'}、世界首页收起 ${home === 0}`,
   );
   if (
@@ -242,9 +263,10 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (!['地名', '宜居度', '州', '城址', '道路'].every((w) => togs.includes(w)) || !regionsOn || !stillOpen) errs.push(`图层弹层:叠加开关不全 / 点了没反应(${togs})`);
   if (cultureKeys < 2) errs.push(`图层弹层:选"民族"时没有列出民族色块(${cultureKeys})`);
   if (!ovOpen || !['现存', '历来', '民族', '城镇', '种子 7', '当前'].every((w) => ovHead.includes(w))) errs.push(`世界概览:打不开 / 头部不全(${ovHead})`);
-  if (!['国家', '编年史', '我的干预 0', '创世'].every((w) => ovTabs.includes(w)) || ovRows < 3) errs.push(`世界概览:页签不全 / 国家表没有列出国家(${ovTabs};${ovRows} 行)`);
+  if (!['国家', '编年史', '我的干预 0', '世界设定'].every((w) => ovTabs.includes(w)) || ovRows < 3) errs.push(`世界概览:页签不全 / 国家表没有列出国家(${ovTabs};${ovRows} 行)`);
   if (!/大事 \d+/.test(pages.chronicle ?? '') || !(pages.interventions ?? '').includes('还没有干预')) errs.push('世界概览:编年史页 / 我的干预页(空)不对');
-  if (!['新世界', '世界参数', '回放世界形成', '改地形', '地块', '板块', '河流'].every((w) => (pages.genesis ?? '').includes(w))) errs.push(`世界概览:创世页功能不全(${pages.genesis})`);
+  if (!['创建时定下的', '不能再改', '种子', '陆地', '改过的地形', '以它为底稿新建', '回放世界形成'].every((w) => (pages.genesis ?? '').includes(w)) || /换一颗|随机/.test(pages.genesis ?? ''))
+    errs.push(`世界概览:世界设定页不对(应只能看、能以它为底稿新建、回放;${pages.genesis})`);
   if (!escClosed || !scrimClosed) errs.push('世界概览:Esc / 点外面收不起');
   if (!rowClosed || !rowIns.includes(rowName)) errs.push(`世界概览:国家表点一行没有收起概览、选中这国(${rowName};${rowIns.slice(0, 40)})`);
   if (!ins || !side || ins.x < side.x - 1 || ins.x + ins.width > side.x + side.width + 1 || home !== 0) errs.push('界面骨架:点国家后面板没有出现在侧栏里 / 世界首页没收起');
@@ -289,9 +311,7 @@ if (!hover.includes('海拔') && !hover.includes('水深')) errs.push('某一点
 const wf = () => page.evaluate(() => (window as any).__wf);
 const markWf = () => page.evaluate(() => ((window as any).__wf.mark = 1));
 const waitRedraw = () => page.waitForFunction(() => !(window as any).__wf.mark, null, { timeout: 30000 });
-// 回放按钮在概览"创世"页(点了概览收起);地质放完时字幕从"约 N 百万年前 / 今天"换成文明回放的"第 N 年"
-const replayBtn = page.locator('.ov button.replay');
-const IDLE = '回放世界形成';
+// 回放按钮在概览"世界设定"页(点了概览收起);地质放完时字幕从"约 N 百万年前 / 今天"换成文明回放的"第 N 年"
 await page.waitForFunction(() => /第 \d+ 年/.test(document.querySelector('.caption .big')?.textContent ?? ''), null, { timeout: 20000 });
 
 // 地质放完接着放文明:时间轴从第 0 年往后走,色块用半分辨率,每帧耗时(底图 + 国名、城镇符号的文字层)要在预算内
@@ -340,24 +360,49 @@ const cached = await wf();
 console.log('切回画过的画风 renderMs:', cached.renderMs.toFixed(1));
 if (!(cached.renderMs < 20)) errs.push(`切回画过的画风仍在重画(renderMs=${cached.renderMs.toFixed(1)})`);
 
-// 回放中点"新世界":新世界出来后回放按钮要恢复正常、还能再点
+// 回放中点概览"世界设定"页的"以它为底稿新建…":概览收起,左边换成新建卡片(种子锁着,地形、参数带过去);
+// 带着东西、起好了名,一开始就存成没建完的(网址 w=编号,刷新不丢);什么都没动就点返回,这一份删掉
+await replayClick();
+await page.waitForTimeout(1000);
+await openOverview(page, 'genesis');
+await page.click('.ov [data-act=draft-from]');
+const fromCard = await page.locator('.sidebar.nw-card').waitFor({ timeout: 5000 }).then(() => true, () => false);
+const fromClosed = !(await page.locator('.ov-root:not([hidden])').count());
+const fromSeed = (await page.locator('.nw-card [data-act=seed-locked]').innerText().catch(() => '')).replace(/\n/g, ' ');
+const fromUrl = page.url();
+const fromId = new URL(fromUrl).searchParams.get('w');
+const fromKey = `wenming-ditu:world:${fromId}`;
+const fromStored = !!fromId && (await page.evaluate((k) => localStorage.getItem(k) !== null, fromKey));
+await page.click('.nw-card [data-act=back]').catch(() => {});
+await page.locator('.sidebar.nw-card').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+const fromLeft = !!fromId && (await page.evaluate((k) => localStorage.getItem(k) !== null, fromKey));
+console.log(`以它为底稿新建:卡片 ${fromCard}、概览收起 ${fromClosed}、种子「${fromSeed}」、网址 ${fromUrl.split('?')[1]}、存下了 ${fromStored};没动就返回后还在 ${fromLeft}`);
+if (!fromCard || !fromClosed) errs.push('点"以它为底稿新建"后没有换成新建卡片 / 概览没收起');
+if (!/种子.*7/.test(fromSeed)) errs.push(`以它为底稿新建:种子应锁着、还是 7(${fromSeed})`);
+if (!fromStored) errs.push(`以它为底稿新建:应一开始就存成没建完的、网址带 w=编号(${fromUrl})`);
+if (fromLeft) errs.push('以它为底稿新建后什么都没动就返回,没建完的那一份没有删掉');
+
+// 新建中回放时点"换一颗":新星球出来后回放按钮要恢复正常、还能再点
+await page.goto(`${dev.url}/?new=1&seed=7&style=realistic`);
+await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+const replayBtn = page.locator('.nw-body [data-act=replay]');
+const IDLE = '回放这颗星球的形成';
 await replayClick();
 await page.waitForTimeout(1000);
 await markWf();
-await openOverview(page, 'genesis');
-await page.click('.ov [data-act=new-world]');
-const newClosed = !(await page.locator('.ov-root:not([hidden])').count());
+await page.click('.nw-body [data-act=new-seed]');
 // 生成新世界时顶部提示条上有进度
 const genToast = await page.locator('.toast[data-toast=progress]').innerText({ timeout: 5000 }).catch(() => '');
 await waitRedraw();
-console.log(`新世界:生成时提示条「${genToast.replace(/\n/g, ' ')}」`);
+const seed2 = await page.locator('.nw-seed-input').inputValue();
+console.log(`换一颗:种子 7 → ${seed2},生成时提示条「${genToast.replace(/\n/g, ' ')}」`);
 if (!genToast) errs.push('生成新世界时顶部提示条上没有进度');
-if (!newClosed) errs.push('点"新世界"后概览没有收起');
-await openOverview(page, 'genesis');
+if (seed2 === '7' || !new RegExp(`[?&]seed=${seed2}(&|$)`).test(page.url())) errs.push(`点"换一颗"后种子 / 网址没变(${seed2},${page.url()})`);
+await page.waitForFunction((t) => document.querySelector('.nw-body [data-act=replay]')?.textContent === t, IDLE, { timeout: 15000 }).catch(() => {});
 const txt = await replayBtn.innerText();
 const off = await replayBtn.isDisabled();
-console.log('回放中换新世界后按钮:', JSON.stringify(txt), off ? '(禁用)' : '(可点)');
-if (txt !== IDLE || off) errs.push(`回放中换新世界后按钮卡住了:${txt}${off ? '(禁用)' : ''}`);
+console.log('回放中换一颗后按钮:', JSON.stringify(txt), off ? '(禁用)' : '(可点)');
+if (txt !== IDLE || off) errs.push(`回放中换一颗后按钮卡住了:${txt}${off ? '(禁用)' : ''}`);
 else {
   await replayBtn.click();
   const replays = await page
@@ -809,10 +854,12 @@ for (const style of ['realistic', 'fantasy']) {
   const RENAME_BUDGET = process.env.CI ? 250 : 100;
   if (!(renameMs <= RENAME_BUDGET)) errs.push(`改名太慢(${renameMs.toFixed(1)} ms,预算 ${RENAME_BUDGET} ms)`);
 }
-// 存档(阶段 4):改一个名字 → 刷新页面 → 名字还在(自动恢复);存成文件 → 换一个世界 → 从文件打开 → 名字回来
+// 存档(阶段 4):打开一个种子(只是看看,不存)→ 改一个名字 → 存进"我的世界"、网址换成 w=编号 → 刷新页面 → 名字还在(自动恢复);
+// 存档菜单写着"已自动存";存成文件;回到"我的世界"有这张卡片 → 换一个世界、清掉浏览器里的存档 → 从文件打开 → 名字回来
 {
   const labelsHave = (n: string, timeout = 60000) =>
     page.waitForFunction((t) => (window as any).__wfLabels?.texts?.includes(t), n, { timeout }).then(() => true, () => false);
+  await page.evaluate(() => localStorage.clear());
   await page.goto(`${dev.url}/?seed=7&style=fantasy&civ=polities`);
   await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
   await page.waitForTimeout(300);
@@ -839,21 +886,27 @@ for (const style of ['realistic', 'fantasy']) {
   let back = false;
   let loadNote = '';
   let listed = 0;
+  let visitUrl = '';
+  let storedUrl = '';
+  let menu = '';
   if (city && mark) {
+    visitUrl = page.url();
     await page.mouse.click(mark.x, mark.y);
     await page.click('.inspector .ins-name');
     await page.fill('.inspector .ins-edit input', '饕餮城');
     await page.keyboard.press('Enter');
     await labelsHave('饕餮城', 5000);
     await page.keyboard.press('Escape');
+    await page.waitForFunction(() => /[?&]w=w/.test(location.search), null, { timeout: 5000 }).catch(() => {});
+    storedUrl = page.url();
     await page.reload();
     await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
     kept = await labelsHave('饕餮城', 10000);
     restoredNote = await toastText(page, 'save');
-    // "我的世界"里有这个世界;存成文件
+    // 存档菜单:当前世界一行写着"已自动存";存成文件
     await closeOverview();
     await page.click('.save-btn');
-    listed = await page.locator('.save-row').count();
+    menu = (await page.locator('.save-menu .save-cur').innerText().catch(() => '')).replace(/\n/g, ' ');
     try {
       const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('[data-act=save-file]')]);
       fileName = dl.suggestedFilename();
@@ -861,13 +914,17 @@ for (const style of ['realistic', 'fantasy']) {
       const text = file ? (await import('node:fs')).readFileSync(file, 'utf8') : '';
       const save = JSON.parse(text);
       fileOk = save.app === '文明与地图' && save.seed === 7 && Object.values(save.edits?.names ?? {}).includes('饕餮城') && /^[0-9a-f]{12}$/.test(save.check);
-      // 换一个世界(种子 2024),再从文件打开
-      await openOverview(page, 'genesis');
-      await page.fill('.ov-seed input', '2024');
-      await page.press('.ov-seed input', 'Enter');
-      await page.waitForFunction(() => location.search.includes('seed=2024') && (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+      await page.click('.save-btn');
+      // 回到"我的世界":有这个世界的卡片
+      await page.click('.sidebar [data-act=home]');
+      await page.locator('.mw').waitFor({ timeout: 5000 });
+      listed = await page.locator('.mw [data-act=open-world]').count();
+      // 换一个世界(种子 2024),清掉浏览器里的存档(像换了台电脑),再从文件打开
+      await page.goto(`${dev.url}/?seed=2024&style=fantasy&civ=polities`);
+      await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+      await page.evaluate(() => localStorage.clear());
       await page.waitForTimeout(300);
-      if (file) await page.setInputFiles('[data-testid=save-file-input]', file);
+      if (file) await openFile(page, file);
       back = (await labelsHave('饕餮城')) && page.url().includes('seed=7');
       loadNote = await toastText(page, 'save');
     } catch (e) {
@@ -876,21 +933,24 @@ for (const style of ['realistic', 'fantasy']) {
     await closeOverview();
   }
   console.log(
-    `存档:改名「${city?.text}」→ 饕餮城,刷新后还在 ${kept}(提示「${restoredNote.replace(/\n/g, ' ')}」);我的世界 ${listed} 个;` +
+    `存档:改名「${city?.text}」→ 饕餮城,网址 ${visitUrl.split('?')[1]} → ${storedUrl.split('?')[1]},刷新后还在 ${kept}(提示「${restoredNote.replace(/\n/g, ' ')}」);` +
+      `存档菜单「${menu}」;我的世界 ${listed} 个;` +
       `存成文件 ${fileName} 内容对 ${fileOk};换种子 2024 后从文件打开,名字回来 ${back}(提示「${loadNote.replace(/\n/g, ' ')}」)`,
   );
   if (!city) errs.push('存档检查没找到可以改名的城');
   if (!kept) errs.push('改名后刷新页面,名字没有自动恢复');
   if (!restoredNote.includes('已恢复')) errs.push('刷新后没有"已恢复上次的修改"的提示');
-  if (listed < 1) errs.push('"我的世界"里没有列出改过的世界');
+  if (/[?&]w=/.test(visitUrl) || !/[?&]w=w/.test(storedUrl)) errs.push(`只是看看的世界改了以后,网址应换成 w=编号(${visitUrl} → ${storedUrl})`);
+  if (!menu.includes('已自动存')) errs.push(`存档菜单里当前世界没写"已自动存"(${menu})`);
+  if (listed !== 1) errs.push(`"我的世界"里应正好有改过的这一个世界(${listed})`);
   if (!fileOk || !/^文明与地图-.+\.json$/.test(fileName)) errs.push(`存成的文件不对(${fileName})`);
   if (!back) errs.push('从文件打开后没有回到存档的世界 / 名字没回来');
   // 收尾:删掉这个世界的存档(不影响后面的检查)
   await page.evaluate(() => localStorage.clear());
 }
 
-// 旧存档的键(阶段 4 远处的历史别乱):浏览器里存着一个旧版本(r + 州号的键)的自动存档 → 打开这个世界 →
-// 改名照样套上(州名、城名),自动存里的键就地换成了 c 格式(按地块)
+// 旧存档的键(阶段 4 远处的历史别乱):浏览器里存着一个旧版本(按"种子 + 参数"当编号、r + 州号的键)的自动存档 →
+// 进站先到"我的世界",列着这个世界(换成了新编号)→ 打开 → 改名照样套上(州名、城名),自动存里的键就地换成了 c 格式(按地块)
 {
   const { worldKey } = await import('../src/gen/savefile');
   const { DEFAULT_PARAMS } = await import('../src/gen/world');
@@ -907,18 +967,39 @@ for (const style of ['realistic', 'fantasy']) {
     savedAt: '2026-09-20T08:00:00.000Z',
   };
   await page.evaluate(([k, v]) => localStorage.setItem(k, v), [`wenming-ditu:world:${id}`, JSON.stringify(legacy)]);
-  await page.goto(`${dev.url}/?seed=7&style=fantasy&civ=polities`);
+  await page.goto(`${dev.url}/?style=fantasy&civ=polities`);
+  const card = await page.locator('.mw [data-act=open-world]').first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+  if (card) await page.locator('.mw [data-act=open-world]').first().click();
   await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
   // 自动存写回去是同步的(套上修改那一刻);等一下提示出来
   await page.waitForTimeout(500);
-  const stored = await page.evaluate((k) => localStorage.getItem(k), `wenming-ditu:world:${id}`);
+  const keysNow = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('wenming-ditu:world:')));
+  const newKey = keysNow.length === 1 && /^wenming-ditu:world:w/.test(keysNow[0]) ? keysNow[0] : '';
+  const stored = newKey ? await page.evaluate((k) => localStorage.getItem(k), newKey) : null;
   const names: Record<string, string> = stored ? JSON.parse(stored).edits?.names ?? {} : {};
   const keys = Object.keys(names);
   const note = await toastText(page, 'save');
   const upgraded = keys.length === 2 && keys.every((k) => /^(region|settlement):c\d+(#\d+)?$/.test(k)) && Object.values(names).sort().join() === '九嶷州,饕餮城';
-  console.log(`旧存档的键:读回后 ${JSON.stringify(names)},换成 c 格式 ${upgraded}(提示「${note.replace(/\n/g, ' ')}」)`);
+  console.log(`旧存档的键:我的世界里有卡片 ${card},存档的键 ${keysNow.join()};读回后 ${JSON.stringify(names)},换成 c 格式 ${upgraded}(提示「${note.replace(/\n/g, ' ')}」)`);
+  if (!card) errs.push('旧版本的自动存档没有出现在"我的世界"里');
+  if (!newKey) errs.push(`旧版本的自动存档没有换成新编号(${keysNow.join()},旧的 ${id})`);
   if (!upgraded) errs.push(`旧存档里 r 格式的键没有换成 c 格式:${JSON.stringify(names)}`);
   if (/找不到对应的地方/.test(note)) errs.push(`旧存档的改名有找不到的:${note}`);
+  // 改版前的网址(只带种子、参数,没有 w=)刷新:回到这个存档(换成新编号,改名都在),不是一个空白的"看看"
+  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(([k, v]) => localStorage.setItem(k, v), [`wenming-ditu:world:${id}`, JSON.stringify(legacy)]);
+  await page.goto(`${dev.url}/?seed=7&style=fantasy&civ=polities`);
+  await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+  await page.waitForTimeout(500);
+  const back = await page.evaluate(() => {
+    const w = new URLSearchParams(location.search).get('w');
+    const keys = Object.keys(localStorage).filter((k) => k.startsWith('wenming-ditu:world:'));
+    return { w, keys, stored: w ? localStorage.getItem(`wenming-ditu:world:${w}`) : null };
+  });
+  const backNames = back.stored ? Object.values(JSON.parse(back.stored).edits?.names ?? {}).sort().join() : '';
+  console.log(`改版前的网址刷新:网址里的世界编号 ${back.w},存档的键 ${back.keys.join()},改名 ${backNames}`);
+  if (!back.w || back.keys.length !== 1 || backNames !== '九嶷州,饕餮城')
+    errs.push(`改版前的网址刷新没有回到原来的存档(w=${back.w},键 ${back.keys.join()},改名 ${backNames})`);
   await page.evaluate(() => localStorage.clear());
 }
 // 世界换成球面以前(生成器版本 4 及以前)的存档文件、分享链接:照常打开成同一个种子的球面世界,提示"来自旧版本",
@@ -949,7 +1030,7 @@ for (const style of ['realistic', 'fantasy']) {
   await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
   const file = path.join(os.tmpdir(), `wf-old-save-${process.pid}.json`);
   fs.writeFileSync(file, JSON.stringify(old));
-  await page.setInputFiles('[data-testid=save-file-input]', file);
+  await openFile(page, file);
   const fileOpened = await page
     .waitForFunction(() => location.search.includes('seed=7') && (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 })
     .then(() => true, () => false);
@@ -1021,7 +1102,8 @@ for (const style of ['realistic', 'fantasy']) {
 }
 
 // 分享链接(阶段 4):改名 → 复制分享链接 → 另一个浏览器(什么都没存)打开这个链接 → 名字在、地址栏的 # 去掉了;
-// 那边本地改成别的名字后再打开链接 → 顶部提示条问"用链接里的 / 保留本地",两个都点一遍;剪贴板用不了 → 存档菜单里一行手动复制
+// 那边改成别的名字(存进那边的"我的世界")后再打开链接 → 看到的是链接里的(不问、不覆盖),回"我的世界"打开本地那个还是自己改的名字;
+// 剪贴板用不了 → 存档菜单里一行手动复制
 {
   type Pick = { kind: string; id: number; text: string; x: number; y: number };
   const has = (p: typeof page, n: string, timeout = 30000) =>
@@ -1058,11 +1140,11 @@ for (const style of ['realistic', 'fantasy']) {
   let opened = false;
   let hashGone = false;
   let openNote = '';
-  let ask = '';
-  /** 问的时候开着的窗口(应该没有:问题在提示条上) */
+  let again = false;
+  /** 再打开链接时开着的窗口 / 问的提示条(都应该没有) */
   let askModal = 0;
+  let cards = 0;
   let kept = false;
-  let used = false;
   let manualOk = false;
   if (city && (await rename(a, city.id, '梼杌城'))) {
     await closeOverview(a);
@@ -1078,21 +1160,20 @@ for (const style of ['realistic', 'fantasy']) {
       opened = await has(b, '梼杌城');
       hashGone = (await b.evaluate(() => location.hash)) === '' && b.url().includes('seed=7');
       openNote = await note(b);
-      // 那边本地改成别的名字(自动存下),再打开同一个链接:问
+      // 那边改成别的名字(存进那边的"我的世界"),再打开同一个链接:就是链接里的样子;本地改过的那个另外留着
       if (opened && (await rename(b, city.id, '混沌城'))) {
         await b.waitForTimeout(300);
         await b.goto(share.url);
-        ask = await toastText(b, 'share-ask', 20000);
-        askModal = await b.locator('[aria-modal=true]:visible').count();
-        if (ask) {
-          await b.click('.toast[data-toast=share-ask] [data-act=share-keep]');
-          await ready(b);
-          kept = (await has(b, '混沌城')) && !(await b.evaluate(() => (window as any).__wfLabels.texts.includes('梼杌城')));
-          await b.goto(share.url);
-          await b.locator('.toast[data-toast=share-ask]').waitFor({ timeout: 20000 }).catch(() => {});
-          await b.click('.toast[data-toast=share-ask] [data-act=share-use]').catch(() => {});
-          used = await has(b, '梼杌城');
-        }
+        await ready(b);
+        again = (await has(b, '梼杌城')) && !(await b.evaluate(() => (window as any).__wfLabels.texts.includes('混沌城')));
+        askModal = (await b.locator('[aria-modal=true]:visible').count()) + (await b.locator('.toast[data-toast=share-ask]').count());
+        await closeOverview(b);
+        await b.click('.sidebar [data-act=home]');
+        await b.locator('.mw').waitFor({ timeout: 5000 }).catch(() => {});
+        cards = await b.locator('.mw [data-act=open-world]').count();
+        await b.locator('.mw [data-act=open-world]').first().click().catch(() => {});
+        await ready(b);
+        kept = (await has(b, '混沌城', 10000)) && !(await b.evaluate(() => (window as any).__wfLabels.texts.includes('梼杌城')));
       }
     }
     // 剪贴板用不了:存档菜单留着,里面多一行选中了链接的输入框
@@ -1110,8 +1191,8 @@ for (const style of ['realistic', 'fantasy']) {
   }
   console.log(
     `分享链接:改名「${city?.text}」→ 梼杌城,复制 ${share?.length ?? '-'} 字(剪贴板一致 ${!!share && clip === share.url},提示「${copyNote}」);` +
-      `新浏览器打开 名字在 ${opened}、# 去掉 ${hashGone}(提示「${openNote}」);本地改过再开:提示条「${ask}」,` +
-      `保留本地 ${kept},用链接里的 ${used};剪贴板用不了时手动复制框 ${manualOk}`,
+      `新浏览器打开 名字在 ${opened}、# 去掉 ${hashGone}(提示「${openNote}」);本地改过再开:是链接里的 ${again}、问 ${askModal} 次;` +
+      `我的世界 ${cards} 个,打开是本地改的 ${kept};剪贴板用不了时手动复制框 ${manualOk}`,
   );
   if (!city) errs.push('分享:没找到可以改名的城');
   else {
@@ -1121,11 +1202,8 @@ for (const style of ['realistic', 'fantasy']) {
     if (!opened) errs.push('分享:另一个浏览器打开链接后名字不在');
     if (!hashGone) errs.push('分享:打开后地址栏的 # 没去掉');
     if (!openNote.includes('已打开分享的世界')) errs.push(`分享:打开链接后的提示不对(${openNote})`);
-    if (!ask.includes('1 处和链接不同') || !ask.includes('用链接里的') || !ask.includes('保留本地'))
-      errs.push(`分享:本地有不同修改时提示条上没有问"用链接里的 / 保留本地"(${ask})`);
-    if (askModal) errs.push('分享:问"用链接里的 / 保留本地"时另开了窗口');
-    if (!kept) errs.push('分享:点"保留本地的"后名字不是本地的');
-    if (!used) errs.push('分享:点"用链接里的"后名字不是链接里的');
+    if (!again || askModal) errs.push(`分享:本地改过以后再打开链接,应直接是链接里的样子、不问(链接里的 ${again},问 ${askModal})`);
+    if (cards !== 1 || !kept) errs.push(`分享:本地改过的那个世界应留在"我的世界"里(${cards} 个,名字是本地的 ${kept})`);
     if (!manualOk) errs.push('分享:剪贴板用不了时存档菜单里没有手动复制的一行');
   }
   await ctxA.close();
@@ -1155,7 +1233,7 @@ for (const style of ['realistic', 'fantasy']) {
   const path = await import('node:path');
   const bad = path.join(os.tmpdir(), `wf-bad-${process.pid}.json`);
   fs.writeFileSync(bad, JSON.stringify({ hello: 'world' }));
-  await sp.setInputFiles('[data-testid=save-file-input]', bad);
+  await openFile(sp, bad);
   // 读完再删(页面是异步读文件的,先删了会变成"读不了这个文件")
   const badNote = await sp.locator('.toast[data-toast=save].k-error').innerText({ timeout: 5000 }).then((t) => t.replace(/\n/g, ' '), () => '');
   fs.rmSync(bad, { force: true });
@@ -1510,11 +1588,12 @@ for (const style of ['realistic', 'fantasy']) {
   await page.evaluate(() => localStorage.clear());
 }
 
-// 改地形(阶段 4):打开"改地形" → 在海里点一下放火山 → 后台按新地形重新生成 → 那里成了陆地(悬停显示海拔);
-// 刷新后自动恢复(直接带着地形修改生成);分享链接在另一个浏览器里打开,地形修改在(也是直接带着修改生成);撤销 → 又变回海
+// 改地形(阶段 4):只在新建世界时能改。新建卡片上点"改地形" → 卡片里换成改地形工具 → 在海里点一下放火山 → 后台按新地形重新生成 →
+// 那里成了陆地(悬停显示海拔);撤销 → 又变回海,再放一次;"完成"收起工具;动过的新建世界存下来了,刷新后自动恢复(直接带着地形修改生成);
+// 创建以后没有改地形的入口,概览"世界设定"页写着改过的地形;分享链接在另一个浏览器里打开,地形修改在(也是直接带着修改生成)
 {
   await page.evaluate(() => localStorage.clear());
-  await page.goto(`${dev.url}/?seed=7&style=fantasy`);
+  await page.goto(`${dev.url}/?new=1&seed=7&style=fantasy`);
   await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
   await page.waitForTimeout(300);
   // 种子 7 大洋中间的一处海(世界坐标;生成算法换代、这里成了陆地时改它)
@@ -1535,29 +1614,31 @@ for (const style of ['realistic', 'fantasy']) {
     await page.waitForFunction((p) => ((window as any).__wfTerrain?.id ?? 0) > p, prev, { timeout: 30000 }).catch(() => null);
     return page.evaluate(() => (window as any).__wfTerrain ?? null) as Promise<{ id: number; paintedMs: number; workerMs: number } | null>;
   };
+  const volcano = () =>
+    regen(async () => {
+      const [x, y] = await at();
+      await page.mouse.click(x, y);
+    });
+  const urlBefore = page.url();
   const before = await probeSea();
   await terrainOn();
-  const panel = await page.locator('.terrain-bar').innerText().catch(() => '');
-  const barBox = await page.locator('.terrain-bar').boundingBox();
-  const t = await regen(async () => {
-    const [x, y] = await at();
-    await page.mouse.click(x, y);
-  });
+  const panel = await page.locator('.tp').innerText().catch(() => '');
+  const barBox = await page.locator('.tp').boundingBox();
+  const sideBox = await page.locator('.sidebar').boundingBox();
+  const t = await volcano();
   const after = await probeSea();
-  const count = await page.locator('.terrain-bar .tbar-count').innerText().catch(() => '');
-  // 重新生成的结果照旧走顶部提示条,排在工具条下面
+  const count = await page.locator('.tp .tp-n').innerText().catch(() => '');
+  // 重新生成的结果照旧走顶部提示条(在地图那一块,不压侧栏)
   const tBox = await page.locator('.toast[data-toast=terrain]').boundingBox().catch(() => null);
   console.log(
-    `改地形:工具条 ${barBox ? `${Math.round(barBox.width)}×${Math.round(barBox.height)} @ ${Math.round(barBox.x)},${Math.round(barBox.y)}` : '没出来'};` +
+    `改地形:工具 ${barBox ? `${Math.round(barBox.width)}×${Math.round(barBox.height)} @ ${Math.round(barBox.x)},${Math.round(barBox.y)}` : '没出来'};` +
       `海里点火山 → 重新生成 ${t ? `${t.paintedMs.toFixed(0)} ms(线程里 ${t.workerMs.toFixed(0)} ms)` : '没完成'};` +
-      `之前「${before.split(' / ')[1] ?? ''}」→ 之后「${after.split(' / ')[1] ?? ''}」;工具条「${count}」;提示条在 ${tBox ? Math.round(tBox.y) : '-'}`,
+      `之前「${before.split(' / ')[1] ?? ''}」→ 之后「${after.split(' / ')[1] ?? ''}」;工具「${count}」;提示条在 ${tBox ? `${Math.round(tBox.x)},${Math.round(tBox.y)}` : '-'}`,
   );
-  // 宽屏:工具条在卡片右边那一块的顶上(右上那排按钮下面),不压在侧栏卡片上
-  const sideR = await page.evaluate(() => document.querySelector('.sidebar')?.getBoundingClientRect().right ?? 0);
-  if (!['火山', '山脉', '湖', '撤销', '完成'].every((w) => panel.includes(w)) || !barBox || barBox.y > 80 || barBox.x < sideR) errs.push(`改地形:进入后顶部没有工具条(${panel})`);
-  if (tBox && barBox && tBox.y < barBox.y + barBox.height) errs.push('改地形:提示条压在工具条上');
-  // 工具条只有一行(用法在各工具的悬停提示里,不另写一行说明)
-  if (barBox && barBox.height > 56) errs.push(`改地形:工具条不止一行(高 ${Math.round(barBox.height)})`);
+  if (!['火山', '山脉', '湖', '撤销', '完成'].every((w) => panel.includes(w))) errs.push(`改地形:进入后卡片里没有改地形工具(${panel})`);
+  if (!barBox || !sideBox || barBox.x < sideBox.x || barBox.x + barBox.width > sideBox.x + sideBox.width + 1) errs.push('改地形:工具应在左边的新建卡片里');
+  if (tBox && sideBox && tBox.x < sideBox.x + sideBox.width) errs.push('改地形:提示条压在侧栏卡片上');
+  if (!count.includes('改了 1 处')) errs.push(`改地形:工具里的计数不对(${count})`);
   if (!before.includes('水深')) errs.push(`改地形:测试点原本应该是海(${before})`);
   if (!t) errs.push('改地形:放了火山以后没有重新生成');
   else {
@@ -1566,18 +1647,46 @@ for (const style of ['realistic', 'fantasy']) {
     // 机器负载高时单次能慢到 2.5 秒,CI 虚拟机再慢两倍
     const BUDGET = process.env.CI ? 6000 : 3000;
     if (!(t.paintedMs <= BUDGET)) errs.push(`改地形:重新生成太慢(${t.paintedMs.toFixed(0)} ms,预算 ${BUDGET} ms)`);
-    // 自动存:刷新后直接带着地形修改生成(只生成一次),那里还是陆地
+    // 撤销:又变回海;再放一次
+    const u = await regen(() => page.click('.tp [data-act=terrain-undo]'));
+    const undone = await probeSea();
+    const t2 = await volcano();
+    // "完成":工具收起,卡片上写着改过几处
+    await page.click('.tp [data-act=terrain-done]');
+    await page.waitForTimeout(200);
+    const barGone = !(await page.locator('.tp').count());
+    const row = (await page.locator('.nw-body [data-act=terrain]').innerText().catch(() => '')).replace(/\n/g, ' ');
+    console.log(`改地形:撤销 → 「${undone.split(' / ')[1] ?? ''}」;再放一次 ${!!t2};点"完成"工具收起 ${barGone}、卡片上「${row}」`);
+    if (!u || !undone.includes('水深')) errs.push(`改地形:撤销后没有变回海(${undone})`);
+    if (!barGone) errs.push('改地形:点"完成"后工具没收起');
+    if (!row.includes('改过 1 处')) errs.push(`改地形:收起后卡片上没写改过几处(${row})`);
+    // 自动存:动过的新建世界存下来了(网址换成 w=编号),刷新后还在新建、直接带着地形修改生成(只生成一次),那里还是陆地
+    await page.waitForFunction(() => /[?&]w=w/.test(location.search), null, { timeout: 5000 }).catch(() => {});
+    const urlStored = page.url();
     await page.waitForTimeout(800);
     await page.reload();
     await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
     await page.waitForTimeout(500);
     const again = await probeSea();
     const regenAfterReload = await page.evaluate(() => (window as any).__wfTerrain ?? null);
-    console.log(`改地形:刷新后「${again.split(' / ')[1] ?? ''}」,刷新后又重新生成了 ${regenAfterReload ? '是' : '否'}`);
-    if (!again.includes('海拔')) errs.push('改地形:刷新页面后地形修改没有自动恢复');
+    const stillDraft = (await page.locator('.sidebar.nw-card').count()) === 1;
+    console.log(
+      `改地形:网址 ${urlBefore.split('?')[1]} → ${urlStored.split('?')[1]};刷新后「${again.split(' / ')[1] ?? ''}」、还在新建 ${stillDraft},刷新后又重新生成了 ${regenAfterReload ? '是' : '否'}`,
+    );
+    if (!/[?&]new=1/.test(urlBefore) || !/[?&]w=w/.test(urlStored) || /[?&]new=1/.test(urlStored)) errs.push(`改地形:新建世界动过以后网址应换成 w=编号(${urlBefore} → ${urlStored})`);
+    if (!again.includes('海拔') || !stillDraft) errs.push('改地形:刷新页面后没回到新建 / 地形修改没有自动恢复');
     if (regenAfterReload) errs.push('改地形:刷新后先生成原样再按地形修改重新生成了一遍(应该直接带着修改生成)');
-    // 分享链接:另一个浏览器(什么都没存)打开,那里是陆地;也是直接带着地形修改生成
+    // 创建:没有改地形的入口了;世界设定页写着改过的地形
+    await page.click('[data-act=create-world]');
+    await page.locator('.sidebar:not(.nw-card) .sb-title').waitFor({ timeout: 10000 }).catch(() => {});
+    const noEntry = (await page.locator('[data-act=terrain]').count()) === 0;
+    await openOverview(page, 'genesis');
+    const settings = (await page.locator('.ov-settings [data-param=terrain]').innerText().catch(() => '')).replace(/\n/g, ' ');
     await closeOverview();
+    console.log(`改地形:创建后改地形入口 ${noEntry ? '没有' : '还在'},世界设定页「${settings}」`);
+    if (!noEntry) errs.push('改地形:创建以后还能改地形');
+    if (!settings.includes('1 处') || !settings.includes('火山')) errs.push(`改地形:世界设定页没写改过的地形(${settings})`);
+    // 分享链接:另一个浏览器(什么都没存)打开,那里是陆地;也是直接带着地形修改生成
     await page.click('.save-btn');
     await page.click('[data-act=share-link]');
     const link = await page.waitForFunction(() => (window as any).__wfShare?.url, null, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<string>, () => '');
@@ -1599,18 +1708,6 @@ for (const style of ['realistic', 'fantasy']) {
     else if (!shared.includes('海拔')) errs.push(`改地形:带地形修改的分享链接打开后,那里不是陆地(${shared})`);
     if (regenShared) errs.push('改地形:分享链接打开时先生成原样再按地形修改重新生成了一遍(应该直接带着修改生成)');
     await ctx3.close();
-    // 撤销:又变回海
-    await closeOverview();
-    await terrainOn();
-    const u = await regen(() => page.click('.terrain-bar [data-act=terrain-undo]'));
-    const undone = await probeSea();
-    // "完成":工具条收起,单击地图又是看详情
-    await page.click('.terrain-bar [data-act=terrain-done]');
-    await page.waitForTimeout(200);
-    const barGone = !(await page.locator('.terrain-bar').count());
-    console.log(`改地形:撤销 → 「${undone.split(' / ')[1] ?? ''}」;点"完成"工具条收起 ${barGone}`);
-    if (!u || !undone.includes('水深')) errs.push(`改地形:撤销后没有变回海(${undone})`);
-    if (!barGone) errs.push('改地形:点"完成"后工具条没收起');
   }
   await page.evaluate(() => localStorage.clear());
 }
@@ -2475,15 +2572,15 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(`视窗装饰:${JSON.stringify(decor)}`);
   if (!decor.shown) errs.push('东西相连:手绘风的外框 / 罗盘没有画在视窗上');
 
-  // 6. 改地形:中心转到 180°(接缝在视窗正中),"山脉"按住从接缝左边拖到右边 —— 画的线是连着的一笔(不横穿整张图),能照常重新生成
+  // 6. 改地形(新建世界时):中心转到 180°(接缝在视窗正中),"山脉"按住从接缝左边拖到右边 —— 画的线是连着的一笔(不横穿整张图),能照常重新生成
   {
-    await page.goto(`${dev.url}/?seed=7&style=fantasy&civ=-labels`);
+    await page.goto(`${dev.url}/?new=1&seed=7&style=fantasy&civ=-labels`);
     await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
     await page.waitForTimeout(300);
     await page.evaluate(() => (window as any).__wfSetCenter(180));
     await page.waitForTimeout(150);
     await terrainOn();
-    await page.click('.terrain-bar [data-tool=range]');
+    await page.click('.tp [data-tool=range]');
     const [cx, cy] = (await page.evaluate(() => (window as any).__wfWorldToClient(0, 420))) as [number, number];
     const prev = await page.evaluate(() => (window as any).__wfTerrain?.id ?? 0);
     await page.mouse.move(cx - 70, cy);
@@ -2710,7 +2807,10 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(`导出罗宾森:${png.width}×${png.height},角上 ${corner.join(',')}(纸色 ${cornerPaper}),中部取样 ${varied} 种颜色变化`);
   if (png.width !== 2048 || png.height !== 1024) errs.push(`投影:导出的罗宾森图片尺寸不对(${png.width}×${png.height})`);
   if (!cornerPaper || varied < 20) errs.push('投影:导出的罗宾森图片不对(外轮廓外不是底色,或中部是空白)');
-  // 8. 改地形时切回等距圆柱(弯边投影里不改地形)
+  // 8. 改地形(新建世界时)切回等距圆柱(弯边投影里不改地形)
+  await page.goto(`${dev.url}/?new=1&seed=7&style=fantasy&proj=robinson`);
+  await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await page.waitForTimeout(300);
   await terrainOn();
   await page.waitForTimeout(300);
   const onAfter = await projOn(page);
@@ -2980,9 +3080,9 @@ for (const style of ['realistic', 'fantasy']) {
     await hp.waitForFunction(() => (window as any).__wfGlobe?.style === 'realistic', null, { timeout: 30000 });
     await hp.waitForTimeout(500);
     const f = await H();
-    // 换世界:扔掉,1 倍时也不重铺
-    await openOverview(hp, 'genesis');
-    await hp.click('.ov [data-act=new-world]');
+    // 换世界(点"我的世界";一个都没存过 → 直接新建一颗随机的星球):扔掉,1 倍时也不重铺
+    await closeOverview(hp);
+    await hp.click('.sidebar [data-act=home]');
     await hp.waitForFunction(() => (window as any).__wfGlobe?.hdCached === 0 && (window as any).__wf?.ready, null, { timeout: 60000 }).catch(() => {});
     await hp.waitForTimeout(1500);
     const g = await H();
@@ -3135,7 +3235,6 @@ for (const style of ['realistic', 'fantasy']) {
   let tiles = 0;
   let capsuleHidden = false;
   let ws1: Rect = null;
-  let terrainPeek = false;
   if (wRow) {
     await swipe([[wRow.x + 60, wRow.y + wRow.height / 2]], [[wRow.x + 60, wRow.y + wRow.height / 2 - 420]]);
     await mp.waitForTimeout(500);
@@ -3145,15 +3244,6 @@ for (const style of ['realistic', 'fantasy']) {
     await mp.tap('.psheet .sheet-grip');
     await mp.waitForTimeout(500);
     ws1 = await box('.psheet.ps-peek');
-    // 再拉到顶,点"改地形":卡片先收起、上面是工具条;点"完成"退出
-    await mp.tap('.psheet .sheet-grip');
-    await mp.waitForTimeout(500);
-    await mp.locator('.psheet [data-act=terrain]').scrollIntoViewIfNeeded().catch(() => {});
-    await mp.tap('.psheet [data-act=terrain]').catch(() => {});
-    await mp.waitForTimeout(500);
-    terrainPeek = (await mp.locator('.psheet.ps-peek').count()) === 1 && (await mp.locator('.terrain-bar').isVisible().catch(() => false));
-    await mp.tap('[data-act=terrain-done]').catch(() => {});
-    await mp.waitForTimeout(400);
   }
   // 双指捏合:两指从中间往两边分开 → 放大;中点下的地方还在中点下
   const k0 = (await mp.evaluate(() => (window as any).__wfView)).k;
@@ -3283,24 +3373,37 @@ for (const style of ['realistic', 'fantasy']) {
   await hit.tap().catch(() => {});
   await mp.waitForTimeout(900);
   const searchIns = await mp.locator('.inspector').innerText().catch(() => '');
-  // 拉到顶的世界卡片里点"新世界":卡片先收起,看得到新生成的世界(关掉详情卡片时世界卡片还是搜索时拉到顶的样子)
+  // 拉到顶的世界卡片里点"我的世界":整屏换成我的世界(改过的这个世界在里面);点"新建世界" → 底部是新建世界的卡片;
+  // 点"改地形" → 卡片里换成改地形工具;点"完成"退回(关掉详情卡片时世界卡片还是搜索时拉到顶的样子)
   await mp.tap('.inspector .cp-x').catch(() => {});
   await mp.waitForTimeout(400);
   if (!(await mp.locator('.psheet.ps-full').count())) {
     await mp.tap('.psheet .sheet-grip').catch(() => {});
     await mp.waitForTimeout(500);
   }
-  const newFull = (await mp.locator('.psheet.ps-full .ps-tiles [data-act=new-world]').count()) === 1;
-  await mp.tap('.psheet .ps-tiles [data-act=new-world]').catch(() => {});
-  await mp.waitForTimeout(500);
-  const newPeek = (await mp.locator('.psheet.ps-peek').count()) === 1;
+  const homeFull = (await mp.locator('.psheet.ps-full .ps-tiles [data-act=home]').count()) === 1;
+  await mp.tap('.psheet .ps-tiles [data-act=home]').catch(() => {});
+  await mp.locator('.mw').waitFor({ timeout: 5000 }).catch(() => {});
+  const homeBox = await box('.mw');
+  const homeCards = await mp.locator('.mw [data-act=open-world]').count();
+  await mp.tap('.mw [data-act=new-world] >> nth=0').catch(() => {});
+  await mp.locator('.psheet.nw-sheet').waitFor({ timeout: 10000 }).catch(() => {});
+  const nwBox = await box('.psheet.nw-sheet');
+  await mp.locator('.nw-sheet [data-act=terrain]:not([disabled])').waitFor({ timeout: 60000 }).catch(() => {});
+  await mp.tap('.nw-sheet [data-act=terrain]').catch(() => {});
+  await mp.waitForTimeout(400);
+  const nwTools = (await mp.locator('.psheet.nw-sheet.tools .tp').isVisible().catch(() => false)) && !(await mp.locator('.nw-sheet [data-act=create-world]').count());
+  await mp.tap('.tp [data-act=terrain-done]').catch(() => {});
+  await mp.waitForTimeout(400);
+  const nwBack = !(await mp.locator('.tp').count()) && (await mp.locator('.nw-sheet [data-act=create-world]').isVisible().catch(() => false));
   console.log(
     `手机布局:胶囊 ${JSON.stringify(row)},轨道 ${JSON.stringify(track)};世界卡片 ${JSON.stringify(ws0)}「${sub}」;右上 ${btnActs} ${JSON.stringify(btns)};提示「${hint0}」;+ − ${zoomBtns} 个;` +
-      `上拖 → 拉到顶 ${JSON.stringify(wsFull)}、大按钮 ${tiles} 个、胶囊藏起 ${capsuleHidden};点拖动条 → 收起 ${JSON.stringify(ws1)};拉到顶点改地形 → 收起 ${terrainPeek};` +
+      `上拖 → 拉到顶 ${JSON.stringify(wsFull)}、大按钮 ${tiles} 个、胶囊藏起 ${capsuleHidden};点拖动条 → 收起 ${JSON.stringify(ws1)};` +
       `捏合 k ${k0.toFixed(2)} → ${k1.toFixed(2)}(中点下 ${mid0?.map((v: number) => v.toFixed(0))} → ${mid1?.map((v: number) => v.toFixed(0))});单指拖动 ${panned};点两下回正 k ${kReset.toFixed(2)};` +
       `点「${pol?.text}」→ 详情卡片 ${JSON.stringify(sheet0)}、胶囊 ${JSON.stringify(row1)}、国都圆环 ${JSON.stringify(ring)}、悬停卡片 ${hover};上拖 → 拉到顶 ${full} ${JSON.stringify(sheet1)}、胶囊藏起 ${fullCapsuleHidden};` +
       `干预页 ${cmds} 条;结盟提示「${pickToast}」、卡片藏起 ${hiddenWhilePicking};点「${tgtText}」→「${doneToast}」;撤销 →「${undoToast}」;` +
-      `图层抽屉 ${JSON.stringify(lp)} → 实景 ${dark}、收起 ${lpClosed};概览「${ovRowText}」→ 收起 ${ovClosed};搜索框 ${JSON.stringify(sb)} 拉到顶 ${searchFull} → 「${hitName}」;拉到顶 ${newFull} 点新世界 → 收起 ${newPeek}`,
+      `图层抽屉 ${JSON.stringify(lp)} → 实景 ${dark}、收起 ${lpClosed};概览「${ovRowText}」→ 收起 ${ovClosed};搜索框 ${JSON.stringify(sb)} 拉到顶 ${searchFull} → 「${hitName}」;` +
+      `拉到顶 ${homeFull} 点我的世界 → ${JSON.stringify(homeBox)}、${homeCards} 个世界;新建 → 卡片 ${JSON.stringify(nwBox)};改地形 → 工具 ${nwTools};完成 → 退回 ${nwBack}`,
   );
   if (!ws0 || Math.abs(ws0.y - (VH - PEEK)) > 2 || Math.abs(ws0.y + ws0.height - VH) > 1 || ws0.width !== VW) errs.push(`手机:世界卡片没有收在最底(${JSON.stringify(ws0)})`);
   if (!row || !ws0 || Math.abs(row.y + row.height - (ws0.y - 10)) > 2 || Math.abs(row.width - (VW - 24)) > 1 || row.height > 56)
@@ -3311,7 +3414,6 @@ for (const style of ['realistic', 'fantasy']) {
     errs.push(`手机:右上不是竖排的图层、地球两个按钮(${btnActs} ${JSON.stringify(btns)})`);
   if (!wsFull || Math.abs(wsFull.y - 0.08 * VH) > 8 || tiles !== 4 || !capsuleHidden) errs.push(`手机:往上拖世界卡片没有拉到顶(${JSON.stringify(wsFull)},大按钮 ${tiles},胶囊藏起 ${capsuleHidden})`);
   if (!ws1 || Math.abs(ws1.y - (VH - PEEK)) > 2) errs.push(`手机:点拖动条没有收起世界卡片(${JSON.stringify(ws1)})`);
-  if (!terrainPeek) errs.push('手机:拉到顶的世界卡片里点"改地形",卡片没有收起 / 工具条没出来');
   if (!hint0.includes('双指缩放') || hint1 !== 0) errs.push(`手机:操作提示不对 / 捏合后没消失(${hint0})`);
   if (zoomBtns) errs.push('手机:右下还有地球仪 / 缩放按钮');
   if (!(k1 > k0 * 1.6)) errs.push(`手机:双指捏合后地图比例没变(${k0} → ${k1})`);
@@ -3338,7 +3440,9 @@ for (const style of ['realistic', 'fantasy']) {
   if (!ovClosed || !ovName || !ovIns.includes(ovName)) errs.push(`手机:概览的国家列表点一国没有打开这国(${ovName})`);
   if (!sb || sb.width < VW - 40 || !searchFull) errs.push(`手机:搜索时世界卡片没有拉到顶(${JSON.stringify(sb)})`);
   if (!hitName || !searchIns.includes(hitName)) errs.push(`手机:搜索点一条没有打开它(${hitName})`);
-  if (!newFull || !newPeek) errs.push(`手机:拉到顶的世界卡片里点"新世界",卡片没有收起(拉到顶 ${newFull},收起 ${newPeek})`);
+  if (!homeFull || !homeBox || homeBox.width !== VW || homeCards !== 1) errs.push(`手机:拉到顶的世界卡片里点"我的世界"没有整屏换成我的世界(${JSON.stringify(homeBox)},${homeCards} 个世界)`);
+  if (!nwBox || Math.abs(nwBox.y + nwBox.height - VH) > 1 || nwBox.width !== VW) errs.push(`手机:我的世界里点"新建世界",底部没有新建世界的卡片(${JSON.stringify(nwBox)})`);
+  if (!nwTools || !nwBack) errs.push(`手机:新建卡片里点"改地形"没有换成改地形工具 / 点"完成"没退回(${nwTools},${nwBack})`);
   await mctx.close();
 }
 

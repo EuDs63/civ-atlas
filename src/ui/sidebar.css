@@ -105,11 +105,15 @@
 }
 .sb-pill:not(.pm):hover:not(:disabled),
 .sb-acts .save-btn:hover,
-.sb-acts .save-btn.on,
 .sb-pill > .pm-btn:hover,
 .sb-pill > .pm-btn.on {
   background: var(--hover-bg);
   filter: brightness(0.94);
+}
+/* 存档菜单开着 */
+.sb-acts .save-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .sb-pill:disabled {
   opacity: 0.45;
@@ -123,11 +127,11 @@
   position: static;
 }
 .sb-acts .save-menu {
-  left: 0;
-  right: 0;
+  left: -6px;
+  right: -6px;
   width: auto;
   max-width: none;
-  top: calc(100% + 8px);
+  top: calc(100% + 12px);
 }
 
 .sb-more-wrap {

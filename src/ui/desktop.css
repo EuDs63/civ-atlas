@@ -266,19 +266,10 @@
   top: 35px;
 }
 
-/* ---- 在地图那一块里居中的:提示条、第一次打开的操作提示、回放说明、改地形工具条;数据图层的图例在地图左上 ---- */
+/* ---- 在地图那一块里居中的:提示条、第一次打开的操作提示、回放说明;数据图层的图例在地图左上 ---- */
 .app.has-side .toast {
   left: var(--map-mid);
   top: 64px;
-}
-/* 改地形工具条在右上的图层按钮下面;提示条再挪到工具条下面 */
-.app.has-side .terrain-bar {
-  left: var(--map-mid);
-  top: 64px;
-  max-width: calc(100% - var(--side-room) - 32px);
-}
-.app.has-side .stage.terrain-on ~ .toast {
-  top: calc(var(--tbar-bottom, 112px) + 8px);
 }
 .app.has-side .first-hint {
   left: var(--map-mid);

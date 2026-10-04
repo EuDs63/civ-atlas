@@ -5,14 +5,15 @@
  *         关闭。窄屏(手机)还有 AI 设置入口(AiMenu)、存档(SaveMenu)、导出(ExportMenu)、成书(收起概览 + 打开写史书窗口)——
  *         宽屏这几样在侧栏和地图右上
  *   页签  国家(WorldOverviewCountries.tsx)/ 编年史(Chronicle.tsx)/ 我的干预(WorldOverviewInterventions.tsx)/
- *         创世(WorldOverviewGenesis.tsx:种子、新世界、世界参数、回放世界形成、改地形)
+ *         世界设定(WorldOverviewGenesis.tsx:创建时定下的种子、参数、地形,只能看;以它为底稿新建、回放世界形成)
+ *   世界名旁边"改名"(点了就地变成输入框)
  *   底部  一行小字:源代码、隐私政策、用户协议(新标签页打开;网址在 links.ts)
  * 关闭:右上角的关闭 / Esc / 点浮层外面。窄屏铺满全屏。开没开、在哪一页见 overviewStore.ts(别处用 openOverview(tab, opts) 打开某一页)。
  *
  * 窄屏的存档、导出、AI 这三个菜单一直挂着(浮层关着时只是藏起来):导出做到一半收起概览,做完照样在顶部提示;
  * 别处(成书窗口、AI 功能)照样能打开 AI 设置。
  */
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { World, WorldParams } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import type { Civ } from '../gen/civ/types';
@@ -25,26 +26,23 @@ import { openHistoryBook } from './HistoryBook';
 import { Chronicle } from './Chronicle';
 import { CountriesPage } from './WorldOverviewCountries';
 import { InterventionsPage } from './WorldOverviewInterventions';
-import { GenesisPage } from './WorldOverviewGenesis';
+import { SettingsPage } from './WorldOverviewGenesis';
 import { getCivTime, subscribeCivTime } from './civView';
 import { useEdits } from './editsStore';
-import { currentWorld, useSavesVersion } from './saveStore';
+import { currentWorld, renameWorld, useSavesVersion } from './saveStore';
 import { closeOverview, setOverviewTab, useOverview, type OverviewTab } from './overviewStore';
 import type { Style } from './mapLayers';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
 import { useNarrow } from './device';
 import { Icon } from './icons';
 import { APP_VERSION } from './version';
+import { TitleInput } from './worldParts';
 import './overview.css';
 
 export interface WorldOverviewProps {
   data: { world: World; raster: Raster } | null;
   civ: Civ | null;
   params: WorldParams;
-  /** 用这组参数重新生成 */
-  onCommit: (p: WorldParams) => void;
-  /** 随机一个种子,生成新世界 */
-  onRandomSeed: () => void;
   /** 导出用:当前画风、数据图层 */
   style: Style;
   dataLayer: LayerId;
@@ -55,18 +53,15 @@ export interface WorldOverviewProps {
   /** 回放世界形成:能不能点、正在放 */
   replay: { on: boolean; ready: boolean };
   onReplay: () => void;
-  /** 改地形进不去(新世界还在生成、正在回放) */
-  terrainDisabled: boolean;
-  /** 读档:文件内容 / "我的世界"里的一个 */
-  onOpenText: (text: string, fileName?: string) => void;
-  onOpenStored: (id: string) => void;
+  /** 以这个世界为底稿新建(世界设定页) */
+  onDraftFrom: () => void;
 }
 
 const TABS: { id: OverviewTab; name: string }[] = [
   { id: 'countries', name: '国家' },
   { id: 'chronicle', name: '编年史' },
   { id: 'interventions', name: '我的干预' },
-  { id: 'genesis', name: '创世' },
+  { id: 'genesis', name: '世界设定' },
 ];
 
 const subscribeYear = (f: () => void) => subscribeCivTime(() => f());
@@ -111,7 +106,7 @@ export function WorldOverview(p: WorldOverviewProps) {
             {narrow && (
               <>
                 <AiMenu />
-                <SaveMenu ready={ready} onOpenText={p.onOpenText} onOpenStored={p.onOpenStored} />
+                <SaveMenu ready={ready} />
                 <ExportMenu data={p.data} civ={p.civ} style={p.style} layer={p.dataLayer} />
                 <button
                   className="ov-btn ov-primary ov-book"
@@ -184,15 +179,18 @@ function OverviewPage(p: WorldOverviewProps & { tab: OverviewTab }) {
       return <InterventionsPage civ={p.civ} busy={p.resimBusy} />;
     case 'genesis':
       return (
-        <GenesisPage
+        <SettingsPage
           params={p.params}
-          world={p.data?.world ?? null}
-          onCommit={p.onCommit}
-          onRandomSeed={p.onRandomSeed}
-          generating={p.generating}
+          generating={p.generating || !p.data}
           replay={p.replay}
-          onReplay={p.onReplay}
-          terrainDisabled={p.terrainDisabled}
+          onReplay={() => {
+            closeOverview();
+            p.onReplay();
+          }}
+          onDraftFrom={() => {
+            closeOverview();
+            p.onDraftFrom();
+          }}
         />
       );
   }
@@ -203,7 +201,9 @@ function OverviewSummary({ civ, seed }: { civ: Civ | null; seed: number | null }
   useSavesVersion();
   const edits = useEdits();
   const year = useYear(civ);
-  const title = currentWorld()?.title;
+  const cur = currentWorld();
+  const title = cur?.title;
+  const [naming, setNaming] = useState(false);
   const n = edits.interventions.length;
   const stats = useMemo(() => {
     if (!civ || !civ.viable) return null;
@@ -220,11 +220,30 @@ function OverviewSummary({ civ, seed }: { civ: Civ | null; seed: number | null }
     for (const s of civ.settlements) if (populationAt(s, year) > 0) towns++;
     return { alive, founded, cultures, towns, regions: civ.regions.count };
   }, [civ, year]);
-  const sub = [seed !== null ? `种子 ${seed}` : '正在生成', civ ? `当前 ${year} 年` : null, n ? `已干预 ${n} 处` : '未干预'].filter(Boolean).join('，');
+  const sub = [seed !== null ? `种子 ${seed}` : '正在生成', civ ? `当前 ${year} 年` : null, n ? `干预了 ${n} 处` : '未干预'].filter(Boolean).join('，');
   return (
     <div className="ov-summary">
       <div className="ov-title">
-        <span className="ov-name">{title || '未命名世界'}</span>
+        {naming && cur ? (
+          <TitleInput
+            className="ov-name-input"
+            initial={title ?? ''}
+            onDone={(t) => {
+              setNaming(false);
+              if (t !== null) renameWorld(cur.id, t);
+            }}
+          />
+        ) : (
+          <span className="ov-name-row">
+            <span className="ov-name">{title || '未命名世界'}</span>
+            {cur && (
+              <button className="ov-rename" data-act="ov-rename" onClick={() => setNaming(true)}>
+                <Icon name="rename" size={14} />
+                改名
+              </button>
+            )}
+          </span>
+        )}
         <span className="ov-subline">{sub}</span>
         {stats && (
           <span className="ov-subline ov-stats">

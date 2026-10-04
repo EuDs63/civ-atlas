@@ -203,7 +203,7 @@ export interface RewriteMaterial {
 /**
  * 给 AI 的材料。year = 时间轴现在的年份;wishes = 作者这几轮说的话(点了名的州、城、山河一并列出)
  */
-export function rewriteMaterial(world: World, civ: Civ, year: number, edits: WorldEdits, wishes: readonly string[]): RewriteMaterial {
+export function rewriteMaterial(world: World, civ: Civ, year: number, edits: WorldEdits, wishes: readonly string[], lock?: RewriteLock): RewriteMaterial {
   const Y = Math.floor(Math.min(civ.endYear, Math.max(0, Number.isFinite(year) ? year : civ.endYear)));
   const said = wishes.join('\n');
   const named = (s: string | undefined) => !!s && [...s].length >= 2 && said.includes(s);
@@ -217,6 +217,8 @@ export function rewriteMaterial(world: World, civ: Civ, year: number, edits: Wor
       (civ.viable ? `,作者没说年份的命令从第 ${defaultFrom(civ, Y)} 年起。` : '。') +
       '位置写成(经度, 纬度):经度 −180~180,东经为正;纬度 −90~90,北纬为正。赤道一圈约 4 万公里,纬度 1° 约 111 公里。',
   );
+  if (lock === 'terrain') out.push('这个世界已经建好,地形定下来了:不能再改地形(火山、山脉、湖、抬起陆地、沉成海都不行),只能下历史命令、改名。作者要改地形时,在 cannot 里说"世界建好以后地形不能再改,想换地形请在世界设定里以它为底稿新建"。');
+  else if (lock === 'history') out.push('这个世界还在新建:现在只能改地形,不能下历史命令、不能改名(历史在作者点"创建世界"以后才定下来)。作者要改历史或名字时,在 cannot 里说"创建世界以后再改历史和名字"。');
   if (!civ.viable) out.push('这颗星球太冷或陆地太少,没有长出文明:没有国家、城和民族,只能改地形。');
 
   // ---- 陆块 ----
@@ -595,6 +597,16 @@ export interface RewriteItem {
 
 export type RewriteParse = { ok: true; reply: string; items: RewriteItem[]; cannot: string[] } | { ok: false; message: string };
 
+/**
+ * 锁住了哪一样:terrain = 世界建好了,地形定下来(只能下命令、改名);history = 还在新建,只能改地形(历史等创建以后)
+ */
+export type RewriteLock = 'terrain' | 'history';
+
+const LOCKED: Record<RewriteLock, string> = {
+  terrain: '世界建好以后地形不能再改;想换地形,在世界设定里「以它为底稿新建」',
+  history: '还在新建世界:现在只能改地形,历史和名字等创建以后再改',
+};
+
 export interface RewriteContext {
   world: World;
   /** 套上了改名的这份历史(界面上看到的名字) */
@@ -603,6 +615,8 @@ export interface RewriteContext {
   year: number;
   /** 现在的修改(查重、地形处数上限) */
   edits: WorldEdits;
+  /** 锁住了哪一样(那一类修改照样列出来,写明原因,不能执行) */
+  lock?: RewriteLock;
 }
 
 const str = (v: unknown, max: number): string => {
@@ -754,6 +768,15 @@ class Checker {
   }
 
   private check(op: string, o: Record<string, unknown>): Omit<RewriteItem, 'op' | 'why'> {
+    const r = this.checkOp(op, o);
+    const terrain = op === 'volcano' || op === 'lake' || op === 'range' || op === 'raise' || op === 'sink';
+    const lock = this.ctx.lock;
+    // 锁住的那一类:照样列出来(写的是哪一条看得懂),不能执行
+    if (lock && r.change && (lock === 'terrain') === terrain) return { ...r, change: null, problem: LOCKED[lock] };
+    return r;
+  }
+
+  private checkOp(op: string, o: Record<string, unknown>): Omit<RewriteItem, 'op' | 'why'> {
     switch (op) {
       case 'protect':
       case 'unity':

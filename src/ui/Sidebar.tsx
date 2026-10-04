@@ -1,12 +1,13 @@
 /**
  * 左边的侧栏(宽屏):界面的主体都在这里,地图在它右边。样子照常见的地图应用。
  *
- *   顶上   世界名、"种子 7，现存 14 国";存档、新世界、更多(用一句话改写世界、写成史书、AI 设置、关于);下面一个搜索框
+ *   顶上   "‹ 我的世界";世界名、"种子 7，现存 14 国";存档、更多(用一句话改写世界、写成史书、AI 设置、关于);下面一个搜索框
  *          "改写"的框(Rewrite.tsx)浮在侧栏右边、地图的左上角
  *   下面   三选一 ——
  *          搜索框里有字:搜索结果(点一条 = 选中它,地图飞过去)
  *          地图上选中了东西:它的详情(Inspector:国家 / 城 / 地理实体 / 州的面板)
- *          什么都没选:整个世界(WorldHome:国家按大小排、最近大事、我的干预、地形)
+ *          什么都没选:整个世界(WorldHome:国家按大小排、最近大事、我的干预、这颗星球)
+ * 新建世界这一步左边是另一张卡片(NewWorld.tsx)。
  *
  * 窄屏(手机)不用这个侧栏:同样的内容放进底部的世界卡片(PhoneSheet.tsx),这里的零件(搜索、世界名、"更多"菜单、整个世界)两边共用。
  */
@@ -24,7 +25,6 @@ import { SaveMenu } from './SaveMenu';
 import { openAiSettings } from './AiSettings';
 import { openHistoryBook } from './bookStore';
 import { openOverview } from './overviewStore';
-import { setTerrainTool } from './TerrainTools';
 import { searchCiv, type SearchHit } from './searchIndex';
 import { countUpTo, evText } from './timelineLayout';
 import { RewriteBox } from './Rewrite';
@@ -42,18 +42,13 @@ export interface SidebarProps {
   /** 没套改名的历史 */
   raw: Civ | null;
   params: WorldParams;
-  /** 随机一个种子,生成新世界 */
-  onRandomSeed: () => void;
   /** 世界还在生成 */
   generating: boolean;
   /** 回放世界形成:能不能点、正在放 */
   replay: { on: boolean; ready: boolean };
   onReplay: () => void;
-  /** 改地形进不去(新世界还在生成、正在回放) */
-  terrainDisabled: boolean;
-  /** 读档:文件内容 / "我的世界"里的一个 */
-  onOpenText: (text: string, fileName?: string) => void;
-  onOpenStored: (id: string) => void;
+  /** 回到"我的世界" */
+  onHome: () => void;
   /** 正在重推 / 按新地形重新生成 / 生成新世界(改写框里这时不能发话、不能执行) */
   rewriteBusy: boolean;
   /** 详情面板放进来的空位(面板只挂一份,由 App 挪到这里;见 App 的 inspectorHost) */
@@ -76,6 +71,7 @@ export function Sidebar(p: SidebarProps) {
   return (
     <aside className="sidebar" aria-label="侧栏" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
       <header className="sb-head">
+        <BackHome onClick={p.onHome} />
         <WorldHead {...p} />
         <SearchField s={s} civ={p.civ} />
       </header>
@@ -167,7 +163,17 @@ export function SearchField({ s, civ, onFocus }: { s: SearchState; civ: Civ | nu
 }
 
 // ---------------------------------------------------------------------------
-// 顶上:世界名、存档、新世界、更多
+// 顶上:回到我的世界、世界名、存档、更多
+
+/** 卡片左上"‹ 我的世界" */
+export function BackHome({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="nw-back" data-act="home" onClick={onClick}>
+      <Icon name="back" size={18} />
+      我的世界
+    </button>
+  );
+}
 
 /** 世界名、副标("种子 7,现存 14 国,干预了 2 处") */
 export function useWorldInfo(civ: Civ | null, data: SidebarProps['data']): { title: string; sub: string } {
@@ -249,18 +255,14 @@ function WorldHead(p: SidebarProps) {
         <span className="sb-sub">{sub}</span>
       </button>
       <div className="sb-acts">
-        <SaveMenu ready={!!p.data && !p.generating} onOpenText={p.onOpenText} onOpenStored={p.onOpenStored} icon={<Icon name="save" size={15} />} />
-        <button className="sb-pill" data-act="new-world" disabled={p.generating} onClick={p.onRandomSeed} title="随机一个种子,生成一个新世界">
-          <Icon name="plus" size={15} />
-          新世界
-        </button>
+        <SaveMenu ready={!!p.data && !p.generating} icon={<Icon name="save" size={15} />} />
         <div className="sb-more-wrap" ref={more}>
           <WorldMoreMenu civ={p.civ} data={p.data} onRewrite={() => setRewriting(true)} />
         </div>
       </div>
       {rewriting && canRewrite && (
         <div className="sb-rewrite">
-          <RewriteBox civ={p.civ!} world={p.data!.world} busy={p.rewriteBusy} onClose={closeRewrite} anchor={more} />
+          <RewriteBox civ={p.civ!} world={p.data!.world} busy={p.rewriteBusy} onClose={closeRewrite} anchor={more} lock="terrain" />
         </div>
       )}
     </div>
@@ -307,8 +309,8 @@ const RECENT_N = 3;
 
 let owners: Owners | undefined;
 
-/** 什么都没选时的整个世界:国家按大小排、最近大事、我的干预、地形(宽屏侧栏、手机的世界卡片拉到顶时共用) */
-export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'generating' | 'replay' | 'onReplay' | 'terrainDisabled'>) {
+/** 什么都没选时的整个世界:国家按大小排、最近大事、我的干预、这颗星球(宽屏侧栏、手机的世界卡片拉到顶时共用) */
+export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'generating' | 'replay' | 'onReplay'>) {
   const { civ } = p;
   const year = useYear(civ);
   const edits = useEdits();
@@ -331,7 +333,6 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
   const recent = entries.slice(Math.max(0, k - RECENT_N), k).reverse();
   const nIv = edits.interventions.length;
   const nTerrain = edits.terrain.length;
-  const params = p.params;
   return (
     <div className="sb-home">
       {ok && (
@@ -393,25 +394,24 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
       )}
       <section className="sb-sec">
         <div className="sb-sec-head">
-          <span>地形</span>
+          <span>这颗星球</span>
         </div>
         <div className="sb-group">
-          <button className="sb-row terrain-toggle" data-act="terrain" disabled={p.terrainDisabled} onClick={() => setTerrainTool({ on: true })} title="放火山、画山脉、挖湖……改完整个世界按新地形重新长一遍">
-            <Icon name="terrain" size={17} className="sb-ico" />
-            <span className="sb-row-main">改地形</span>
-            {nTerrain > 0 && <span className="sb-row-side">改了 {nTerrain} 处</span>}
-            <Icon name="chevron" size={14} className="sb-chev" />
-          </button>
           <button className="sb-row" data-act="replay" disabled={!p.data || p.generating || p.replay.on} onClick={p.onReplay}>
             <Icon name="replay" size={17} className="sb-ico" />
-            <span className="sb-row-main">{p.replay.on ? (p.replay.ready ? '正在回放' : '正在准备回放') : '回放世界形成'}</span>
+            <span className="sb-row-main">
+              <b>{p.replay.on ? (p.replay.ready ? '正在回放' : '正在准备回放') : '回放世界形成'}</b>
+            </span>
             <Icon name="chevron" size={14} className="sb-chev" />
           </button>
-          <button className="sb-row" data-act="genesis" onClick={() => openOverview('genesis')}>
-            <Icon name="sliders" size={17} className="sb-ico" />
-            <span className="sb-row-main">世界参数</span>
+          <button className="sb-row" data-act="genesis" onClick={() => openOverview('genesis')} title="创建时定下的种子、参数、地形">
+            <Icon name="lock" size={17} className="sb-ico" />
+            <span className="sb-row-main">
+              <b>世界设定</b>
+            </span>
             <span className="sb-row-side">
-              陆地 {Math.round(params.landFraction * 100)}%，{params.plates} 个板块
+              种子 {p.params.seed}
+              {nTerrain ? `，地形改过 ${nTerrain} 处` : ''}
             </span>
             <Icon name="chevron" size={14} className="sb-chev" />
           </button>

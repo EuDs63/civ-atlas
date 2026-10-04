@@ -1,8 +1,8 @@
 /**
  * 手机(窄屏)底部的世界卡片:没选东西时一直在屏幕底,两档 ——
  *
- *   收起(默认)  拖动条、搜索框、一行世界名 +"存档""新世界"
- *   拉到顶       搜索框、世界名 +"更多"、四个大按钮(新世界、存档、导出、编年史)、整个世界(国家、最近大事、我的干预、地形)
+ *   收起(默认)  拖动条、搜索框、一行世界名 +"我的世界"
+ *   拉到顶       搜索框、世界名 +"更多"、四个大按钮(我的世界、存档、导出、编年史)、整个世界(国家、最近大事、我的干预、这颗星球)
  *
  * 往上拖 / 点拖动条 / 点搜索框 → 拉到顶;往下拖 / 点拖动条 → 收起(拖着的时候下面的内容跟着露出来)。搜索框里有字时下面换成搜索结果。
  * 选中了东西:详情卡片(Inspector)从屏幕底升起盖住这张(App 这时不渲染它)。
@@ -72,9 +72,8 @@ export function PhoneSheet(p: PhoneSheetProps) {
                 <b className="sb-name">{title}</b>
                 <span className="sb-sub">{sub}</span>
               </button>
-              <SaveMenu ready={ready} onOpenText={p.onOpenText} onOpenStored={p.onOpenStored} />
-              <button className="ps-link" data-act="new-world" disabled={p.generating} onClick={p.onRandomSeed} title="随机一个种子,生成一个新世界">
-                新世界
+              <button className="ps-link" data-act="home" onClick={p.onHome} title="我存过的世界、新建世界">
+                我的世界
               </button>
             </div>
           )}
@@ -108,11 +107,11 @@ export function PhoneSheet(p: PhoneSheetProps) {
                   </div>
                 )}
                 <div className="ps-tiles">
-                  <button className="ps-tile" data-act="new-world" disabled={p.generating} onClick={p.onRandomSeed} title="随机一个种子,生成一个新世界">
-                    <Icon name="plus" size={20} />
-                    新世界
+                  <button className="ps-tile" data-act="home" onClick={p.onHome} title="我存过的世界、新建世界">
+                    <Icon name="grid" size={20} />
+                    我的世界
                   </button>
-                  <SaveMenu ready={ready} onOpenText={p.onOpenText} onOpenStored={p.onOpenStored} icon={<Icon name="save" size={20} />} />
+                  <SaveMenu ready={ready} icon={<Icon name="save" size={20} />} />
                   <ExportMenu {...p.exp} icon={<Icon name="export" size={20} />} />
                   <button
                     className="ps-tile"
@@ -133,7 +132,7 @@ export function PhoneSheet(p: PhoneSheetProps) {
       </section>
       {rewriting && canRewrite && (
         <div className="ps-rewrite">
-          <RewriteBox civ={p.civ!} world={p.data!.world} busy={p.rewriteBusy} onClose={closeRewrite} />
+          <RewriteBox civ={p.civ!} world={p.data!.world} busy={p.rewriteBusy} onClose={closeRewrite} lock="terrain" />
         </div>
       )}
     </>

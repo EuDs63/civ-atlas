@@ -156,9 +156,14 @@ export interface LayerPopoverProps {
   trigger?: 'seg' | 'icon';
   /** trigger = seg 时:当前图层在不在前几段里(在 = 这一段不亮) */
   inSeg?: boolean;
+  /** 新建世界这一步(还没有历史):不列政区、民族,不放国家 / 民族的叠加开关 */
+  draft?: boolean;
 }
 
-export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs, disabled, trigger = 'icon', inSeg = true }: LayerPopoverProps) {
+/** 新建世界时列不出来的图层(要有历史) */
+const HISTORY_LAYERS: MapLayer[] = ['political', 'cultures'];
+
+export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs, disabled, trigger = 'icon', inSeg = true, draft = false }: LayerPopoverProps) {
   const [open, setOpen] = useState(false);
   const proj = useProjection();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -224,7 +229,7 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
           </div>
           <div className="lp-sec">图层</div>
           <div className="lp-layers" role="radiogroup" aria-label="图层">
-            {MAP_LAYERS.filter((l) => l.main).map((l) => (
+            {MAP_LAYERS.filter((l) => l.main && !(draft && HISTORY_LAYERS.includes(l.id))).map((l) => (
               <button key={l.id} className={`lp-layer${layer === l.id ? ' on' : ''}`} role="radio" aria-checked={layer === l.id} data-layer={l.id} onClick={() => pick(l.id)}>
                 <Thumb src={thumbs[l.id]} />
                 <span>{l.name}</span>
@@ -238,10 +243,12 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
               </button>
             ))}
           </div>
-          <div className="lp-overlays">
-            <CivToggles />
-            {layer === 'cultures' && <CultureLegend civ={civ} />}
-          </div>
+          {!draft && (
+            <div className="lp-overlays">
+              <CivToggles />
+              {layer === 'cultures' && <CultureLegend civ={civ} />}
+            </div>
+          )}
           <ProjectionSection />
         </div>
       )}

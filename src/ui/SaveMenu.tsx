@@ -1,44 +1,22 @@
 /**
- * 世界概览头部的"存档"菜单(阶段 4):
+ * 世界卡片头部的"存档"菜单:只管正在看的这一个世界(打开别的世界、从文件打开在"我的世界"那一页,见 MyWorlds.tsx) ——
  *
- *   当前世界:名字(可起名 / 改名)、种子、改了几处、"已自动存在这个浏览器里"
+ *   当前世界:缩略图、名字、种子、地形改过几处、"已自动存在这个浏览器里"(打开的链接还没动过 = 还没存)
  *   存成文件:下载 .json(文明与地图-九州大陆.json;格式见 gen/savefile.ts)
- *   从文件打开:选文件(也可以把 .json 直接拖进页面,App 接住)
  *   复制分享链接:整份存档压缩进网址的 # 后面(gen/savefile.ts 的 encodeShare),复制到剪贴板;
  *     没有修改 = 普通网址(只带种子、参数);剪贴板用不了:菜单留着,里面多一行选中了链接的输入框,让用户自己复制
- *   我的世界:浏览器里存过的世界(缩略图、名字、种子、改了几处、最后修改时间),点一个就打开;可改名、删除
  *
- * 存、读、列都在 saveStore.ts;打开一个世界(重新生成 + 套上修改)由 App 做(onOpenText / onOpenStored)。
- * 读档结果、自动恢复、版本不同、存储满了之类的提示(saveStore 的 notify)显示在顶部的提示条上;
- * 打开分享链接时本地存过不同修改的"用链接里的 / 保留本地"也是提示条上的两个按钮(App 显示)。
+ * 存、读、列都在 saveStore.ts。存储满了之类的提示(saveStore 的 notify)显示在顶部的提示条上。
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { DEFAULT_PARAMS, type WorldParams } from '../gen/world';
-import { SHARE_WARN_LENGTH, TITLE_MAX, editCount, encodeShare, hasShareData, saveFileName, saveText, type SaveFile } from '../gen/savefile';
-import { GENERATOR_VERSION } from '../gen/edits';
+import { SHARE_WARN_LENGTH, editCount, encodeShare, hasShareData, saveFileName, saveText, type SaveFile } from '../gen/savefile';
 import { useEdits } from './editsStore';
-import {
-  addFileSaver,
-  currentSave,
-  currentWorld,
-  deleteWorld,
-  listWorlds,
-  loadWorld,
-  notify,
-  persistent,
-  renameWorld,
-  storageIsFull,
-  useSavesVersion,
-  type StoredWorld,
-} from './saveStore';
+import { addFileSaver, currentSave, currentWorld, loadWorld, notify, persistent, storageIsFull, useSavesVersion } from './saveStore';
+import { Icon } from './icons';
 
 export interface SaveMenuProps {
   /** 世界生成完了(能存) */
   ready: boolean;
-  /** 读档:文件内容(App 解析、按存档的参数生成、套上修改) */
-  onOpenText: (text: string, fileName?: string) => void;
-  /** 打开"我的世界"里的一个 */
-  onOpenStored: (id: string) => void;
   /** 按钮上文字前面的小图标 */
   icon?: ReactNode;
 }
@@ -109,19 +87,6 @@ function download(text: string, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-/** 和默认值不同的参数,简写:"陆地 45% · 板块 20" */
-function paramsBrief(p: WorldParams): string {
-  const d = DEFAULT_PARAMS;
-  const out: string[] = [];
-  if (p.landFraction !== d.landFraction) out.push(`陆地 ${Math.round(p.landFraction * 100)}%`);
-  if (p.plates !== d.plates) out.push(`板块 ${p.plates}`);
-  if (p.mountains !== d.mountains) out.push(`造山 ${p.mountains.toFixed(2)}×`);
-  if (p.temperature !== d.temperature) out.push(`气温 ${p.temperature > 0 ? '+' : ''}${p.temperature}°C`);
-  if (p.rainfall !== d.rainfall) out.push(`降水 ${p.rainfall.toFixed(2)}×`);
-  if (p.cells !== d.cells) out.push(`${Math.round(p.cells / 1000)}k 地块`);
-  return out.join(' · ');
-}
-
 /** 剪贴板用不了:菜单里一行"没能自动复制",下面是选中了链接的输入框(不另开窗口) */
 function ManualCopy({ url }: { url: string }) {
   const ref = useRef<HTMLInputElement>(null);
@@ -137,140 +102,25 @@ function ManualCopy({ url }: { url: string }) {
   );
 }
 
-/** 最后修改时间:刚刚 / 5 分钟前 / 3 小时前 / 昨天 14:05 / 9月27日 */
-function when(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '';
-  const now = Date.now();
-  const s = Math.max(0, (now - t) / 1000);
-  if (s < 60) return '刚刚';
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
-  const d = new Date(t);
-  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  if (t >= today.getTime()) return s < 6 * 3600 ? `${Math.floor(s / 3600)} 小时前` : `今天 ${hm}`;
-  if (t >= today.getTime() - 86400e3) return `昨天 ${hm}`;
-  const y = d.getFullYear() === today.getFullYear() ? '' : `${d.getFullYear()}年`;
-  return `${y}${d.getMonth() + 1}月${d.getDate()}日`;
-}
-
-const worldName = (save: Pick<SaveFile, 'title' | 'seed'>) => save.title || `种子 ${save.seed}`;
-
-/** 名字输入框:回车 / 点别处确定,Esc 取消 */
-function TitleInput({ initial, onDone }: { initial: string; onDone: (v: string | null) => void }) {
-  const [text, setText] = useState(initial);
-  const done = useRef(false);
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
-  const finish = (v: string | null) => {
-    if (done.current) return;
-    done.current = true;
-    onDone(v);
-  };
-  return (
-    <input
-      ref={ref}
-      className="save-title-input"
-      value={text}
-      maxLength={TITLE_MAX}
-      placeholder="给这个世界起个名字,如「九州大陆」"
-      spellCheck={false}
-      onChange={(e) => setText(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') finish(text);
-        else if (e.key === 'Escape') {
-          e.stopPropagation();
-          finish(null);
-        }
-      }}
-      onBlur={() => finish(text)}
-    />
-  );
-}
-
 function Thumb({ src }: { src: string | null }) {
   return src ? <img className="save-thumb" src={src} alt="" draggable={false} /> : <div className="save-thumb empty" />;
 }
 
-function WorldRow({ w, isCurrent, onOpen }: { w: StoredWorld; isCurrent: boolean; onOpen: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [arm, setArm] = useState(false);
-  useEffect(() => {
-    if (!arm) return;
-    const t = setTimeout(() => setArm(false), 3000);
-    return () => clearTimeout(t);
-  }, [arm]);
-  const brief = paramsBrief(w.save.params);
-  return (
-    <div className={`save-row${isCurrent ? ' current' : ''}`} data-id={w.id}>
-      <button className="save-open" onClick={onOpen} disabled={isCurrent} title={isCurrent ? '正在看的就是这个世界' : '打开这个世界'}>
-        <Thumb src={w.thumb} />
-        <span className="save-info">
-          {editing ? null : (
-            <b>
-              {worldName(w.save)}
-              {isCurrent && <em className="save-badge">当前</em>}
-            </b>
-          )}
-          <span>
-            种子 {w.save.seed}
-            {brief && ` · ${brief}`}
-          </span>
-          <span>
-            {w.count ? `改了 ${w.count} 处` : '没有修改'}
-            {w.save.savedAt && ` · ${when(w.save.savedAt)}`}
-            {w.save.generator !== GENERATOR_VERSION && (
-              <em className="save-old" title="存的时候是另一个版本:打开后地形可能不同">
-                {w.save.generator < GENERATOR_VERSION ? ' · 旧版本' : ' · 新版本'}
-              </em>
-            )}
-          </span>
-        </span>
-      </button>
-      {editing && (
-        <div className="save-row-edit">
-          <TitleInput
-            initial={w.save.title ?? ''}
-            onDone={(v) => {
-              setEditing(false);
-              if (v !== null) renameWorld(w.id, v);
-            }}
-          />
-        </div>
-      )}
-      <div className="save-acts">
-        <button className="save-act" onClick={() => setEditing(true)} title="给这个存档改名">
-          ✎
-        </button>
-        <button
-          className={`save-act del${arm ? ' arm' : ''}`}
-          onClick={() => {
-            if (!arm) return setArm(true);
-            setArm(false);
-            deleteWorld(w.id);
-          }}
-          title={arm ? '再点一次就删掉' : '从"我的世界"里删掉'}
-        >
-          {arm ? '确定删除' : '删除'}
-        </button>
-      </div>
-    </div>
-  );
+/** 分享链接的网址部分:种子、参数、图层……照当前网址;去掉只在这个浏览器里有意义的世界编号 */
+function shareBase(): string {
+  const q = new URLSearchParams(location.search);
+  q.delete('w');
+  q.delete('new');
+  const s = q.toString();
+  return location.origin + location.pathname + (s ? `?${s}` : '');
 }
 
-export function SaveMenu({ ready, onOpenText, onOpenStored, icon }: SaveMenuProps) {
+export function SaveMenu({ ready, icon }: SaveMenuProps) {
   const [open, setOpen] = useState(false);
-  const [naming, setNaming] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const v = useSavesVersion();
   const edits = useEdits();
   const cur = ready ? currentWorld() : null;
-  const list = useMemo(() => (open ? listWorlds() : []), [open, v]);
   const curStored = useMemo(() => (open && cur ? loadWorld(cur.id) : null), [open, cur, v]);
   const count = editCount(edits);
   const keep = persistent();
@@ -290,9 +140,6 @@ export function SaveMenu({ ready, onOpenText, onOpenStored, icon }: SaveMenuProp
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
-  useEffect(() => {
-    if (!open) setNaming(false);
-  }, [open]);
 
   const saveFile = () => {
     setOpen(false);
@@ -305,7 +152,7 @@ export function SaveMenu({ ready, onOpenText, onOpenStored, icon }: SaveMenuProp
   const shareLink = async () => {
     const save = currentSave();
     if (!save) return;
-    const base = location.origin + location.pathname + location.search;
+    const base = shareBase();
     const withData = hasShareData(save);
     let url = base;
     if (withData) {
@@ -336,101 +183,65 @@ export function SaveMenu({ ready, onOpenText, onOpenStored, icon }: SaveMenuProp
   // 存储满了 / 浏览器不让存时,提示条上的"存成文件"
   useEffect(() => addFileSaver(saveCurrentFile), []);
 
-  const pickFile = () => fileRef.current?.click();
-  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = '';
-    if (!f) return;
-    setOpen(false);
-    try {
-      onOpenText(await f.text(), f.name);
-    } catch {
-      notify({ kind: 'error', text: `打不开 ${f.name}`, more: ['读不了这个文件'] });
-    }
-  };
-
   const title = cur?.title;
+  const nTerrain = edits.terrain.length;
+  // 存没存住:浏览器不让存 / 存不下 / 已经在"我的世界"里 / 打开的链接还没动过
+  const status = !keep
+    ? { cls: 'warn', text: '浏览器不让网页存数据，关掉前请存成文件' }
+    : full
+      ? { cls: 'warn', text: '浏览器存储已满，没能自动存' }
+      : curStored
+        ? { cls: 'ok', text: '已自动存在这个浏览器里' }
+        : { cls: '', text: '还没存进我的世界；改了名字或历史就会自动存' };
   return (
     <div className="save" ref={rootRef}>
-      <button className={`save-btn${open ? ' on' : ''}`} onClick={() => setOpen((o) => !o)} title="我的世界:自动存在浏览器里;也能存成文件、从文件打开">
+      <button className={`save-btn${open ? ' on' : ''}`} onClick={() => setOpen((o) => !o)} title="存成文件、复制分享链接">
         {icon}
         存档
       </button>
-      <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} data-testid="save-file-input" />
       {open && (
         <div className="save-menu" role="menu">
-          <div className="save-sec">当前世界</div>
           {cur ? (
             <div className="save-cur">
               <Thumb src={curStored?.thumb ?? null} />
               <div className="save-info">
-                {naming ? (
-                  <TitleInput
-                    initial={title ?? ''}
-                    onDone={(t) => {
-                      setNaming(false);
-                      if (t !== null) renameWorld(cur.id, t);
-                    }}
-                  />
-                ) : (
-                  <button className="save-name" onClick={() => setNaming(true)} title="给这个世界起个名字(起了名字的世界没有修改也会留在「我的世界」里)">
-                    {title || <span className="ph">起个名字…</span>}
-                    <span className="ins-pen" aria-hidden="true">
-                      ✎
-                    </span>
-                  </button>
-                )}
-                <span>
+                <b className="save-cur-name">{title || '未命名世界'}</b>
+                <small>
                   种子 {cur.params.seed}
-                  {paramsBrief(cur.params) && ` · ${paramsBrief(cur.params)}`}
-                </span>
-                <span className={full ? 'save-full' : undefined}>
-                  {count ? `改了 ${count} 处 · ` : ''}
-                  {full ? '浏览器存储已满,没能自动存' : curStored ? (keep ? '已自动存在这个浏览器里' : '只存在这个页面里') : count ? '' : '还没有修改'}
-                </span>
+                  {nTerrain ? `，地形改过 ${nTerrain} 处` : ''}
+                </small>
+                <small className={`save-status ${status.cls}`}>{status.text}</small>
               </div>
             </div>
           ) : (
-            <div className="save-empty">{ready ? '' : '正在生成世界'}</div>
+            <div className="save-empty">正在生成世界</div>
           )}
-          <div className="save-btns">
-            <button className="save-item" data-act="save-file" disabled={!cur} onClick={saveFile}>
-              <b>存成文件(.json)</b>
-              <span>换台电脑也能打开</span>
-            </button>
-            <button className="save-item" data-act="open-file" onClick={pickFile}>
-              <b>从文件打开…</b>
-              <span>也可以把 .json 拖进页面</span>
-            </button>
-            <button className="save-item wide" data-act="share-link" disabled={!cur} onClick={shareLink}>
+          <button className="save-it" data-act="save-file" disabled={!cur} onClick={saveFile}>
+            <Icon name="save" size={17} />
+            <span>
+              <b>存成文件（.json）</b>
+              <small>换台电脑、换个浏览器也能打开</small>
+            </span>
+          </button>
+          <button className="save-it" data-act="share-link" disabled={!cur} onClick={shareLink}>
+            <Icon name="link" size={17} />
+            <span>
               <b>复制分享链接</b>
-              <span>{count || title ? '对方打开看到同一个世界、同样的修改' : '还没有修改,只带种子和参数'}</span>
-            </button>
-          </div>
+              <small>{count || title ? '对方打开看到同一个世界、同样的修改' : '还没有修改，只带种子和参数'}</small>
+            </span>
+          </button>
           {manual !== null && <ManualCopy url={manual} />}
-          <div className="save-sec">
-            我的世界{list.length ? `(${list.length})` : ''}
-          </div>
-          <div className="save-list">
-            {list.length ? (
-              list.map((w) => (
-                <WorldRow
-                  key={w.id}
-                  w={w}
-                  isCurrent={w.id === cur?.id}
-                  onOpen={() => {
-                    setOpen(false);
-                    onOpenStored(w.id);
-                  }}
-                />
-              ))
-            ) : (
-              <div className="save-empty">还没有存过的世界。改过或起了名字的世界会出现在这里</div>
-            )}
-          </div>
-          <div className="save-foot">{keep ? '改过的世界自动存在这个浏览器里' : '浏览器不让网页存数据,关掉页面前请存成文件'}</div>
         </div>
       )}
     </div>
   );
+}
+
+/** 把一个存档存成文件(我的世界里卡片上的"存成文件") */
+export function downloadSave(save: SaveFile) {
+  const name = saveFileName(save);
+  const text = saveText(save);
+  download(text, name);
+  (window as unknown as { __wfSave?: SaveDebug }).__wfSave = { name, bytes: new Blob([text]).size, count: editCount(save.edits) };
+  notify({ kind: 'ok', text: '已存成文件', more: [name] });
 }

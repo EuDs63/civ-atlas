@@ -85,6 +85,42 @@ const PATHS = {
       <path d="M12 11v5M12 8h.01" />
     </>
   ),
+  down: <path d="M6 9l6 6 6-6" />,
+  back: <path d="M15 5l-7 7 7 7" />,
+  lock: (
+    <>
+      <rect x="5.5" y="10.5" width="13" height="9.5" rx="2" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+    </>
+  ),
+  grid: (
+    <>
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
+    </>
+  ),
+  dice: <path d="M4 8h3.5c2 0 3.2.8 4.3 2.6l.4.8c1.1 1.8 2.3 2.6 4.3 2.6H20M17 11l3 3-3 3M4 16h3.5c1.4 0 2.4-.4 3.2-1.2M13.3 9.2c.8-.8 1.8-1.2 3.2-1.2H20M17 5l3 3-3 3" />,
+  file: (
+    <>
+      <path d="M7 3.5h7l4 4V20H7z" />
+      <path d="M14 3.5V8h4M12.5 17v-6M10 13.5l2.5-2.5 2.5 2.5" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="8" y="8" width="11" height="12" rx="2" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h8" />
+    </>
+  ),
+  trash: <path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13" />,
+  link: (
+    <>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

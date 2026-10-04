@@ -1,28 +1,35 @@
 /**
- * 存档的浏览器存储(阶段 4):"我的世界"。
+ * 存档的浏览器存储:"我的世界"。
  *
- * - 自动存:App 生成完一个世界就 attachWorld(参数, 地形校验);之后修改(editsStore)一变,就把这个世界的
- *   存档(gen/savefile.ts 的 SaveFile,和"存成文件"同一个格式)写进 localStorage。下次打开同一个世界
- *   (同样的种子 + 参数)时 attachWorld 读回来,App 再 setEdits。换世界前 App 先 detachWorld,
- *   清空旧世界的修改就不会被当成"改回默认"存下去。
- * - 只存改过的(或起过名字的)世界:修改全改回默认、又没起名的,从列表里删掉。
- * - 改地形(阶段 4)以后世界按新地形重新生成,地形校验跟着变:App 生成完调 updateCheck 记下新的。
- * - 缩略图(256×128 JPEG dataURL)单独存一个键,第一次存这个世界时由 App 给的 thumbMaker 截一张。
+ * - 一个世界一个编号(newWorldId,网址里的 w=):同一个种子 + 参数可以存好几个,各走各的历史。
+ *   存档本身(gen/savefile.ts 的 SaveFile,和"存成文件"同一个格式)、缩略图、几项只在本地用的信息(还在新建、最近打开、现存几国)
+ *   各存一个键;以前按"种子 + 参数"当编号存的,第一次读的时候原地换成新编号(换不了就照旧用老编号,照样能打开);
+ *   改版前的网址(只带种子、参数)刷新还回到它(legacyWorld)。
+ * - 世界分三种(attachWorld 的 kind):
+ *     draft    新建世界这一步(种子、参数、地形还能改):作者动过(起名、调参数、改地形)才存,在"我的世界"里标"没建完"
+ *     created  建好的世界(种子、参数、地形锁住):一直存着,没有修改也在列表里
+ *     visit    打开别人的分享链接、带种子的网址:先不存;改了名字、历史(或起了名)才存进"我的世界",从此算建好的
+ * - 自动存:App 生成完一个世界就 attachWorld;之后修改(editsStore)一变就写一次。换世界前 App 先 detachWorld,
+ *   清空旧世界的修改就不会被当成这个世界的。
+ * - 缩略图(480×240 JPEG dataURL)单独存一个键,第一次存这个世界时由 App 给的 thumbMaker 截一张(截不到就过一会儿再试);
+ *   新建中的世界地形变了、刚创建完,App 调 refreshThumb 重截。
  * - 存储有上限:最多存 MAX_WORLDS 个世界;写不下(配额满了)就删最旧的再试 —— 删了别的世界就在顶部提示一句;
  *   删光了也写不下:提示"浏览器存储已满",带"存成文件"(同一次满只提示一回,之后写成功了再重新算)。
  * - 浏览器不让用 localStorage(隐私模式、禁用了存储)时退回"只在内存里":这次打开的页面里照样能用,
- *   刷新就没了;第一次存的时候顶部提示一句(带"存成文件",10 秒后自己收起),菜单里一直写着。所有读写都 try/catch,从不往外抛错。
+ *   刷新就没了;第一次存的时候顶部提示一句(带"存成文件",10 秒后自己收起),存档菜单里一直写着。所有读写都 try/catch,从不往外抛错。
  * - 投影和中央经线(ui/projection.ts、mapWrap.ts)跟着世界存:存档时按当时的设置写进 view;
- *   已经存着的世界换了投影 / 中心,App 调 viewChanged 重写一次(没存过的世界不为这个占列表,刷新靠网址里的 proj / lon)。
+ *   已经存着的世界换了投影 / 中心,App 调 viewChanged 重写一次。
+ * - 删掉一个世界,AI 给它写的东西(ai/library.ts,按世界编号存)一起删。
  */
 import { useSyncExternalStore } from 'react';
 import type { WorldParams } from '../gen/world';
-import { EMPTY_EDITS, type WorldEdits } from '../gen/edits';
+import type { WorldEdits } from '../gen/edits';
 import {
   CHECK_WARNING,
   NEWER_WARNING,
   SHARE_BROKEN,
   STALE_WARNING,
+  TITLE_MAX,
   cleanTitle,
   editCount,
   makeSave,
@@ -33,6 +40,7 @@ import {
   type SaveView,
 } from '../gen/savefile';
 import { getEdits, subscribeEdits } from './editsStore';
+import type { DraftBase } from './stageStore';
 import { getProjection } from './projection';
 import { getMapCenter } from './mapWrap';
 import { clearToast, showToast, type ToastAction } from './toastStore';
@@ -44,8 +52,16 @@ export function currentView(): SaveView {
 
 const PREFIX = 'wenming-ditu:world:';
 const THUMB = 'wenming-ditu:thumb:';
-/** 最多存多少个世界(每个几 KB + 缩略图十几 KB) */
+const META = 'wenming-ditu:meta:';
+/** AI 写的东西(ai/library.ts)按世界编号存的键 */
+const NOTES = 'civ-atlas:ai-notes:';
+/** 以前按"种子 + 参数"当编号存的世界换成了哪个新编号(旧网址只带种子、参数,刷新还回到它) */
+const LEGACY = 'wenming-ditu:legacy:';
+/** 最多存多少个世界(每个几 KB + 缩略图三十来 KB) */
 export const MAX_WORLDS = 60;
+/** 缩略图的大小("我的世界"里一张卡片宽 480) */
+export const THUMB_W = 480;
+export const THUMB_H = 240;
 
 // ---------------------------------------------------------------------------
 // 键值存储:localStorage,用不了就退回内存
@@ -85,58 +101,135 @@ function openLocal(): Storage | null {
 }
 
 let local: Storage | null | undefined;
+/** 以前按"种子 + 参数"当编号存的世界换过新编号了(每次打开页面查一次) */
+let migrated = false;
 /** 浏览器存储能不能用(第一次用到时探测) */
 function store(): KV {
   if (local === undefined) local = openLocal();
   const s = local;
-  if (!s) return memKV;
-  return {
-    get: (k) => {
-      try {
-        return s.getItem(k);
-      } catch {
-        return mem.get(k) ?? null;
-      }
-    },
-    set: (k, v) => {
-      try {
-        s.setItem(k, v);
-        return true;
-      } catch (e) {
-        if (isQuota(e)) return false;
-        // 别的错(存储突然不让用了):退回内存
-        local = null;
-        mem.set(k, v);
-        return true;
-      }
-    },
-    remove: (k) => {
-      try {
-        s.removeItem(k);
-      } catch {
-        /* 删不掉就算了 */
-      }
-      mem.delete(k);
-    },
-    keys: () => {
-      try {
-        const out: string[] = [];
-        for (let i = 0; i < s.length; i++) {
-          const k = s.key(i);
-          if (k !== null) out.push(k);
-        }
-        return out;
-      } catch {
-        return [...mem.keys()];
-      }
-    },
-  };
+  const kv: KV = !s
+    ? memKV
+    : {
+        get: (k) => {
+          try {
+            return s.getItem(k);
+          } catch {
+            return mem.get(k) ?? null;
+          }
+        },
+        set: (k, v) => {
+          try {
+            s.setItem(k, v);
+            return true;
+          } catch (e) {
+            if (isQuota(e)) return false;
+            // 别的错(存储突然不让用了):退回内存
+            local = null;
+            mem.set(k, v);
+            return true;
+          }
+        },
+        remove: (k) => {
+          try {
+            s.removeItem(k);
+          } catch {
+            /* 删不掉就算了 */
+          }
+          mem.delete(k);
+        },
+        keys: () => {
+          try {
+            const out: string[] = [];
+            for (let i = 0; i < s.length; i++) {
+              const k = s.key(i);
+              if (k !== null) out.push(k);
+            }
+            return out;
+          } catch {
+            return [...mem.keys()];
+          }
+        },
+      };
+  if (!migrated) {
+    migrated = true;
+    migrateLegacy(kv);
+  }
+  return kv;
 }
 
 /** 存档能不能留到下次打开(false = 只在这次打开的页面里) */
 export function persistent(): boolean {
   store();
   return !!local;
+}
+
+// ---------------------------------------------------------------------------
+// 世界编号
+
+const ID_RE = /^w[0-9a-z]{6,24}$/;
+
+/** 一个新的世界编号(w + 时间 + 随机几位,只有小写字母和数字,放进网址不用转义) */
+export function newWorldId(): string {
+  const kv = store();
+  for (;;) {
+    let r = '';
+    try {
+      const a = new Uint32Array(1);
+      crypto.getRandomValues(a);
+      r = a[0].toString(36);
+    } catch {
+      r = Math.floor(Math.random() * 2 ** 32).toString(36);
+    }
+    const id = `w${Date.now().toString(36)}${r.padStart(7, '0').slice(-5)}`;
+    if (kv.get(PREFIX + id) === null && kv.get(META + id) === null) return id;
+  }
+}
+
+/** 像不像一个世界编号(网址里的 w= 先过一遍;老编号是"种子 + 参数"那一串,也认) */
+export function isWorldId(s: unknown): s is string {
+  return typeof s === 'string' && s.length <= 400 && (ID_RE.test(s) || /^seed=/.test(s));
+}
+
+/** 以前按"种子 + 参数"当编号存的世界:换成新编号(连同缩略图、AI 写的东西);写不下就照旧用老编号 */
+function migrateLegacy(kv: KV) {
+  for (const k of kv.keys()) {
+    if (!k.startsWith(PREFIX)) continue;
+    const old = k.slice(PREFIX.length);
+    if (ID_RE.test(old)) continue;
+    const text = kv.get(k);
+    if (text === null) continue;
+    let id = '';
+    for (let i = 0; i < 4 && !id; i++) {
+      const c = `w${Date.now().toString(36)}${(Math.floor(Math.random() * 36 ** 5) + i).toString(36).padStart(5, '0').slice(-5)}`;
+      if (kv.get(PREFIX + c) === null) id = c;
+    }
+    if (!id || !kv.set(PREFIX + id, text)) continue;
+    const moved = [THUMB, NOTES].every((p) => {
+      const v = kv.get(p + old);
+      return v === null || kv.set(p + id, v);
+    });
+    if (!moved) {
+      for (const p of [PREFIX, THUMB, NOTES]) kv.remove(p + id);
+      continue;
+    }
+    for (const p of [PREFIX, THUMB, NOTES, META]) kv.remove(p + old);
+    kv.set(LEGACY + old, id);
+  }
+}
+
+/** 以前按"种子 + 参数"存的那个世界(改版前的网址只带种子、参数,刷新时找回它);没有 = null */
+export function legacyWorld(params: WorldParams): StoredWorld | null {
+  const kv = store();
+  const old = worldKey(params);
+  // 没换成新编号的(写不下)照旧用老编号
+  const direct = loadWorld(old);
+  if (direct) return direct;
+  const id = kv.get(LEGACY + old);
+  if (id === null) return null;
+  const w = ID_RE.test(id) ? loadWorld(id) : null;
+  if (w && worldKey(w.save.params) === old) return w;
+  kv.remove(LEGACY + old);
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +264,7 @@ export interface SaveNotice {
 
 let notice: SaveNotice | null = null;
 /**
- * 存档的提示(读档结果、自动恢复、复制了分享链接……):显示在顶部的提示条上(toastStore,来源 'save');
+ * 存档的提示(读档结果、复制了分享链接……):显示在顶部的提示条上(toastStore,来源 'save');
  * 成功的 7 秒后收起,有警告 / 出错的留着等用户关。null = 收起
  */
 export function notify(n: Omit<SaveNotice, 'stamp'> | null) {
@@ -267,12 +360,24 @@ function reportEvicted(why: 'quota' | 'count') {
 function reportMemoryOnly() {
   if (memoryWarned || local) return;
   memoryWarned = true;
-  // 停 10 秒自己收起(存档菜单里当前世界那一行、菜单底部一直写着)
+  // 停 10 秒自己收起(存档菜单里当前世界那一行一直写着)
   showToast({ id: 'storage', kind: 'warn', text: '浏览器不让网页存数据', more: ['修改只留在这个页面里,关掉前请存成文件'], action: saveFileAction(), ttl: 10_000 });
 }
 
 // ---------------------------------------------------------------------------
 // 存、读、列、删
+
+/** 只在本地用的几项(不进存档文件) */
+interface Meta {
+  /** 还在新建(没点"创建世界") */
+  draft?: boolean;
+  /** 最近一次打开(ISO 8601) */
+  opened?: string;
+  /** 结束那一年现存几国(没长出文明 = 0);还不知道 = 没有 */
+  alive?: number;
+  /** 新建中、以某个世界为底稿:原来那个世界 */
+  base?: DraftBase;
+}
 
 export interface StoredWorld {
   id: string;
@@ -280,6 +385,14 @@ export interface StoredWorld {
   /** 改了几处 */
   count: number;
   thumb: string | null;
+  /** 还在新建("没建完") */
+  draft: boolean;
+  /** 最近打开或修改的时间(ISO;列表按它排,最近的在前) */
+  at: string;
+  /** 结束那一年现存几国;还不知道 = undefined */
+  alive?: number;
+  /** 新建中、以某个世界为底稿:原来那个世界 */
+  base?: DraftBase;
 }
 
 function readSave(id: string): SaveFile | null {
@@ -289,14 +402,34 @@ function readSave(id: string): SaveFile | null {
   return r.ok ? r.save : null;
 }
 
+function readMeta(id: string): Meta {
+  const text = store().get(META + id);
+  if (!text) return {};
+  try {
+    const v = JSON.parse(text) as Record<string, unknown>;
+    const m: Meta = {};
+    if (v.draft === true) m.draft = true;
+    if (typeof v.opened === 'string' && !Number.isNaN(Date.parse(v.opened))) m.opened = v.opened;
+    if (typeof v.alive === 'number' && Number.isFinite(v.alive) && v.alive >= 0) m.alive = Math.floor(v.alive);
+    const b = v.base as Record<string, unknown> | undefined;
+    if (b && typeof b === 'object' && typeof b.id === 'string' && typeof b.title === 'string')
+      m.base = { id: b.id, title: cleanTitle(b.title) || '未命名世界', names: Math.max(0, Math.floor(Number(b.names) || 0)), interventions: Math.max(0, Math.floor(Number(b.interventions) || 0)) };
+    return m;
+  } catch {
+    return {};
+  }
+}
+
 /** 浏览器里存的一个世界;没有 = null */
 export function loadWorld(id: string): StoredWorld | null {
   const save = readSave(id);
   if (!save) return null;
-  return { id, save, count: editCount(save.edits), thumb: store().get(THUMB + id) };
+  const m = readMeta(id);
+  const at = m.opened && m.opened > save.savedAt ? m.opened : save.savedAt;
+  return { id, save, count: editCount(save.edits), thumb: store().get(THUMB + id), draft: !!m.draft, at, alive: m.alive, base: m.draft ? m.base : undefined };
 }
 
-/** 存过的世界,最近改的在前 */
+/** 存过的世界,最近打开或改过的在前 */
 export function listWorlds(): StoredWorld[] {
   const out: StoredWorld[] = [];
   for (const k of store().keys()) {
@@ -304,7 +437,12 @@ export function listWorlds(): StoredWorld[] {
     const w = loadWorld(k.slice(PREFIX.length));
     if (w) out.push(w);
   }
-  return out.sort((a, b) => (b.save.savedAt > a.save.savedAt ? 1 : b.save.savedAt < a.save.savedAt ? -1 : a.id < b.id ? -1 : 1));
+  return out.sort((a, b) => (b.at > a.at ? 1 : b.at < a.at ? -1 : a.id < b.id ? -1 : 1));
+}
+
+/** 这个编号在浏览器里存着 */
+export function isStored(id: string): boolean {
+  return store().get(PREFIX + id) !== null;
 }
 
 const nameOf = (id: string) => {
@@ -314,8 +452,7 @@ const nameOf = (id: string) => {
 
 function removeKeys(id: string) {
   const kv = store();
-  kv.remove(PREFIX + id);
-  kv.remove(THUMB + id);
+  for (const p of [PREFIX, THUMB, META, NOTES]) kv.remove(p + id);
 }
 
 /** 删掉最旧的一个世界(不删 keep;读不出来的坏条目、没有存档的缩略图最先删);没得删 = false */
@@ -323,14 +460,16 @@ function evictOldest(keep: string): boolean {
   const kv = store();
   const ids = new Set<string>();
   for (const k of kv.keys()) {
-    if (k.startsWith(PREFIX)) ids.add(k.slice(PREFIX.length));
-    else if (k.startsWith(THUMB)) ids.add(k.slice(THUMB.length));
+    for (const p of [PREFIX, THUMB, META]) if (k.startsWith(p)) ids.add(k.slice(p.length));
   }
   ids.delete(keep);
+  if (shield) ids.delete(shield);
   let oldest: string | null = null;
-  let at = '\uffff';
+  let at = '￿';
   for (const id of ids) {
-    const t = readSave(id)?.savedAt ?? '';
+    const s = readSave(id);
+    const m = s ? readMeta(id) : {};
+    const t = s ? (m.opened && m.opened > s.savedAt ? m.opened : s.savedAt) : '';
     if (t < at || (t === at && oldest !== null && id < oldest)) {
       oldest = id;
       at = t;
@@ -343,6 +482,9 @@ function evictOldest(keep: string): boolean {
   return true;
 }
 
+/** 存不下要删旧世界时,除了正在写的那个,这一个也不删(复制时的原件) */
+let shield: string | null = null;
+
 /** 写一个键;写不下就删最旧的世界再试 */
 function put(key: string, value: string, keep: string): boolean {
   const kv = store();
@@ -353,19 +495,49 @@ function put(key: string, value: string, keep: string): boolean {
   return false;
 }
 
-function writeSave(save: SaveFile): boolean {
-  const id = worldKey(save.params);
-  const fresh = store().get(PREFIX + id) === null;
+function writeMeta(id: string, m: Meta): boolean {
+  const v: Meta = {};
+  if (m.draft) v.draft = true;
+  if (m.opened) v.opened = m.opened;
+  if (m.alive !== undefined) v.alive = m.alive;
+  if (m.draft && m.base) v.base = m.base;
+  return put(META + id, JSON.stringify(v), id);
+}
+
+/** 只写本地信息(最近打开、现存几国):存不下删了旧世界的,也提示一句 */
+function touchMeta(id: string, m: Meta): boolean {
   evicted = [];
-  const ok = put(PREFIX + id, JSON.stringify(save), id);
+  const ok = writeMeta(id, m);
+  reportEvicted('quota');
+  return ok;
+}
+
+/**
+ * 写一个世界的存档(和本地信息);新存一个超过上限就删最旧的。
+ * 本地信息没写进去也算没存成:没有"还在新建"那一条,没建完的世界下次打开会被当成建好的、锁住。
+ * 新存的就把存档也拿掉;原来就有的留着原来那份本地信息
+ */
+function writeSave(id: string, save: SaveFile, meta?: Meta): boolean {
+  const kv = store();
+  const fresh = kv.get(PREFIX + id) === null;
+  evicted = [];
+  let ok = put(PREFIX + id, JSON.stringify(save), id);
+  if (ok && meta && !writeMeta(id, meta)) {
+    if (fresh) kv.remove(PREFIX + id);
+    ok = false;
+  }
   reportEvicted('quota');
   // 新存一个世界:超过上限就删最旧的
   if (ok && fresh) {
-    for (const w of listWorlds().slice(MAX_WORLDS))
-      if (w.id !== id) {
-        evicted.push(w.save.title || `种子 ${w.save.seed}`);
-        removeKeys(w.id);
-      }
+    const list = listWorlds();
+    let extra = list.length - MAX_WORLDS;
+    for (let i = list.length - 1; i >= 0 && extra > 0; i--) {
+      const w = list[i];
+      if (w.id === id || w.id === shield) continue;
+      evicted.push(w.save.title || `种子 ${w.save.seed}`);
+      removeKeys(w.id);
+      extra--;
+    }
     reportEvicted('count');
   }
   if (ok) {
@@ -378,38 +550,116 @@ function writeSave(save: SaveFile): boolean {
   return ok;
 }
 
-/** 删掉一个存档(当前世界的也可以删:修改还在页面上,下次再改会重新存) */
+/** 删掉一个存档(连同缩略图、AI 写的东西)。删的是正在看的世界:不再自动存它 */
 export function deleteWorld(id: string) {
   removeKeys(id);
-  if (current?.id === id) current.title = undefined;
+  if (current?.id === id) {
+    current = null;
+    stopThumb();
+  }
   changed();
 }
 
-/** 给存档起名(改名);当前世界还没存过的,顺手存下来(起了名字的世界没有修改也留在列表里) */
+/** 给存档起名(改名);当前世界还没存过的(打开的链接),顺手存下来 */
 export function renameWorld(id: string, title: string) {
   const t = cleanTitle(title);
   if (current?.id === id) {
     current.title = t || undefined;
     saveCurrent(true);
+    changed();
     return;
   }
   const w = readSave(id);
   if (!w) return;
-  const next: SaveFile = { ...w, savedAt: w.savedAt };
+  // 改名也算改了它:最后修改时间跟着变(我的世界里排到前面)
+  const next: SaveFile = { ...w, savedAt: new Date().toISOString() };
   if (t) next.title = t;
   else delete next.title;
-  writeSave(next);
+  writeSave(id, next);
   changed();
+}
+
+const CN = ['二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/** 另一个世界的名字:"苍澜界" → "苍澜界(二)";已经有了就(三)、(四)……(和存着的世界、当前世界都不重名) */
+export function nextTitle(base: string): string {
+  const root = cleanTitle(base).replace(/（[二三四五六七八九十\d]+）$/, '') || '未命名世界';
+  const taken = new Set(listWorlds().map((w) => w.save.title ?? ''));
+  if (current?.title) taken.add(current.title);
+  for (let i = 0; i < 99; i++) {
+    const n = i < CN.length ? CN[i] : String(i + 2);
+    const suffix = `（${n}）`;
+    const head = [...root].slice(0, TITLE_MAX - suffix.length).join('');
+    const t = head + suffix;
+    if (!taken.has(t)) return t;
+  }
+  return root;
+}
+
+/** "我的世界"里复制一份(名字加"(二)",缩略图一起;AI 写的东西由 ai/library 的 copyNotes 复制);返回新编号,复制不了 = null */
+export function duplicateWorld(id: string): string | null {
+  const w = loadWorld(id);
+  if (!w) return null;
+  const nid = newWorldId();
+  const save: SaveFile = { ...w.save, title: nextTitle(w.save.title || '未命名世界'), savedAt: new Date().toISOString() };
+  // 存不下要删旧的:原件不删(它可能正好是最旧的)
+  shield = id;
+  try {
+    if (!writeSave(nid, save, { draft: w.draft, alive: w.alive })) return null;
+    // 缩略图写不下(删了旧的也不行)就先不要,打开它时再截一张;删了旧的照样提示
+    if (w.thumb) {
+      evicted = [];
+      put(THUMB + nid, w.thumb, nid);
+      reportEvicted('quota');
+    }
+  } finally {
+    shield = null;
+  }
+  changed();
+  return nid;
+}
+
+/**
+ * 从文件打开:存进"我的世界"(算建好的),返回它的编号。
+ * 已经有一个一模一样的(参数、修改、名字都相同,比如同一个文件打开了两次)就用那一个,不重复存
+ */
+export function importSave(save: SaveFile): string | null {
+  const same = (s: SaveFile) => worldKey(s.params) === worldKey(save.params) && (s.title ?? '') === (save.title ?? '') && JSON.stringify(s.edits) === JSON.stringify(save.edits);
+  for (const w of listWorlds()) {
+    if (w.draft || !same(w.save)) continue;
+    // 只差投影 / 中央经线:用文件里的(下次打开还是文件里的样子)
+    if (!sameView(w.save.view, save.view)) {
+      const next: SaveFile = { ...w.save, savedAt: new Date().toISOString() };
+      if (save.view) next.view = save.view;
+      else delete next.view;
+      writeSave(w.id, next);
+      changed();
+    }
+    return w.id;
+  }
+  const id = newWorldId();
+  const copy: SaveFile = { ...save, savedAt: new Date().toISOString() };
+  if (!writeSave(id, copy, { opened: copy.savedAt })) return null;
+  changed();
+  return id;
 }
 
 // ---------------------------------------------------------------------------
 // 当前世界 + 自动存
+
+export type WorldKind = 'draft' | 'created' | 'visit';
 
 interface Current {
   id: string;
   params: WorldParams;
   check: string;
   title?: string;
+  kind: WorldKind;
+  /** 新建中、作者还没动过(没起名、没调参数、没改地形):不存 */
+  pristine: boolean;
+  /** 结束那一年现存几国(存进本地信息,"我的世界"的卡片上写) */
+  alive?: number;
+  /** 新建中、以某个世界为底稿:原来那个世界 */
+  base?: DraftBase;
   /** 最近一次存下的修改(同一个对象不重复存) */
   saved: WorldEdits | null;
   /** 最近一次存下的投影设置 */
@@ -420,13 +670,24 @@ let current: Current | null = null;
 /** 截缩略图(App 给):画布还没画好这个世界 = null */
 let thumbMaker: ((id: string) => string | null) | null = null;
 let thumbTimer: ReturnType<typeof setTimeout> | undefined;
+/** 等着的那一张是要重截的(已经有了也截):这个世界的编号 */
+let thumbForce: string | null = null;
+
+/** 不截了(换世界、删掉) */
+function stopThumb() {
+  if (thumbTimer !== undefined) clearTimeout(thumbTimer);
+  thumbTimer = undefined;
+  thumbForce = null;
+}
 
 export function setThumbMaker(f: ((id: string) => string | null) | null) {
   thumbMaker = f;
 }
 
+export type CurrentWorld = Readonly<Omit<Current, 'saved' | 'savedView'>>;
+
 /** 当前世界(自动存的对象);换世界途中 = null */
-export function currentWorld(): Readonly<Omit<Current, 'saved'>> | null {
+export function currentWorld(): CurrentWorld | null {
   return current;
 }
 
@@ -436,20 +697,24 @@ export function currentSave(): SaveFile | null {
   return makeSave(current.params, getEdits(), current.check, current.title, undefined, currentView());
 }
 
-/** 过一会儿截一张缩略图(画布这时可能还没画好这个世界,截不到就再等等,最多等十来次);已有的不重截 */
-function scheduleThumb(id: string, tries = 0) {
-  if (tries > 12) return;
-  if (thumbTimer !== undefined) clearTimeout(thumbTimer);
+/** 过一会儿截一张缩略图(画布这时可能还没画好这个世界,截不到就再等等);force = 已经有了也重截 */
+function scheduleThumb(id: string, force = false, tries = 0) {
+  // 等着重截的不被随后一次普通的盖掉
+  if (thumbForce === id) force = true;
+  stopThumb();
+  if (tries > 40) return;
+  if (force) thumbForce = id;
   thumbTimer = setTimeout(() => {
     thumbTimer = undefined;
-    if (current?.id !== id || !store().get(PREFIX + id) || store().get(THUMB + id)) return;
+    thumbForce = null;
+    if (current?.id !== id || !store().get(PREFIX + id) || (!force && store().get(THUMB + id))) return;
     let url: string | null = null;
     try {
       url = thumbMaker?.(id) ?? null;
     } catch {
       url = null;
     }
-    if (!url) return scheduleThumb(id, tries + 1);
+    if (!url) return scheduleThumb(id, force, tries + 1);
     evicted = [];
     const ok = put(THUMB + id, url, id);
     reportEvicted('quota');
@@ -457,23 +722,47 @@ function scheduleThumb(id: string, tries = 0) {
   }, 700);
 }
 
-/** 把当前世界存下来(修改没变就不存;force = 起名、删了又存) */
-function saveCurrent(force = false) {
+/** 当前世界的样子变了(新建中改了地形、刚创建完):缩略图重截 */
+export function refreshThumb() {
+  if (current && store().get(PREFIX + current.id) !== null) scheduleThumb(current.id, true);
+}
+
+function metaOf(c: Current, opened?: string): Meta {
+  const m = readMeta(c.id);
+  return { draft: c.kind === 'draft', opened: opened ?? m.opened, alive: c.alive ?? m.alive, base: c.kind === 'draft' ? c.base : undefined };
+}
+
+/** 把当前世界存下来(修改没变就不存;force = 起名、换了投影、刚创建……) */
+/** 存当前世界;返回写进去没有(没有当前世界、没改过不用存 = false) */
+function saveCurrent(force = false): boolean {
   const c = current;
-  if (!c) return;
+  if (!c) return false;
   const edits = getEdits();
-  if (!force && edits === c.saved) return;
+  if (!force && edits === c.saved) return false;
+  // 干预变了:历史要重推,缩略图上结束那一年的国家跟着变,重截(App 等重推完才给图)
+  const was = c.saved?.interventions;
+  const redraw = !!was && edits.interventions !== was && JSON.stringify(edits.interventions) !== JSON.stringify(was);
   c.saved = edits;
-  if (!editCount(edits) && !c.title) {
-    // 全改回默认、又没起名:不占列表
-    removeKeys(c.id);
-    changed();
-    return;
-  }
+  // 新建中:走到这里就是作者动了(改了地形、起了名、调了参数);只换投影的走不到这里(没存过的不为它存)
+  if (c.kind === 'draft') c.pristine = false;
+  // 打开的链接改过了:存进"我的世界",从此算建好的
+  if (c.kind === 'visit') c.kind = 'created';
   const view = currentView();
   c.savedView = view;
-  if (writeSave(makeSave(c.params, edits, c.check, c.title, undefined, view))) scheduleThumb(c.id);
+  const ok = writeSave(c.id, makeSave(c.params, edits, c.check, c.title, undefined, view), metaOf(c));
+  if (ok) scheduleThumb(c.id, redraw);
   changed();
+  return ok;
+}
+
+/**
+ * 这个世界里存了 AI 写的东西(史书、名字由来):只是看看的世界从此存进"我的世界"(那些东西按世界编号存,
+ * 不存这个世界的话刷新以后就找不回来了)。新建中的、已经存着的不用管
+ */
+export function keepWorld(id: string) {
+  const c = current;
+  if (!c || c.id !== id || c.kind !== 'visit') return;
+  saveCurrent(true);
 }
 
 /**
@@ -487,41 +776,111 @@ export function viewChanged() {
   saveCurrent(true);
 }
 
-/**
- * 生成完一个世界:以后它的修改自动存。
- * file = 读档(文件)带来的存档:用它的修改和名字(覆盖浏览器里这个世界原来存的);
- * 不给 = 浏览器里存过这个世界就读回来。返回要套上的存档(App 拿去 setEdits、核对地形);没有 = null
- */
-export function attachWorld(params: WorldParams, check: string, file?: SaveFile): SaveFile | null {
-  const id = worldKey(params);
-  const prev = readSave(id);
-  // 没有修改、也没起名的存档(只记了种子 + 参数)= 只是打开这个世界:浏览器里存过的修改照样读回来
-  const incoming = file && (editCount(file.edits) > 0 || file.title) ? file : undefined;
-  const stored = incoming ? null : prev;
-  const from = incoming ?? stored;
-  // 读回浏览器里存的:App 会 setEdits(stored.edits) —— 就是存着的那份,记成"已存",不重写(最后修改时间不变);
-  // 读档(文件)带来的:App setEdits 之后自动存写下去(覆盖这个世界原来存的)
-  // 文件里没起名、浏览器里给这个世界起过名的,名字留着
-  const title = incoming?.title ?? prev?.title;
-  current = { id, params: { ...params }, check, title, saved: stored ? stored.edits : null, savedView: from?.view };
-  if (incoming && !editCount(incoming.edits) && title) saveCurrent(true);
-  changed();
-  return from;
+export interface AttachSpec {
+  id: string;
+  params: WorldParams;
+  /** 地形的短哈希(worldCheck) */
+  check: string;
+  kind: WorldKind;
+  title?: string;
+  /**
+   * 已经存下的(或者打开时就带着的)修改:App 套上的修改和它是同一个对象就不重写;
+   * 不一样(比如旧格式的键换成了新的)就写一次
+   */
+  saved: WorldEdits;
+  /** 存档里的投影设置(打开存着的世界时) */
+  view?: SaveView;
+  /** 新建中、作者还没动过:不存 */
+  pristine?: boolean;
+  /** 新建中、以某个世界为底稿:原来那个世界 */
+  base?: DraftBase | null;
 }
 
-/** 当前世界按新的地形修改重新生成完(阶段 4 改地形):记下新的地形校验,已经存着的存档跟着改 */
+/**
+ * 生成完一个世界、App 套上修改(setEdits)之后调:以后它的修改自动存。
+ * 建好的世界、动过的新建世界:浏览器里没存过、或者存的和现在的对不上(参数、地形、名字、修改),就写一次;
+ * 存着的世界原样打开:只记一下"最近打开"
+ */
+export function attachWorld(spec: AttachSpec) {
+  const prev = readSave(spec.id);
+  const title = cleanTitle(spec.title) || undefined;
+  current = {
+    id: spec.id,
+    params: { ...spec.params },
+    check: spec.check,
+    title,
+    kind: spec.kind,
+    pristine: spec.kind === 'draft' && !!spec.pristine,
+    base: spec.kind === 'draft' ? (spec.base ?? undefined) : undefined,
+    saved: spec.saved,
+    savedView: spec.view ?? prev?.view,
+  };
+  const keep = spec.kind === 'created' || (spec.kind === 'draft' && !spec.pristine);
+  const same =
+    !!prev &&
+    worldKey(prev.params) === worldKey(spec.params) &&
+    prev.check === spec.check &&
+    (prev.title ?? '') === (title ?? '') &&
+    getEdits() === spec.saved &&
+    !!readMeta(spec.id).draft === (spec.kind === 'draft');
+  if (keep && !same) {
+    saveCurrent(true);
+    // 新建中换了参数、地形:换了一颗星球,缩略图重截
+    if (prev && (worldKey(prev.params) !== worldKey(spec.params) || prev.check !== spec.check)) scheduleThumb(spec.id, true);
+  } else if (prev && spec.kind === 'draft' && spec.pristine) {
+    // 新建中又变回没动过(换了一颗星球,改过的地形作废):原来存的那份拿掉
+    removeKeys(spec.id);
+  } else if (prev) {
+    touchMeta(spec.id, metaOf(current, new Date().toISOString()));
+    // 刚从文件打开的(先存了、再生成):还没有缩略图,截一张
+    if (store().get(THUMB + spec.id) === null) scheduleThumb(spec.id);
+  }
+  changed();
+}
+
+/** 回到我的世界、又点开下面一直开着的这个世界(不用重新打开):记一下"最近打开" */
+export function markOpened(id: string) {
+  const c = current;
+  if (!c || c.id !== id || store().get(PREFIX + id) === null) return;
+  touchMeta(id, metaOf(c, new Date().toISOString()));
+  changed();
+}
+
+/** 新建世界点了"创建世界":从此算建好的(种子、参数、地形锁住),一直存着 */
+export function markCreated(): boolean {
+  const c = current;
+  if (!c || c.kind !== 'draft') return false;
+  c.kind = 'created';
+  c.pristine = false;
+  c.base = undefined;
+  return saveCurrent(true);
+}
+
+/** 结束那一年现存几国(App 推演完告诉这里;"我的世界"的卡片上写) */
+export function setWorldStats(alive: number) {
+  const c = current;
+  if (!c || c.alive === alive) return;
+  c.alive = alive;
+  if (store().get(PREFIX + c.id) !== null) {
+    touchMeta(c.id, metaOf(c));
+    changed();
+  }
+}
+
+/** 当前世界按新的地形修改重新生成完(新建中改地形):记下新的地形校验,已经存着的存档跟着改、缩略图重截 */
 export function updateCheck(check: string) {
   const c = current;
   if (!c || c.check === check) return;
   c.check = check;
-  if (store().get(PREFIX + c.id) !== null) saveCurrent(true);
+  if (store().get(PREFIX + c.id) === null) return;
+  saveCurrent(true);
+  scheduleThumb(c.id, true);
 }
 
 /** 换世界(或读档)之前:之后的修改(clearEdits)不再算这个世界的 */
 export function detachWorld() {
   current = null;
-  if (thumbTimer !== undefined) clearTimeout(thumbTimer);
-  thumbTimer = undefined;
+  stopThumb();
   changed();
 }
 
@@ -535,10 +894,10 @@ export function _resetForTest() {
   current = null;
   notice = null;
   local = undefined;
+  migrated = false;
   storageFull = false;
   memoryWarned = false;
   evicted = [];
   mem.clear();
-  if (thumbTimer !== undefined) clearTimeout(thumbTimer);
-  thumbTimer = undefined;
+  stopThumb();
 }

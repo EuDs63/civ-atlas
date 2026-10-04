@@ -1,0 +1,813 @@
+/*
+ * 我的世界(MyWorlds.tsx)、新建世界的卡片(NewWorld.tsx)、卡片里的改地形(TerrainTools.tsx 的 TerrainPanel)。
+ *
+ *   我的世界   盖住整个页面的一页:浅灰底,右上新建世界 / 打开存档文件,下面缩略图网格(宽屏三列,手机两列),名字和时间在图下面
+ *   新建世界   宽屏:和侧栏同一张卡片(位置、宽度见 desktop.css),底部一条白底放「创建世界」;
+ *             手机:底部卡片(比世界卡片高,收起时只露标题那一行;改地形时只放改地形那一组)
+ * 行、分组、小标题照侧栏的零件(sidebar.css 的 .sb-*);这里只写新加的。
+ */
+
+/* ==== 我的世界 ==== */
+.mw {
+  position: fixed;
+  inset: 0;
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  padding: 40px 56px 22px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--panel-solid);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  cursor: default;
+}
+.mw button {
+  font: inherit;
+  color: inherit;
+}
+.mw-top {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+}
+.mw-heading h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.3;
+}
+.mw-heading p {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.mw-acts {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+.mw .mw-btn {
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--btn);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.mw .mw-btn:hover {
+  background: var(--hover-bg);
+  filter: brightness(0.94);
+}
+.mw .mw-btn.blue {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.mw .mw-btn.blue:hover {
+  background: var(--accent-hover);
+  filter: none;
+}
+.mw-grid {
+  flex: none;
+  margin-top: 38px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 30px 32px;
+}
+@media (min-width: 1900px) {
+  .mw-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1100px) {
+  .mw-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.mw-card {
+  position: relative;
+  container-type: inline-size;
+}
+.mw-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.mw-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--btn) center / cover no-repeat;
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.14),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.mw-open:hover .mw-thumb {
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.18),
+    0 4px 14px rgba(0, 0, 0, 0.14);
+}
+.mw-open:focus-visible {
+  outline: 0;
+}
+.mw-open:focus-visible .mw-thumb {
+  box-shadow: 0 0 0 3px var(--accent);
+}
+.mw-tag {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1);
+  color: #1d1d1f;
+  font-size: 12px;
+  font-weight: 600;
+}
+.mw-meta {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+.mw-row1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+}
+.mw-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mw-time {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.mw-line {
+  margin-top: 1px;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 改名:输入框盖在名字那一行(缩略图下面) */
+.mw-rename {
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  top: calc(50cqw + 6px);
+}
+.mw-title-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 0 0 3px var(--accent-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+.mw-title-input:focus {
+  outline: 0;
+}
+/* 右上"···":鼠标停在卡片上才出现(菜单开着时一直在) */
+.mw .mw-dots {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.12),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  color: #1d1d1f;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.mw-card:hover .mw-dots,
+.mw-dots:focus-visible,
+.mw-dots.on {
+  opacity: 1;
+}
+.mw-menu.pm-menu {
+  top: 42px;
+  right: 8px;
+  left: auto;
+  min-width: 190px;
+}
+.mw-menu .pm-item.red,
+.mw-menu .pm-item.red .icon {
+  color: var(--err);
+}
+.mw-menu .pm-item.red:hover:not(:disabled) {
+  background: var(--err);
+  color: #fff;
+}
+.mw-menu .pm-item.red:hover:not(:disabled) .icon {
+  color: #fff;
+}
+.mw-menu .pm-item.red.arm {
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+.mw-foot {
+  flex: none;
+  margin-top: auto;
+  padding-top: 30px;
+  display: flex;
+  gap: 18px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.mw-foot a {
+  color: inherit;
+  text-decoration: none;
+}
+.mw-foot a:hover {
+  color: var(--ink-2);
+  text-decoration: underline;
+}
+.mw-ver {
+  margin-left: auto;
+}
+
+/* ---- 手机:两列,新建世界在右上(圆角药丸),打开存档文件在列表下面 ---- */
+.mw.mw-phone {
+  padding: calc(14px + var(--safe-t, 0px)) calc(16px + var(--safe-r, 0px)) calc(24px + var(--safe-b, 0px)) calc(16px + var(--safe-l, 0px));
+}
+.mw-phone .mw-top {
+  display: block;
+}
+.mw-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mw .mw-btn.round {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 17px;
+}
+.mw-phone .mw-heading h1 {
+  margin-top: 4px;
+  font-size: 30px;
+  letter-spacing: 0;
+}
+.mw-phone .mw-heading p {
+  margin-top: 5px;
+  font-size: 13px;
+}
+.mw-phone .mw-grid {
+  margin-top: 17px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 12px;
+}
+.mw-phone .mw-thumb {
+  border-radius: 8px;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
+}
+.mw-phone .mw-tag {
+  left: 6px;
+  top: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+.mw-phone .mw-meta {
+  margin-top: 7px;
+}
+.mw-phone .mw-name {
+  font-size: 14.5px;
+  line-height: 19px;
+}
+.mw-phone .mw-line {
+  margin-top: 0;
+  font-size: 12px;
+  line-height: 17px;
+}
+.mw-phone .mw-time {
+  font-size: 11.5px;
+  line-height: 15px;
+}
+.mw-phone .mw-rename {
+  top: calc(50cqw + 3px);
+}
+.mw-phone .mw-menu.pm-menu {
+  top: 8px;
+  right: 6px;
+}
+.mw .mw-open-file {
+  flex: none;
+  margin-top: 38px;
+  background: var(--surface);
+}
+.mw-open-file .sb-row {
+  width: 100%;
+  min-height: 46px;
+  font-size: 15px;
+  color: var(--ink);
+}
+.mw-open-file .sb-row-main b {
+  font-weight: 500;
+}
+
+/* 我的世界开着时:提示条在整页居中(宽屏不再偏到地图那一块;手机放到底下,不压右上的新建) */
+.app.has-side.home .toast {
+  left: 50%;
+}
+.app.phone.home .toast {
+  top: auto;
+  right: calc(12px + var(--safe-r));
+  bottom: calc(12px + var(--safe-b));
+}
+
+/* ==== 新建世界:宽屏左边的卡片 ==== */
+.sidebar .nw-head {
+  gap: 10px;
+}
+/* 左上返回(新建世界、世界卡片共用) */
+.sidebar .nw-back,
+.psheet .nw-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin: -2px 0 -6px -5px;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.sidebar .nw-back:hover,
+.psheet .nw-back:hover {
+  text-decoration: underline;
+}
+.nw-title-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+/* 「···」比标题高一点:不撑高这一行(和世界卡片顶上的间距一样) */
+.nw-title-row .sb-more {
+  margin: -2px 0;
+}
+.nw-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nw-more-wrap {
+  display: contents;
+}
+.nw-intro {
+  margin-top: -4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.nw-body {
+  padding: 14px 14px 8px;
+  gap: 18px;
+}
+.sb-body.nw-body > .sb-sec {
+  padding: 0;
+  gap: 6px;
+}
+/* 内容比卡片高时整块滚动(分组不压扁) */
+.nw-body > *,
+.nw-body .sb-sec > *,
+.nw-in > * {
+  flex-shrink: 0;
+}
+.app.has-side .nw-card .sb-body {
+  border-radius: 0;
+}
+.sb-sec-head small {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.sb-row.static {
+  cursor: default;
+}
+.sb-row.static:hover {
+  background: transparent;
+}
+/* 种子:输入框 +「换一颗」;以别的世界为底稿时锁住 */
+.nw-seed-ctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nw-field {
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 0.5px var(--line-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14.5px;
+}
+.nw-field::placeholder {
+  color: var(--ink-3);
+}
+.nw-field:focus {
+  outline: 0;
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 0 0 3px var(--accent-soft);
+}
+.nw-seed-input {
+  width: 118px;
+  font-variant-numeric: tabular-nums;
+}
+.nw-seed-ctl .nw-btn {
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--btn);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.nw-seed-ctl .nw-btn.tint {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.nw-seed-ctl .nw-btn.tint:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+.nw-seed-ctl .nw-btn:disabled {
+  opacity: 0.45;
+}
+.nw-seed.locked .sb-row-side {
+  color: var(--ink-2);
+}
+.nw-lock {
+  flex: none;
+  color: var(--ink-3);
+}
+/* 世界参数:点开在这一组里展开六个滑条 */
+.nw-params.open:hover:not(:disabled) {
+  background: transparent;
+}
+.nw-sliders {
+  border-bottom: 0.5px solid var(--line);
+}
+.param-slider {
+  display: block;
+  padding: 7px 12px 10px;
+  border-bottom: 0.5px solid var(--line);
+  font-size: 14px;
+}
+.param-slider:last-child {
+  border-bottom: 0;
+}
+.param-slider-row {
+  display: flex;
+  justify-content: space-between;
+}
+.param-slider-row b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.param-slider input {
+  --fill: 50%;
+  display: block;
+  width: calc(100% + 14px);
+  height: 22px;
+  margin: 1px -7px -9px;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+.param-slider input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.param-slider input::-webkit-slider-runnable-track {
+  height: 4px;
+  margin: 0 7px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--line) var(--fill));
+}
+.param-slider input::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.param-slider input::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.param-slider input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0.5px 2px rgba(0, 0, 0, 0.35),
+    0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+.param-slider input::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0.5px 2px rgba(0, 0, 0, 0.35),
+    0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+.param-slider input:focus-visible {
+  outline: 0;
+}
+.param-slider input:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    0 0.5px 2px rgba(0, 0, 0, 0.35);
+}
+/* 长不出文明 */
+.nw-note {
+  padding: 2px 4px 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.nw-note.warn {
+  color: var(--warn);
+}
+/* 以别的世界为底稿:跟过去的修改下面一段说明(在分组里) */
+.nw-group-hint {
+  padding: 7px 12px 9px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.nw-name {
+  width: 100%;
+}
+.nw-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 0.5px solid var(--line);
+  border-radius: 0 0 14px 14px;
+  background: var(--surface);
+}
+.nw-foot .nw-create,
+.nw-bottom .nw-create {
+  height: 44px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+.nw-foot .nw-create:hover:not(:disabled),
+.nw-bottom .nw-create:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.nw-foot .nw-create:disabled,
+.nw-bottom .nw-create:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- 改地形(卡片里的一组):工具、大小、说明、改了几处 / 撤销 / 全部清除;标题右边"完成" ---- */
+.tp .tp-done {
+  font-size: 13.5px;
+}
+.tp-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 4px;
+}
+.tp-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--field);
+}
+.tp .tp-seg button {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.tp .tp-seg button.on {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  font-weight: 600;
+}
+[data-theme='dark'] .tp .tp-seg button.on {
+  background: rgba(255, 255, 255, 0.18);
+}
+.tp-size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.tp-size > span {
+  flex: none;
+}
+.tp-size .tp-seg {
+  flex: 1;
+  color: var(--ink);
+}
+.tp-hint {
+  padding: 4px 12px 10px;
+  border-bottom: 0.5px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.tp-count {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+.tp-n {
+  flex: 1;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.tp-count .sb-link {
+  font-size: 13.5px;
+}
+.tp-count .sb-link:disabled {
+  opacity: 0.4;
+  text-decoration: none;
+  cursor: default;
+}
+.tp-count .sb-link.danger {
+  color: var(--err) !important;
+}
+
+/* 新建时地图底部的一句提示(宽屏,地图那一块居中) */
+.draft-tip {
+  position: absolute;
+  left: var(--map-mid, 50%);
+  bottom: 26px;
+  z-index: 6;
+  transform: translateX(-50%);
+  padding: 9px 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-toast);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: toast-in 0.18s ease-out;
+}
+
+/* ==== 新建世界:手机底部的卡片 ==== */
+.psheet.nw-sheet {
+  top: max(calc(var(--top-room) + 120px), calc(100% - 492px));
+}
+/* 收起(点拖动条;回放这颗星球的形成时)/ 改地形:卡片只有内容那么高 */
+.psheet.nw-sheet.down,
+.psheet.nw-sheet.tools {
+  top: auto;
+}
+.nw-in {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 2px 16px calc(16px + var(--safe-b));
+}
+.nw-sheet.down .nw-in {
+  padding-bottom: calc(14px + var(--safe-b));
+}
+.psheet.nw-sheet .nw-back {
+  margin: 0 0 -10px -5px;
+  font-size: 15px;
+}
+.nw-sheet .nw-title {
+  font-size: 22px;
+}
+.nw-sheet .nw-seed-input {
+  width: 92px;
+}
+.nw-sheet .nw-seed-ctl .nw-btn {
+  height: 34px;
+}
+.nw-sheet .sb-row {
+  min-height: 46px;
+  font-size: 15px;
+}
+.nw-sheet .sb-row-side {
+  font-size: 13.5px;
+}
+/* 16px:iOS 点进去不会自动放大页面 */
+.nw-sheet .nw-field {
+  font-size: 16px;
+}
+.nw-sheet .nw-name {
+  flex: none;
+  height: 42px;
+  border-radius: 10px;
+}
+.nw-bottom {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nw-bottom p {
+  margin: 0 2px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.nw-sheet .nw-bottom .nw-create {
+  flex: none;
+  height: 48px;
+  border-radius: 12px;
+  font-size: 17px;
+}
+.nw-sheet .tp .sb-sec-head {
+  font-size: 13.5px;
+}

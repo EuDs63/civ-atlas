@@ -9,6 +9,7 @@
  * 类型见 types.ts。
  */
 import { useSyncExternalStore } from 'react';
+import { worldKey } from '../gen/savefile';
 import { currentWorld } from '../ui/saveStore';
 import { AiError, type AiCallOptions, type AiCallRecord, type AiProviderKind, type AiRequest, type AiResult } from './types';
 
@@ -149,6 +150,12 @@ const clip = (s: string) => (s.length > MAX_KEEP ? s.slice(0, MAX_KEEP) + '…�
 // ---------------------------------------------------------------------------
 // 调用
 
+/** 调用时在看哪颗星球(种子 + 参数,记录里写"调用时在看:种子 7") */
+function worldOf(): string | undefined {
+  const cur = currentWorld();
+  return cur ? worldKey(cur.params) : undefined;
+}
+
 /** 调一次 AI。没配置 / 失败抛 AiError(中文说明);成功返回全文。每次调用都记一条记录 */
 export async function aiChat(req: AiRequest, opts: AiCallOptions = {}): Promise<AiResult> {
   const kind = getActiveProvider();
@@ -161,7 +168,7 @@ export async function aiChat(req: AiRequest, opts: AiCallOptions = {}): Promise<
     feature: req.feature,
     title: req.title,
     messages: req.messages.map((m) => ({ role: m.role, content: clip(m.content) })),
-    world: currentWorld()?.id,
+    world: worldOf(),
   };
   if (!p) {
     const err = new AiError('not-configured', getAiStatus().reason ?? '还没有设置 AI');

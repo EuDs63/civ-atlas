@@ -15,7 +15,7 @@ import type { Civ } from '../gen/civ/types';
 import { polityAlive, polityName } from '../gen/civ/growth';
 import { ownersAt } from '../gen/civ/timeline';
 import { useAiStatus } from '../ai/client';
-import { WISH_MAX } from '../ai/prompts/rewrite';
+import { WISH_MAX, type RewriteLock } from '../ai/prompts/rewrite';
 import { openAiSettings } from './AiSettings';
 import { getCivTime } from './civView';
 import { useEdits } from './editsStore';
@@ -36,6 +36,12 @@ import './rewrite.css';
 
 const TERRAIN_OPS = ['volcano', 'lake', 'range', 'raise', 'sink'];
 
+const HINT: Record<RewriteLock | 'none', string> = {
+  none: '用一句话说想怎么改这个世界:AI 把它翻成命令、改名或改地形,列出来给你勾选,点了执行才改。',
+  terrain: '用一句话说想怎么改这个世界的历史和名字:AI 把它翻成命令或改名,列出来给你勾选,点了执行才改。地形已经定下来了。',
+  history: '用一句话说想怎么改这颗星球的地形:AI 把它翻成火山、山脉、湖……列出来给你勾选,点了执行才改。',
+};
+
 /** 没发出去的话(框关了再打开还在) */
 let draft = '';
 
@@ -45,9 +51,12 @@ export function RewriteBox({
   busy = false,
   onClose,
   anchor,
+  lock,
 }: {
   world: World;
   civ: Civ;
+  /** 锁住了哪一样:terrain = 世界建好了(只改历史、名字);history = 还在新建(只改地形) */
+  lock?: RewriteLock;
   /** 正在重推 / 按新地形重新生成(界面上的 civ 还是旧的) */
   busy?: boolean;
   onClose: () => void;
@@ -60,8 +69,8 @@ export function RewriteBox({
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
-  // 换了世界(比如框开着时粘贴了别的世界的分享链接):对话清空
-  useEffect(() => syncRewriteWorld(), [world, civ]);
+  // 换了世界(比如框开着时粘贴了别的世界的分享链接)、世界刚建好(锁变了):对话清空
+  useEffect(() => syncRewriteWorld(lock), [world, civ, lock]);
   useEffect(() => {
     draft = text;
   }, [text]);
@@ -99,9 +108,9 @@ export function RewriteBox({
     const w = text.trim();
     if (!w || thinking || !ai.ready || busy) return;
     setText('');
-    void sendWish({ world, civ, year: getCivTime().year ?? civ.endYear }, w);
+    void sendWish({ world, civ, year: getCivTime().year ?? civ.endYear, lock }, w);
   };
-  const examples = useMemo(() => exampleWishes(civ, Math.floor(getCivTime().year ?? civ.endYear)), [civ]);
+  const examples = useMemo(() => exampleWishes(civ, Math.floor(getCivTime().year ?? civ.endYear), lock), [civ, lock]);
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
 
   return (
@@ -109,7 +118,7 @@ export function RewriteBox({
       <div className="rw-log" ref={log}>
         {!st.turns.length && (
           <div className="rw-empty">
-            <div className="rw-hint">用一句话说想怎么改这个世界:AI 把它翻成命令、改名或改地形,列出来给你勾选,点了执行才改。</div>
+            <div className="rw-hint">{HINT[lock ?? 'none']}</div>
             <div className="rw-examples">
               {examples.map((x) => (
                 <button key={x} className="rw-example" onClick={() => (setText(x), input.current?.focus())}>
@@ -120,7 +129,7 @@ export function RewriteBox({
           </div>
         )}
         {st.turns.map((t) => (
-          <Turn key={t.id} t={t} latest={t === last} now={{ civ, busy }} onApplied={onClose} onRetry={() => setText(t.wish)} />
+          <Turn key={t.id} t={t} latest={t === last} now={{ civ, busy }} onApplied={onClose} onRetry={() => setText(t.wish)} newWorld={lock === 'history'} />
         ))}
       </div>
       {ai.ready && busy && <div className="rw-unset">世界正在重推,好了再说</div>}
@@ -156,7 +165,7 @@ export function RewriteBox({
   );
 }
 
-function Turn({ t, latest, now, onApplied, onRetry }: { t: RwTurn; latest: boolean; now: WorldNow; onApplied: () => void; onRetry: () => void }) {
+function Turn({ t, latest, now, onApplied, onRetry, newWorld }: { t: RwTurn; latest: boolean; now: WorldNow; onApplied: () => void; onRetry: () => void; newWorld?: boolean }) {
   const [msg, setMsg] = useState<string | null>(null);
   const off = new Set(t.off ?? []);
   const n = pickedChanges(t).length;
@@ -225,7 +234,7 @@ function Turn({ t, latest, now, onApplied, onRetry }: { t: RwTurn; latest: boole
               {c}
             </div>
           ))}
-          {terrain && !t.applied && (
+          {terrain && !t.applied && !newWorld && (
             <div className="rw-note">
               {mixed
                 ? '同时有改地形和历史命令:地形一改,三千年历史整个重来,这些命令多半对不上。建议先只执行改地形,再接着说历史那部分'
@@ -267,8 +276,11 @@ function Turn({ t, latest, now, onApplied, onRetry }: { t: RwTurn; latest: boole
 }
 
 /** 空的时候给的三句例子(用这个世界里的名字;时间轴在最后一百年时,结盟、不再扩张按历史的三分之二处举例) */
-function exampleWishes(civ: Civ, year: number): string[] {
-  if (!civ.viable || !civ.polities.length) return ['在赤道的海上放一座火山岛'];
+function exampleWishes(civ: Civ, year: number, lock?: RewriteLock): string[] {
+  const range = civ.places.find((p) => p.kind === 'mountains');
+  // 还在新建:只举改地形的例子
+  if (lock === 'history') return ['在赤道的海上放一座火山岛', ...(range ? [`把${range.name}再拉长一些`] : []), '在最大的那块陆地中间挖一个大湖'].slice(0, 3);
+  if (!civ.viable || !civ.polities.length) return lock === 'terrain' ? [] : ['在赤道的海上放一座火山岛'];
   const y = Math.min(civ.endYear, Math.max(0, year));
   const at = y <= civ.endYear - 100 ? Math.floor(y) : Math.floor((civ.endYear * 2) / 300) * 100;
   const P = civ.polities;
@@ -283,7 +295,6 @@ function exampleWishes(civ: Civ, year: number): string[] {
   if (fallen) out.push(`让${fallen.name}多撑三百年`);
   if (alive.length >= 2) out.push(`让${short(alive[0])}和${short(alive[1])}结盟`);
   if (alive[0]) out.push(`${short(alive[0])}从第 ${at} 年起不再扩张`);
-  const range = civ.places.find((p) => p.kind === 'mountains');
-  if (out.length < 3 && range) out.push(`把${range.name}再拉长一些`);
+  if (out.length < 3 && range && lock !== 'terrain') out.push(`把${range.name}再拉长一些`);
   return out.slice(0, 3);
 }

@@ -95,6 +95,9 @@ button {
   border-radius: 50%;
   background: var(--accent);
 }
+.toast-mark.ok {
+  background: var(--ok);
+}
 .toast-text {
   display: flex;
   flex-direction: column;
@@ -609,8 +612,7 @@ button.primary:hover {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.export-item,
-.save-item {
+.export-item {
   display: block;
   width: 100%;
   text-align: left;
@@ -619,39 +621,34 @@ button.primary:hover {
   border-radius: 3px;
   padding: 7px 10px;
 }
-.export-item:hover:not(:disabled),
-.save-item:hover:not(:disabled) {
+.export-item:hover:not(:disabled) {
   background: var(--hover-bg);
 }
-.export-item:disabled,
-.save-item:disabled {
+.export-item:disabled {
   opacity: 0.4;
   cursor: default;
 }
-.export-item b,
-.save-item b {
+.export-item b {
   display: block;
   font-weight: 500;
   font-size: 13px;
   color: var(--text);
 }
-.export-item span,
-.save-item span {
+.export-item span {
   display: block;
   margin-top: 2px;
   font-size: 11.5px;
   color: var(--muted);
   line-height: 1.45;
 }
-.export-foot,
-.save-foot {
+.export-foot {
   margin-top: 4px;
   padding: 8px 10px 4px;
   border-top: 1px solid var(--line);
   font-size: 11px;
   color: var(--muted);
 }
-/* ---- 世界概览头部的"存档"菜单(SaveMenu.tsx):按钮、提示条沿用导出菜单的样式 ---- */
+/* ---- 侧栏"存档"菜单(SaveMenu.tsx):这个世界的缩略图、名字、存没存住,下面两项:存成文件、复制分享链接 ---- */
 .save {
   position: relative;
   flex: none;
@@ -661,39 +658,33 @@ button.primary:hover {
   right: 0;
   top: calc(100% + 8px);
   z-index: 40;
-  width: 380px;
+  width: 356px;
   max-width: calc(100vw - 24px);
-  max-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
-  padding: 8px;
-}
-.save-sec {
-  flex: none;
-  padding: 6px 8px 6px;
-  font-size: 11.5px;
-  letter-spacing: 1px;
-  color: var(--muted);
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-float);
+  animation: pm-in 0.12s ease-out;
 }
 .save-cur {
   flex: none;
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  padding: 2px 8px 10px;
+  padding: 8px 8px 10px;
+  margin-bottom: 4px;
+  border-bottom: 0.5px solid var(--line);
 }
 .save-thumb {
   flex: none;
   width: 96px;
   height: 48px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
+  border-radius: 6px;
   object-fit: cover;
   background: var(--btn);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
   display: block;
 }
 .save-thumb.empty {
@@ -704,168 +695,80 @@ button.primary:hover {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 11.5px;
-  color: var(--muted);
   line-height: 1.45;
 }
 .save-info b {
-  font-weight: 500;
-  font-size: 13.5px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.save-name {
-  align-self: flex-start;
-  max-width: 100%;
-  border: 0;
-  background: transparent;
-  padding: 0 4px 0 0;
-  margin: 0;
   font-size: 15px;
-  font-weight: 500;
-  color: var(--accent);
-  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.save-name .ph {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 400;
+.save-info small {
+  font-size: 12.5px;
+  color: var(--ink-2);
 }
-.save-name .ins-pen {
-  margin-left: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  opacity: 0.7;
-}
-.save-name:hover .ins-pen {
-  opacity: 1;
-  color: var(--accent);
-}
-.save-title-input {
-  width: 100%;
-  background: var(--btn);
-  border: 1px solid var(--line-strong);
-  color: var(--text);
-  border-radius: 3px;
-  padding: 4px 7px;
-  font: inherit;
-  font-size: 13px;
-}
-.save-btns {
-  flex: none;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding-bottom: 6px;
-  margin-bottom: 2px;
-  border-bottom: 1px solid var(--line);
-}
-.save-btns .save-item {
-  border: 1px solid var(--line);
-  background: var(--btn);
-}
-.save-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0 2px;
-}
-.save-row {
-  position: relative;
-  border-radius: 3px;
-}
-.save-row:hover {
-  background: var(--hover-bg);
-}
-.save-row.current {
-  background: var(--btn);
-}
-.save-open {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  border-radius: 3px;
-  padding: 6px 8px;
-  padding-right: 92px;
-}
-.save-open:disabled {
-  cursor: default;
-}
-.save-badge {
-  font-style: normal;
-  font-size: 10.5px;
-  font-weight: 400;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
-  vertical-align: 1px;
-}
-.save-old {
-  font-style: normal;
+.save-status.warn {
   color: var(--warn);
 }
-.save-row-edit {
-  position: absolute;
-  left: 114px;
-  right: 92px;
-  top: 5px;
-}
-.save-acts {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-}
-.save-row:hover .save-acts,
-.save-row:focus-within .save-acts,
-.save-act.arm {
-  opacity: 1;
-}
-.save-act {
-  border: 1px solid var(--line);
-  background: var(--btn);
-  border-radius: 3px;
-  padding: 2px 7px;
-  font-size: 11.5px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.save-act:hover {
-  color: var(--text);
-  border-color: var(--line-strong);
-}
-.save-act.del.arm {
-  border-color: color-mix(in srgb, var(--err) 50%, transparent);
-  color: var(--err);
-  background: color-mix(in srgb, var(--err) 10%, transparent);
-}
 .save-empty {
-  padding: 8px 10px 10px;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.5;
+  padding: 10px 10px 12px;
+  margin-bottom: 4px;
+  border-bottom: 0.5px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
 }
-.save-menu .save-foot {
+.save-it {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+}
+.save-it .icon {
   flex: none;
-  line-height: 1.5;
+  margin-top: 1px;
+  color: var(--accent);
 }
-.save-btns .save-item.wide {
-  grid-column: 1 / -1;
+.save-it b {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+}
+.save-it small {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.save-it:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.save-it:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* 世界名的输入框(改名) */
+.save-title-input {
+  width: 100%;
+  background: var(--surface);
+  border: 0;
+  box-shadow: inset 0 0 0 0.5px var(--line-strong);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 14px;
+}
+.save-title-input:focus {
+  outline: 0;
+  box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft);
 }
 /* 剪贴板用不了:存档菜单里一行"没能自动复制",下面是选中了链接的输入框 */
 .save-manual {
@@ -889,10 +792,6 @@ button.primary:hover {
 }
 .save-manual input:focus {
   outline: 1px solid var(--accent);
-}
-/* 当前世界那一行:存储满了没能自动存 */
-.save-info .save-full {
-  color: var(--warn);
 }
 /* 把 .json 拖进页面时的提示 */
 .drop-hint {

@@ -42,7 +42,7 @@ import {
   type RewriteContext,
 } from '../src/ai/prompts/rewrite';
 import { clearEdits, getEdits, setEdits } from '../src/ui/editsStore';
-import { applyBlock, applyTurn, getRewrite, sendWish, takeRewriteNote, toggleItem, undoTurn } from '../src/ui/rewriteStore';
+import { applyBlock, applyTurn, getRewrite, sendWish, syncRewriteWorld, takeRewriteNote, toggleItem, undoTurn } from '../src/ui/rewriteStore';
 
 const world = generateWorld({ ...DEFAULT_PARAMS, seed: 7 });
 const civ = generateCiv(world);
@@ -533,6 +533,24 @@ describe('改写 · 测试用假 AI', () => {
     expect(getEdits()).toBe(start);
     expect(takeRewriteNote(getEdits())).toMatchObject({ kind: 'undo', turn: id });
     expect(getRewrite().turns.find((x) => x.id === id)!.applied).toMatchObject({ undone: true });
+  });
+
+  it('新建时提的改地形:点了创建世界(锁从只改地形换成只改历史)以后对话清空,不能再执行、撤销', async () => {
+    setActiveProvider('mock');
+    const id = await sendWish({ world, civ, year: Y, lock: 'history' }, '在海上放一座火山');
+    expect(getRewrite().lock).toBe('history');
+    expect(applyTurn(id, NOW)).toBeNull();
+    const after = getEdits();
+    expect(after.terrain.length).toBe(1);
+    // 同一个世界、同一个锁:不动
+    syncRewriteWorld('history');
+    expect(getRewrite().turns.length).toBe(1);
+    syncRewriteWorld('terrain');
+    expect(getRewrite()).toMatchObject({ lock: 'terrain', turns: [] });
+    expect(takeRewriteNote(after)).toBeNull();
+    undoTurn(id);
+    expect(getEdits()).toBe(after);
+    expect(applyTurn(id, NOW)).toMatch(/找不到/);
   });
 
   it('只有最新的一轮能执行;发出去之后世界改过 = 要重说;空话不发', async () => {

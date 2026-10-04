@@ -1,18 +1,18 @@
 /**
- * 改地形(阶段 4)的界面:顶部的工具条(TerrainBar,从世界概览的"创世"页进入)、地图上的覆盖层(画的线、光标圈、改过的地方)。
+ * 改地形(阶段 4)的界面:新建世界卡片里的工具面板(TerrainPanel)、地图上的覆盖层(画的线、光标圈、改过的地方)。
+ * 地形是世界的根:只在新建世界这一步能改,点"创建世界"后锁住(想换地形用"以它为底稿新建")。
  *
  * - 进入改地形后:火山 / 湖 = 点一下放一处(拖动照样平移);山脉 / 抬起陆地 / 沉成海 = 按住拖出一条线(按住空格拖动 = 平移)。
- *   单击不再看详情;点工具条上的"完成"恢复。每种工具三档大小(火山、湖、画笔 = 大小,山脉 = 高低),对应的 r / s 见 gen/terrainEdits.ts 的 TERRAIN_PRESETS(AI 改写也按这三档)。
+ *   点面板上的"完成"收起。每种工具三档大小(火山、湖、画笔 = 大小,山脉 = 高低),对应的 r / s 见 gen/terrainEdits.ts 的 TERRAIN_PRESETS(AI 改写也按这三档)。
  * - 加一处修改 = editsStore.addTerrainOp;撤销 = undoTerrainOp(Ctrl / ⌘ + Z);全部清除 = clearTerrain(点两下确认)。
  *   App 看到地形修改变了就在后台带着新地形重新生成世界、重推文明(见 App.tsx)。
  * - 地图事件由 App 转给这里:terrainDown / terrainMove / terrainUp(画线)、terrainClick(放点);返回 true = 这一下归改地形管。
  * - 覆盖层(TerrainOverlay)用 SVG,坐标就是世界坐标(viewBox = 地图原图大小),随地图一起缩放平移。
  */
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 import type { TerrainKind, TerrainOp } from '../gen/edits';
 import { TERRAIN_PRESETS as PRESETS, isPointKind, sameTerrain } from '../gen/terrainEdits';
 import { addTerrainOp, clearTerrain, undoTerrainOp, useEdits } from './editsStore';
-import './overview.css';
 
 // ---------------------------------------------------------------------------
 // 工具状态
@@ -47,11 +47,11 @@ export function useTerrainTool(): TerrainToolState {
 }
 
 const TOOLS: { id: TerrainKind; name: string; sizeName: string; sizes: [string, string, string]; hint: string }[] = [
-  { id: 'volcano', name: '火山', sizeName: '大小', sizes: ['小', '中', '大'], hint: '点一下放一座火山;点在海里 = 火山岛' },
-  { id: 'range', name: '山脉', sizeName: '高低', sizes: ['低', '中', '高'], hint: '按住拖出一条线,沿线抬起一道山脉;按住空格拖动 = 平移' },
-  { id: 'lake', name: '湖', sizeName: '大小', sizes: ['小', '中', '大'], hint: '点一下挖一个湖(点在陆地上)' },
-  { id: 'raise', name: '抬起陆地', sizeName: '笔刷', sizes: ['细', '中', '粗'], hint: '按住拖动,把海抬成陆地;按住空格拖动 = 平移' },
-  { id: 'sink', name: '沉成海', sizeName: '笔刷', sizes: ['细', '中', '粗'], hint: '按住拖动,把陆地沉成海;按住空格拖动 = 平移' },
+  { id: 'volcano', name: '火山', sizeName: '大小', sizes: ['小', '中', '大'], hint: '点一下放一座火山；点在海里是火山岛。' },
+  { id: 'range', name: '山脉', sizeName: '高低', sizes: ['低', '中', '高'], hint: '按住拖出一条线，沿线抬起一道山脉；按住空格拖动是平移。' },
+  { id: 'lake', name: '湖', sizeName: '大小', sizes: ['小', '中', '大'], hint: '点一下挖一个湖（点在陆地上）。' },
+  { id: 'raise', name: '抬起陆地', sizeName: '笔刷', sizes: ['细', '中', '粗'], hint: '按住拖动，把海抬成陆地；按住空格拖动是平移。' },
+  { id: 'sink', name: '沉成海', sizeName: '笔刷', sizes: ['细', '中', '粗'], hint: '按住拖动，把陆地沉成海；按住空格拖动是平移。' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -160,33 +160,16 @@ export interface TerrainStatus {
 }
 
 /**
- * 改地形的工具条(开着改地形时显示在顶部居中,样子和"选择目标"的提示条一样):
- * 工具(火山 / 山脉 / 湖 / 抬起陆地 / 沉成海)、大小三档、撤销、清除、改了几处、"完成"(退出改地形)。
- * 只有一行:工具的用法在悬停提示里;世界还在生成时"改了几处"那里写"生成中"。
- * 重新生成的进度、结果照旧走顶部提示条(App 把提示条挪到工具条下面)。
- * 入口在世界概览的"创世"页。
+ * 改地形的面板(新建世界卡片里"改地形"那一组展开后的样子):
+ * 工具(火山 / 山脉 / 湖 / 抬起陆地 / 沉成海)、大小三档、这个工具怎么用、改了几处、撤销、全部清除;组头右边"完成"(收起)。
+ * 世界还在生成时"改了几处"那里写"生成中"。重新生成的进度、结果照旧走顶部提示条。
+ * 开着的时候键盘:Esc 收起,Ctrl / ⌘ + Z 撤销,按住空格拖动是平移。
  */
-export function TerrainBar({ disabled }: { disabled: boolean }) {
+export function TerrainPanel({ disabled }: { disabled: boolean }) {
   const t = useTerrainTool();
   const edits = useEdits();
   const [confirm, setConfirm] = useState(false);
   const n = edits.terrain.length;
-  const barRef = useRef<HTMLDivElement>(null);
-
-  // 工具条的下沿记在 --tbar-bottom 上:提示条挪到它下面(窄屏时工具条会折成两行)
-  useLayoutEffect(() => {
-    const el = barRef.current;
-    if (!el) return;
-    const root = document.documentElement;
-    const put = () => root.style.setProperty('--tbar-bottom', `${Math.round(el.getBoundingClientRect().bottom)}px`);
-    put();
-    const ro = new ResizeObserver(put);
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      root.style.removeProperty('--tbar-bottom');
-    };
-  }, [t.on]);
 
   useEffect(() => {
     if (!confirm) return;
@@ -194,7 +177,7 @@ export function TerrainBar({ disabled }: { disabled: boolean }) {
     return () => clearTimeout(id);
   }, [confirm]);
 
-  // 键盘(熟手的加速,功能都有按钮):Esc 退出,Ctrl / ⌘ + Z 撤销,按住空格拖动 = 平移
+  // 键盘(熟手的加速,功能都有按钮):Esc 收起,Ctrl / ⌘ + Z 撤销,按住空格拖动 = 平移
   useEffect(() => {
     if (!t.on) return;
     const typing = (e: KeyboardEvent) => {
@@ -231,36 +214,44 @@ export function TerrainBar({ disabled }: { disabled: boolean }) {
     };
   }, [t.on]);
 
-  if (!t.on) return null;
   const cur = TOOLS.find((x) => x.id === t.tool)!;
-  const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   return (
-    <div ref={barRef} className="terrain-bar" role="toolbar" aria-label="改地形" onPointerDown={stop} onClick={stop} onDoubleClick={stop} onWheel={stop}>
-      <div className="tbar-row">
-        <i className="tbar-mark" aria-hidden="true" />
-        <span className="tbar-title">改地形</span>
-        <span className="tbar-group tbar-tools" role="radiogroup" aria-label="工具">
-          {TOOLS.map((x) => (
-            <button key={x.id} role="radio" aria-checked={t.tool === x.id} data-tool={x.id} className={t.tool === x.id ? 'on' : ''} onClick={() => setTerrainTool({ tool: x.id })} title={x.hint}>
-              {x.name}
-            </button>
-          ))}
-        </span>
-        <span className="tbar-group tbar-size" role="radiogroup" aria-label={cur.sizeName}>
-          <span className="tbar-label">{cur.sizeName}</span>
-          {cur.sizes.map((label, i) => (
-            <button key={i} role="radio" aria-checked={t.size === i} className={t.size === i ? 'on' : ''} onClick={() => setTerrainTool({ size: i as 0 | 1 | 2 })}>
-              {label}
-            </button>
-          ))}
-        </span>
-        <span className="tbar-group tbar-actions">
-          <button data-act="terrain-undo" disabled={!n} onClick={undoTerrainOp} title="撤销最后一处(Ctrl / ⌘ + Z)">
+    <section className="sb-sec tp" role="toolbar" aria-label="改地形">
+      <div className="sb-sec-head">
+        <span>改地形</span>
+        <button className="sb-link tp-done" data-act="terrain-done" onClick={() => setTerrainTool({ on: false })}>
+          完成
+        </button>
+      </div>
+      <div className="sb-group tp-group">
+        <div className="tp-tools">
+          <div className="tp-seg tp-kinds" role="radiogroup" aria-label="工具">
+            {TOOLS.map((x) => (
+              <button key={x.id} role="radio" aria-checked={t.tool === x.id} data-tool={x.id} className={t.tool === x.id ? 'on' : ''} onClick={() => setTerrainTool({ tool: x.id })}>
+                {x.name}
+              </button>
+            ))}
+          </div>
+          <div className="tp-size">
+            <span>{cur.sizeName}</span>
+            <div className="tp-seg" role="radiogroup" aria-label={cur.sizeName}>
+              {cur.sizes.map((label, i) => (
+                <button key={i} role="radio" aria-checked={t.size === i} className={t.size === i ? 'on' : ''} onClick={() => setTerrainTool({ size: i as 0 | 1 | 2 })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="tp-hint">{cur.hint}</div>
+        <div className="tp-count">
+          <b className="tp-n">{disabled ? '生成中…' : n ? `改了 ${n} 处` : '还没改'}</b>
+          <button className="sb-link" data-act="terrain-undo" disabled={!n} onClick={undoTerrainOp} title="撤销最后一处(Ctrl / ⌘ + Z)">
             撤销
           </button>
           <button
+            className={`sb-link${confirm ? ' danger' : ''}`}
             data-act="terrain-clear"
-            className={confirm ? 'danger' : ''}
             disabled={!n}
             onClick={() => {
               if (!confirm) return setConfirm(true);
@@ -270,13 +261,9 @@ export function TerrainBar({ disabled }: { disabled: boolean }) {
           >
             {confirm ? '确认清除' : '全部清除'}
           </button>
-          <span className="tbar-count">{disabled ? '生成中…' : n ? `改了 ${n} 处` : '还没改'}</span>
-        </span>
-        <button className="tbar-done" data-act="terrain-done" onClick={() => setTerrainTool({ on: false })}>
-          完成
-        </button>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -1,10 +1,12 @@
 /**
  * AI 写出来的东西(史书、释名……)按世界存在本地浏览器里(阶段 5)。只存本地,不上传。
- * 世界 = saveStore 的世界编号(种子 + 参数);浏览器存储不可用(隐私模式)时只在内存里。
+ * 世界 = saveStore 的世界编号(每个世界一个);浏览器存储不可用(隐私模式)时只在内存里。
+ * 只是看看的世界(打开的种子、分享链接)存进一条:这个世界跟着存进"我的世界",刷新以后还找得到。
  *
  * 各功能用自己的 kind 区分("史书""释名"……),key 由功能自己定(比如 "史书:polity:c4567#0" 或 "释名:settlement:c123#0")。
  */
 import { useSyncExternalStore } from 'react';
+import { keepWorld } from '../ui/saveStore';
 
 export interface AiNote {
   /** 功能内唯一的键 */
@@ -71,6 +73,31 @@ export function putNote(world: string, note: AiNote): void {
   const list = read(world).filter((n) => n.key !== note.key);
   list.push(note);
   write(world, list);
+  keepWorld(world);
+}
+
+/**
+ * 把一个世界的 AI 笔记复制给另一个世界(我的世界里"复制一份"时用)。内存里的一定带上;
+ * 原来那份存在浏览器里、复制的这份存不下(存储满了)= false,原来那份本来就只在内存里的不算
+ */
+export function copyNotes(from: string, to: string): boolean {
+  const list = read(from);
+  if (!list.length) return true;
+  mem.set(to, list.slice());
+  emit();
+  let stored = false;
+  try {
+    stored = localStorage.getItem(PREFIX + from) !== null;
+  } catch {
+    /* 隐私模式:原来那份也只在内存里 */
+  }
+  if (!stored) return true;
+  try {
+    localStorage.setItem(PREFIX + to, JSON.stringify(list));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function deleteNote(world: string, key: string): void {

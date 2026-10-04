@@ -3,7 +3,7 @@
  *
  *   info     选目标之类的操作提示(左边一个主色小菱形),常带"取消"
  *   progress 生成世界 / 重推历史 / 导出:给了 progress 画进度条,没给画转圈
- *   ok       已生效、已存档……默认 7 秒后收起;带"撤销"之类的链接按钮
+ *   ok       已生效、已存档……默认 7 秒后收起;带"撤销"之类的链接按钮;dot = 左边一个绿点(世界创建好了)
  *   warn / error  留着,右边有关闭按钮;可以带一个或两个按钮(分享链接和本地存档冲突:"用链接里的""保留本地")
  * 一行主文字 + 至多一行小字(more 有几条也连成一行)。
  */
@@ -33,7 +33,7 @@ export function ToastBar() {
       onClick={stop}
       onDoubleClick={stop}
     >
-      {mark && <i className="toast-mark" aria-hidden="true" />}
+      {mark ? <i className="toast-mark" aria-hidden="true" /> : t.dot && <i className="toast-mark ok" aria-hidden="true" />}
       <span className="toast-text">
         <span className="toast-main">{t.text}</span>
         {more && <span className="toast-more">{more}</span>}
