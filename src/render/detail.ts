@@ -15,7 +15,7 @@
 import type { World } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import type { VecView } from './common';
-import { drawFantasyCoasts, drawFantasySeaLines, drawFantasyVectors, fantasyBaseClean, fantasyBaseNoInk, fantasySymbolLayerProj } from './fantasy';
+import { drawFantasyCoasts, drawFantasyIce, drawFantasySeaLines, drawFantasyVectors, fantasyBaseClean, fantasyBaseNoInk, fantasySymbolLayerProj } from './fantasy';
 import { drawRealisticRivers, realisticBase } from './realistic';
 import { clipOutline, projector, reprojectImage, type MapProj } from './projection';
 
@@ -37,6 +37,7 @@ export function drawTerrainDetail(ctx: CanvasRenderingContext2D, world: World, r
   ctx.restore();
   if (fantasy) {
     drawFantasySeaLines(ctx, world, raster, v);
+    drawFantasyIce(ctx, world, raster, v);
     drawFantasyCoasts(ctx, raster, v);
     drawFantasyVectors(ctx, world, v);
   } else drawRealisticRivers(ctx, world, raster, v);
@@ -60,7 +61,10 @@ export function drawTerrainProjected(ctx: CanvasRenderingContext2D, world: World
   ctx.save();
   clipOutline(ctx, mp, v);
   if (fantasy) {
-    if (!whole) drawFantasySeaLines(ctx, world, raster, pv);
+    if (!whole) {
+      drawFantasySeaLines(ctx, world, raster, pv);
+      drawFantasyIce(ctx, world, raster, pv);
+    }
     drawFantasyCoasts(ctx, raster, pv);
     if (whole) ctx.drawImage(fantasySymbolLayerProj(world, raster, mp), 0, 0);
     else drawFantasyVectors(ctx, world, pv);
