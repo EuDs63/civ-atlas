@@ -1,0 +1,300 @@
+/**
+ * "文明"显示开关和时间轴的共享状态:图层弹层里的开关(CivPanel.tsx)、时间轴 CivTimeline 改,地图上的 CivLayer、悬停信息读。
+ * 放在这里而不是 App.tsx 里,这样以后加开关 / 时间轴时只改文明自己的文件。
+ *
+ * 网址参数(截图脚本用):
+ *   civ=habitat,regions,sites,routes,cultures,polities   直接打开对应显示;前面加减号是关掉,如 civ=-labels 关掉默认打开的地名
+ *   civYear=1200                                时间轴停在第 1200 年(不给 = 结束年份);给了就不自动播放
+ *   chron=1 / chron=all                         打开世界概览的编年史页(1 = 只看大事,all = 全部)
+ *   play=0 / play=1                             打开网页时不自动播放 / 自动播放
+ *                                               (不给:自动播放;无头浏览器(截图、冒烟检查)里默认不播,画面才固定)
+ */
+import { useSyncExternalStore } from 'react';
+import { CIV_SHOW_DEFAULT, type CivShow } from '../render/civ/overlay';
+import type { ChronicleEntry } from '../gen/civ/chronicle';
+
+function fromUrl(): CivShow {
+  const s: CivShow = { ...CIV_SHOW_DEFAULT };
+  if (typeof location === 'undefined') return s;
+  const v = new URLSearchParams(location.search).get('civ');
+  if (!v) return s;
+  for (const raw of v.split(/[,+ ]/)) {
+    const off = raw.startsWith('-');
+    const k = off ? raw.slice(1) : raw;
+    if (k in s) s[k as keyof CivShow] = !off;
+  }
+  return s;
+}
+
+function store<T>(init: T) {
+  let state = init;
+  const subs = new Set<() => void>();
+  const get = () => state;
+  return {
+    get,
+    set(patch: Partial<T>) {
+      state = { ...state, ...patch };
+      for (const f of subs) f();
+    },
+    /** 不经过 React 直接订阅(编年史回放时只滚动列表、不重新渲染) */
+    subscribe(f: () => void): () => void {
+      subs.add(f);
+      return () => subs.delete(f);
+    },
+    use(): T {
+      return useSyncExternalStore(
+        (f) => {
+          subs.add(f);
+          return () => subs.delete(f);
+        },
+        get,
+        get,
+      );
+    },
+  };
+}
+
+// ---- 显示开关 ----
+
+const show = store<CivShow>(fromUrl());
+
+export function getCivShow(): CivShow {
+  return show.get();
+}
+
+export function setCivShow(patch: Partial<CivShow>) {
+  show.set(patch);
+}
+
+export function useCivShow(): CivShow {
+  return show.use();
+}
+
+// ---- 时间轴(1× / 4×、自动播放) ----
+
+export type PlaySpeed = 1 | 4;
+
+export interface CivTime {
+  /** 时间轴停在哪一年;null = 结束年份("现在") */
+  year: number | null;
+  /** 正在自动播放 */
+  playing: boolean;
+  /** 正在拖动时间轴 */
+  scrubbing: boolean;
+  /** 这次播放是接着"回放世界形成"放的(从第 0 年放完一遍,不看 1× / 4×) */
+  story: boolean;
+  /** 播放速度:1× = 每秒 20 年,4× = 每秒 80 年(timelineLayout.ts 的 PLAY_RATE) */
+  speed: PlaySpeed;
+}
+
+function yearFromUrl(): number | null {
+  if (typeof location === 'undefined') return null;
+  const v = new URLSearchParams(location.search).get('civYear');
+  return v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null;
+}
+
+const time = store<CivTime>({ year: yearFromUrl(), playing: false, scrubbing: false, story: false, speed: 1 });
+
+export function getCivTime(): CivTime {
+  return time.get();
+}
+
+export function setCivTime(patch: Partial<CivTime>) {
+  time.set(patch);
+}
+
+export function useCivTime(): CivTime {
+  return time.use();
+}
+
+/** 年份一变就调 f(不经过 React;回放时每帧都会调) */
+export function subscribeCivTime(f: (t: CivTime) => void): () => void {
+  return time.subscribe(() => f(time.get()));
+}
+
+/** 从某一年起按 1× 播放(干预重推完,App 从生效年份接着放) */
+export function playFrom(year: number) {
+  time.set({ year: Math.max(0, year), playing: true, scrubbing: false, story: false, speed: 1 });
+}
+
+/** 暂停(停在当前这一年;点开国家等详情时调) */
+export function pausePlayback() {
+  const t = time.get();
+  if (t.playing || t.story) time.set({ playing: false, story: false });
+}
+
+/**
+ * 打开网页后第一次显示世界时,要不要自动播放(只问一次,之后都是 false):
+ * 网址给了 civYear(看某一年)或 play=0 不播;play=1 一定播;无头浏览器(截图脚本、冒烟检查)里默认不播
+ */
+let autoplayAsked = false;
+export function takeAutoplay(): boolean {
+  if (autoplayAsked) return false;
+  autoplayAsked = true;
+  if (typeof location === 'undefined') return false;
+  const q = new URLSearchParams(location.search);
+  const play = q.get('play');
+  if (play === '0' || q.has('civYear')) return false;
+  if (play === '1') return true;
+  return !(typeof navigator !== 'undefined' && navigator.webdriver);
+}
+
+/** 自动播放:从 from 年起按 1× 放;还一个文明层都没开(网址也没指定 civ=)就打开"国家",看得见国界在变 */
+export function startAutoplay(from: number) {
+  const s = show.get();
+  const civInUrl = typeof location !== 'undefined' && new URLSearchParams(location.search).has('civ');
+  if (!s.cultures && !s.polities && !civInUrl) show.set({ polities: true });
+  playFrom(from);
+}
+
+/** 回放世界形成开始:文明层先退回第 0 年(被地质回放的画面盖着),停止正在放的文明回放 */
+export function prepareCivReplay() {
+  time.set({ year: 0, playing: false, scrubbing: false, story: false });
+}
+
+/** 地质回放放完:接着放文明,从第 0 年到结束年份(CivTimeline 负责推进年份、打开"民族"和"国家"显示) */
+export function startCivReplay() {
+  time.set({ year: 0, playing: true, scrubbing: false, story: true });
+}
+
+/** 换了新世界:时间轴回到结束年份 */
+export function resetCivTime() {
+  time.set({ year: null, playing: false, scrubbing: false, story: false });
+}
+
+// ---- 编年史(阶段 3;是世界概览的一页,见 overviewStore.ts) ----
+
+export interface ChronicleView {
+  /**
+   * 编年史开着 = 世界概览开在编年史页。setChronicle({ open: true }) 打开概览的编年史页、{ open: false } 收起
+   * (overviewStore.ts 两边同步;新代码直接用 openOverview('chronicle', { polity }))
+   */
+  open: boolean;
+  /** 只看大事 */
+  major: boolean;
+  /** 只看这个国家的事(null = 全部国家;编年史页顶上的国家下拉框、国家面板的"编年史"设它) */
+  polity: number | null;
+}
+
+function chronFromUrl(): ChronicleView {
+  const v = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('chron');
+  return { open: !!v && v !== '0', major: v !== 'all', polity: null };
+}
+
+const chron = store<ChronicleView>(chronFromUrl());
+
+export function getChronicle(): ChronicleView {
+  return chron.get();
+}
+
+export function setChronicle(patch: Partial<ChronicleView>) {
+  chron.set(patch);
+}
+
+export function useChronicle(): ChronicleView {
+  return chron.use();
+}
+
+/** 编年史的开关 / 筛选一变就调 f(overviewStore.ts 用它把老的 setChronicle({ open }) 换成开关概览) */
+export function subscribeChronicle(f: () => void): () => void {
+  return chron.subscribe(f);
+}
+
+/** 只看这国的事(同时打开编年史);再点同一国取消 */
+export function toggleChroniclePolity(id: number) {
+  const c = chron.get();
+  chron.set(c.polity === id ? { polity: null } : { polity: id, open: true });
+}
+
+/**
+ * 地图高亮(点编年史的一条):事发的州(浓)、相关国家那一年的国土(淡),闪约两秒。
+ * stamp 每次点都不同 —— 同一条点两次也重新闪、重新把地图平移过去。
+ */
+export interface CivHighlightState {
+  regions: number[];
+  polities: number[];
+  year: number;
+  stamp: number;
+}
+
+const highlight = store<{ h: CivHighlightState | null }>({ h: null });
+let stamp = 0;
+
+export function setCivHighlight(h: Omit<CivHighlightState, 'stamp'> | null) {
+  highlight.set({ h: h ? { ...h, stamp: ++stamp } : null });
+}
+
+export function getCivHighlight(): CivHighlightState | null {
+  return highlight.get().h;
+}
+
+export function useCivHighlight(): CivHighlightState | null {
+  return highlight.use().h;
+}
+
+// ---- 点编年史的一条(编年史面板里的一行、时间轴上的大事刻度共用) ----
+
+const pick = store<{ entry: ChronicleEntry | null; stamp: number }>({ entry: null, stamp: 0 });
+
+/**
+ * 点编年史的一条:时间轴跳到那一年并暂停,打开"国家"图层,地图上闪烁高亮事发地
+ * (事发地不在视野里时 App 把地图平移过去);编年史面板里这一条标成选中(战争自动展开,不在视野里就滚过去)。
+ */
+export function pickChronicleEntry(e: ChronicleEntry) {
+  setCivTime({ year: e.year, playing: false, scrubbing: false, story: false });
+  setCivShow({ polities: true });
+  setCivHighlight({ regions: e.regions, polities: e.polities, year: e.year });
+  pick.set({ entry: e, stamp: pick.get().stamp + 1 });
+}
+
+/** 换了新世界:清掉上一个世界选中的那一条 */
+export function clearChroniclePick() {
+  if (pick.get().entry) pick.set({ entry: null });
+}
+
+/** 最近点的那一条(stamp 每点一次都不同,同一条点两次也算) */
+export function useChroniclePick(): { entry: ChronicleEntry | null; stamp: number } {
+  return pick.use();
+}
+
+// ---- 点选(阶段 4):地图上单击选中一个东西,详情面板(Inspector.tsx)显示它、在里面改名 ----
+
+/**
+ * 选中的东西(这个世界里的编号;改名不改编号,换世界时清掉):
+ * 国家、城(含故城遗址)、地理实体(civ.places 的下标)、州(没点到别的东西时)
+ */
+export type MapSelection =
+  | { kind: 'polity'; id: number }
+  | { kind: 'settlement'; id: number }
+  | { kind: 'place'; id: number }
+  | { kind: 'region'; id: number };
+
+export interface SelectionState {
+  sel: MapSelection | null;
+  /** 面板放在地图的哪一边(躲开点的地方):点在右半边 = 放左边 */
+  side: 'left' | 'right';
+}
+
+const selection = store<SelectionState>({ sel: null, side: 'right' });
+
+export function getSelection(): SelectionState {
+  return selection.get();
+}
+
+/** 选中一个东西;side 不给 = 面板留在原来那一边。选中新的东西(看详情)时暂停播放 */
+export function setSelection(sel: MapSelection | null, side?: 'left' | 'right') {
+  if (sel && !sameSelection(sel, selection.get().sel)) pausePlayback();
+  selection.set(side ? { sel, side } : { sel });
+}
+
+export function clearSelection() {
+  if (selection.get().sel) selection.set({ sel: null });
+}
+
+export function useSelection(): SelectionState {
+  return selection.use();
+}
+
+export function sameSelection(a: MapSelection | null, b: MapSelection | null): boolean {
+  return a === b || (!!a && !!b && a.kind === b.kind && a.id === b.id);
+}

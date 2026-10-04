@@ -1,0 +1,2165 @@
+/**
+ * 奇幻手绘风格:羊皮纸、墨线海岸、波纹、手绘山峰与树林符号 —— 按"世界地图集"的尺度画:
+ * 全图时符号小而密(山脉读成一条山链、树林读成一片林区),放大后符号逐级变大、细节变多(render/detail.ts 按视口重画)。
+ *
+ * 分两层:
+ * - 像素层(fantasyBase):纸、水彩、海(按深浅)、海冰、海岸墨线;每张地图算一次,放大后细节层拿它当底图
+ * - 矢量层(drawFantasyVectors):林块、河流、山 / 丘陵 / 沙丘 / 草丛 / 火山。
+ *   铺进地形图的是缩放 1 倍的那一份(fantasySymbolLayer,单独一张透明画布);放大后按视口、按缩放倍数重画
+ * 文明层按符号层的形状给水彩"让位"(fantasyInkMask),国土、民族色块不把墨线和树林染脏。
+ * 作者放的火山(阶段 4 改地形,world.volcanoes)在峰顶画一座冒烟的火山,周围不再放普通的山。
+ *
+ * 弯边投影(罗宾森、摩尔威德……)按投影重画:像素层换成不带海岸墨线的那一份(fantasyBaseNoInk)按行重投影,
+ * 海岸墨线、湖岸改成逐点投影的矢量线(fantasyCoastLines、drawFantasyCoasts);矢量层按这种投影的符号规划(间距按投影后的距离留)
+ * 在投影后的位置上正立、按屏幕大小画(drawFantasyVectors 的 v.proj);文明层按投影后的符号层"让位"(fantasyInkProj)。
+ * 主图是等距圆柱投影、东西相连:像素层的邻域操作(距离变换、模糊、墨线梯度、冰缘)列下标取模,
+ * 纸纹、水彩斑驳的噪声左右首尾相接;挨着左右边的符号、林块、河在另一边再画一份,树林的分块左右相接;
+ * 符号的规划(间距、走向、坡度)按左右相连算。主图是一整圈星球、不是一页纸,所以纸边做旧和图框罗盘不烤进地形图,
+ * 画在视窗上(drawFrame / drawPaperEdge,见 ui/MapDecor.tsx、导出)。
+ */
+import type { World } from '../gen/world';
+import type { Raster } from '../gen/raster';
+import { BIOMES, Biome } from '../gen/biomes';
+import {
+  bakedView,
+  boxBlurWrap,
+  distanceTo,
+  drawRivers,
+  hash2,
+  hexRGB,
+  hillshade,
+  nearX,
+  riverLod,
+  rowCos,
+  valueNoiseP,
+  wrapCells,
+  wrapOf,
+  wrapShifts,
+  type RGB,
+  type RiverStyle,
+  type VecView,
+} from './common';
+import { keyed, smoothstep, subSeed } from '../gen/util';
+import { geometryOf } from '../gen/geometry';
+import { addProjectedLine, clipOutline, glyphMetric, insideProj, outlineOnCanvas, projector, relShifts, type GlyphMetric, type MapProj, type Projector, type ProjectionId } from './projection';
+
+const PAPER = hexRGB('#efe2c2');
+const PAPER_EDGE = hexRGB('#c9ae7c');
+const SEA = hexRGB('#8fabb0');
+/** 大陆架(浅海):偏浅、偏绿一点的海色 */
+const SEA_SHELF = hexRGB('#a8c2bd');
+/** 海沟:最深的海色 */
+const SEA_DEEP = hexRGB('#6f8f99');
+const INK = hexRGB('#3a2d22');
+const INK_CSS = 'rgba(58,45,34,';
+/** 山 / 丘陵符号的底色(和 drawSymbols 里的 paper 一致) */
+const GLYPH_PAPER: RGB = [236, 224, 193];
+/** 雪:像羊皮纸上的留白,略带一点冷调(和纸色混合后接近符号底色) */
+const SNOW_PAINT = hexRGB('#ebe6d8');
+/** 雪地背光面的淡蓝灰晕染 */
+const SNOW_SHADOW = hexRGB('#aebbc3');
+/** 海冰:纸色上再提亮一点、略偏冷的淡灰白 */
+const ICE_PAPER = hexRGB('#eef1ec');
+/** 冰缘墨线:比海岸墨线偏冷、偏淡,一眼能和陆地岸线分开 */
+const ICE_INK = hexRGB('#44525a');
+/** 海冰背光边的排线色(淡蓝灰) */
+const ICE_SHADOW = hexRGB('#8c9ea8');
+
+/**
+ * 缩放 k 倍时,符号(山、丘陵、树冠、墨线粗细)在世界坐标里的大小倍数。
+ * k ≤ GLYPH_K0 时为 1(和全图铺进地形图的那一份一样大);之后按 (k / GLYPH_K0)^−GLYPH_SHRINK 收 ——
+ * 屏幕上符号比地图放大得慢(放大 4 倍,符号约大 3 倍),空出来的地方由更高一级的符号补上。
+ */
+export const GLYPH_K0 = 1.35;
+/** 放大后符号在世界坐标里收多快:屏幕上约按 k^(1 − 0.22) ≈ k^0.78 变大 */
+const GLYPH_SHRINK = 0.22;
+export function glyphScale(k: number): number {
+  return k <= GLYPH_K0 ? 1 : Math.pow(k / GLYPH_K0, -GLYPH_SHRINK);
+}
+/** 符号分几级出现:第 t 级的符号从缩放 GLYPH_TIERS[t] 倍起画(第 0 级 = 全图就有) */
+export const GLYPH_TIERS = [1, 2, 3.5, 6];
+
+export function renderFantasy(ctx: CanvasRenderingContext2D, world: World, r: Raster) {
+  ctx.drawImage(fantasyBase(world, r), 0, 0);
+  ctx.drawImage(fantasySymbolLayer(world, r), 0, 0);
+}
+
+/**
+ * 海岸墨线、湖岸描边盖掉的像素原来是什么颜色(按投影重画时要一张"不带墨线"的像素层:墨线改成逐点投影的矢量线,
+ * 线宽处处一致)。只记这些像素(约占全图百分之几),要用时再拼出那一张(fantasyBaseNoInk)
+ */
+interface InkPatch {
+  /** 海岸墨线:像素下标、原色(r, g, b 交错,已乘纸纹) */
+  coastK: number[];
+  coastC: number[];
+  /** 湖岸描边 */
+  lakeK: number[];
+  lakeC: number[];
+}
+
+/** 当前这张地图的像素层(只留一份,换了世界就释放) */
+let base: { raster: Raster; canvas: AnyCanvas; patch: InkPatch } | null = null;
+
+/** 像素层:纸、水彩、海、海冰、海岸墨线、湖岸(不含符号、河流、图框) */
+export function fantasyBase(world: World, r: Raster): AnyCanvas {
+  if (base?.raster === r) return base.canvas;
+  if (base) base.canvas.width = base.canvas.height = 0;
+  const cv = makeCanvas(r.w, r.h);
+  const patch: InkPatch = { coastK: [], coastC: [], lakeK: [], lakeC: [] };
+  paintBase(cv.getContext('2d') as CanvasRenderingContext2D, world, r, patch);
+  base = { raster: r, canvas: cv, patch };
+  return cv;
+}
+
+/** 不带海岸墨线、湖岸描边的像素层(弯边投影按投影重画时用;墨线另外按投影画成矢量线,见 drawFantasyCoasts) */
+let noInk: { raster: Raster; canvas: AnyCanvas } | null = null;
+
+export function fantasyBaseNoInk(world: World, r: Raster): AnyCanvas {
+  const src = fantasyBase(world, r);
+  if (noInk?.raster === r) return noInk.canvas;
+  if (noInk) noInk.canvas.width = noInk.canvas.height = 0;
+  const patch = base!.patch;
+  const cv = makeCanvas(r.w, r.h);
+  const ctx = cv.getContext('2d') as CanvasRenderingContext2D;
+  ctx.drawImage(src, 0, 0);
+  // 盖掉墨线的像素换回原色:先湖岸、再海岸(两样都描过的像素,海岸记下的是两样都没描时的颜色)
+  const img = new ImageData(r.w, r.h);
+  const d = img.data;
+  const put = (K: number[], C: number[]) => {
+    for (let i = 0; i < K.length; i++) {
+      const o = K[i] * 4;
+      d[o] = C[i * 3];
+      d[o + 1] = C[i * 3 + 1];
+      d[o + 2] = C[i * 3 + 2];
+      d[o + 3] = 255;
+    }
+  };
+  put(patch.lakeK, patch.lakeC);
+  put(patch.coastK, patch.coastC);
+  const tmp = makeCanvas(r.w, r.h);
+  (tmp.getContext('2d') as CanvasRenderingContext2D).putImageData(img, 0, 0);
+  ctx.drawImage(tmp, 0, 0);
+  tmp.width = tmp.height = 0;
+  noInk = { raster: r, canvas: cv };
+  return cv;
+}
+
+function paintBase(ctx: CanvasRenderingContext2D, world: World, r: Raster, patch: InkPatch) {
+  const { w, h, water, biome } = r;
+  const N = w * h;
+  const S = r.scale;
+
+  // 符号先规划(纯计算):像素层要知道山符号底边在哪,好把雪地和符号羽化到一起
+  const plan = planOf(world);
+
+  const landMask = new Uint8Array(N);
+  const seaMask = new Uint8Array(N);
+  for (let k = 0; k < N; k++) {
+    if (water[k] === 1) seaMask[k] = 1;
+    else landMask[k] = 1;
+  }
+  const dLand = distanceTo(landMask, w, h); // 海面像素 → 最近陆地
+  const dSea = distanceTo(seaMask, w, h); // 陆地像素 → 最近海
+  const shade = hillshade(r, 0.008, 0);
+  const calm = glyphSkirts(world, plan.glyphs, w, h, S);
+
+  const { mask: iceM, near: iceNear } = seaIceField(r);
+
+  const pr = new Float32Array(N);
+  const pg = new Float32Array(N);
+  const pb = new Float32Array(N);
+  for (let k = 0; k < N; k++) {
+    const c = biome[k] === Biome.Ice ? SNOW_PAINT : BIOMES[biome[k]].paint;
+    pr[k] = c[0];
+    pg[k] = c[1];
+    pb[k] = c[2];
+  }
+  const br = Math.round(3 * S);
+  boxBlurWrap(pr, w, h, br);
+  boxBlurWrap(pg, w, h, br);
+  boxBlurWrap(pb, w, h, br);
+
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
+  paintPixels(r, d, { dLand, dSea, shade, calm, iceM, iceNear, pr, pg, pb, patch });
+  // 湖岸描边(东西相连,左右两列也描:邻居在另一头)
+  for (let py = 1; py < h - 1; py++) {
+    for (let px = 0; px < w; px++) {
+      const k = py * w + px;
+      if (water[k] !== 2) continue;
+      const lf = px > 0 ? k - 1 : k + w - 1;
+      const rt = px < w - 1 ? k + 1 : k - w + 1;
+      if (water[lf] !== 2 || water[rt] !== 2 || water[k - w] !== 2 || water[k + w] !== 2) {
+        const o = k * 4;
+        patch.lakeK.push(k);
+        patch.lakeC.push(d[o], d[o + 1], d[o + 2]);
+        d[o] = d[o] * 0.35 + INK[0] * 0.65;
+        d[o + 1] = d[o + 1] * 0.35 + INK[1] * 0.65;
+        d[o + 2] = d[o + 2] * 0.35 + INK[2] * 0.65;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/** 每个世界的符号规划:像素层、符号层都要用;文明层先要符号层时也不用再算一遍 */
+const plans = new WeakMap<World, Plan>();
+/** 弯边投影各一份(符号间距按投影后的距离留,见 glyphMetric;和中央经线无关) */
+const projPlans = new WeakMap<World, Map<ProjectionId, Plan>>();
+function planOf(world: World, proj?: ProjectionId): Plan {
+  if (proj && proj !== 'equirect') {
+    let m = projPlans.get(world);
+    if (!m) projPlans.set(world, (m = new Map()));
+    let q = m.get(proj);
+    if (!q) m.set(proj, (q = planGlyphs(world, glyphMetric(proj, world.width, world.height))));
+    return q;
+  }
+  let p = plans.get(world);
+  if (!p) plans.set(world, (p = planGlyphs(world)));
+  return p;
+}
+
+type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
+function makeCanvas(w: number, h: number): AnyCanvas {
+  return typeof document !== 'undefined'
+    ? Object.assign(document.createElement('canvas'), { width: w, height: h })
+    : new OffscreenCanvas(w, h);
+}
+
+/**
+ * 矢量层:林块(在河流下面,河从林中穿过)→ 河流 → 山 / 丘陵 / 沙丘 / 草丛(从上到下排序遮挡)。
+ * v.k 决定细节层级:符号大小按 glyphScale(k),只画出现门槛 ≤ k 的符号;河流按流量分级。
+ */
+export function drawFantasyVectors(ctx: CanvasRenderingContext2D, world: World, v: VecView) {
+  if (v.proj) {
+    // 弯边投影(按投影重画):这种投影的符号规划;林块、符号在投影后的位置上按屏幕大小画,河逐点投影
+    const pj = v.proj;
+    const pp = planOf(world, pj.mp.def.id);
+    drawForests(ctx, world, pp.forest, v, v.k > 1 ? 256 : FOREST_TILE, projCells(world, pj));
+    drawRivers(ctx, world.rivers, v, world.riverThreshold, fantasyRiverStyle(v.k, world.riverThreshold));
+    drawSymbols(ctx, pp.glyphs, v);
+    return;
+  }
+  const plan = planOf(world);
+  // 东西相连:挨着左右边的林块、河、符号在另一边再画一份。图框不画在这里(主图是一整圈星球,不是一页纸;
+  // 纸边、外框画在视窗上,见 ui/MapDecor.tsx、导出)
+  const vw = { ...v, wrap: wrapOf(world) };
+  drawForests(ctx, world, plan.forest, vw, v.k > 1 ? 256 : FOREST_TILE);
+  drawRivers(ctx, world.rivers, vw, world.riverThreshold, fantasyRiverStyle(v.k, world.riverThreshold));
+  drawSymbols(ctx, plan.glyphs, vw);
+}
+
+// ---------------------------------------------------------------------------
+// 弯边投影(按投影重画)
+
+/** 地块中心在投影里的位置(地图平面)、经度差、纬线比例 K、局部间距倍数 sig(林块的圆按它放缩) */
+interface ProjCells {
+  X: Float32Array;
+  Y: Float32Array;
+  rel: Float32Array;
+  K: Float32Array;
+  sig: Float32Array;
+}
+let projCellCache: { world: World; key: string; cells: ProjCells } | null = null;
+
+function projCells(world: World, pj: Projector): ProjCells {
+  if (projCellCache && projCellCache.world === world && projCellCache.key === pj.mp.key) return projCellCache.cells;
+  const { n, x, y, adjStart, adj, spacing } = world.mesh;
+  const X = new Float32Array(n);
+  const Y = new Float32Array(n);
+  const rel = new Float32Array(n);
+  const K = new Float32Array(n);
+  const sig = new Float32Array(n);
+  const half = pj.W / 2;
+  for (let i = 0; i < n; i++) {
+    rel[i] = pj.rel(x[i]);
+    K[i] = pj.K(y[i]);
+    X[i] = half + K[i] * rel[i];
+    Y[i] = pj.Y(y[i]);
+  }
+  // 局部间距:到相邻地块的平均距离(地图平面;跨 ±180° 的邻居按连着的那边量)÷ 等距圆柱赤道附近的平均距离
+  // (等距圆柱在赤道附近横竖不变形,林块的圆在那里的大小就是设计的大小;平均邻距约 1.4 个 spacing)
+  const D0 = equatorNeighborDist(world) || spacing;
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    let cnt = 0;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      let dr = rel[j] - rel[i];
+      if (dr > Math.PI) dr -= 2 * Math.PI;
+      else if (dr < -Math.PI) dr += 2 * Math.PI;
+      const dx = half + K[j] * (rel[i] + dr) - X[i];
+      const dy = Y[j] - Y[i];
+      sum += Math.sqrt(dx * dx + dy * dy);
+      cnt++;
+    }
+    sig[i] = cnt ? Math.max(0.35, Math.min(4, sum / cnt / D0)) : 1;
+  }
+  const cells = { X, Y, rel, K, sig };
+  projCellCache = { world, key: pj.mp.key, cells };
+  return cells;
+}
+
+/** 赤道 ±5° 以内的地块到相邻地块的平均距离(世界单位,等距圆柱主图上量) */
+function equatorNeighborDist(world: World): number {
+  const { n, x, y, adjStart, adj } = world.mesh;
+  const W = world.width;
+  const band = world.height / 36;
+  let sum = 0;
+  let cnt = 0;
+  for (let i = 0; i < n; i++) {
+    if (Math.abs(y[i] - world.height / 2) > band) continue;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      const dx = nearX(x[j], x[i], W) - x[i];
+      const dy = y[j] - y[i];
+      sum += Math.sqrt(dx * dx + dy * dy);
+      cnt++;
+    }
+  }
+  return cnt ? sum / cnt : 0;
+}
+
+/** 山脊走向(世界坐标里的角度)换算到投影后的画面上:按这一点的局部拉伸 / 斜切变换方向,再收回 (−90°, 90°] */
+function projectedAngle(pj: Projector, g: Glyph, rel: number): number {
+  const jxx = (pj.K(g.y) * 2 * Math.PI) / pj.W;
+  const jxy = pj.dK(g.y) * rel;
+  const jyy = pj.dY(g.y);
+  const c = Math.cos(g.a);
+  const s = Math.sin(g.a);
+  let a = Math.atan2(jyy * s, jxx * c + jxy * s);
+  if (a > Math.PI / 2) a -= Math.PI;
+  else if (a <= -Math.PI / 2) a += Math.PI;
+  return a;
+}
+
+/** 海岸线、湖岸线(世界坐标折线,x 展开成连续的);每张像素图算一次 */
+const coastCache = new WeakMap<Raster, { sea: Float32Array[]; lake: Float32Array[] }>();
+
+/**
+ * 海岸 / 湖岸的矢量线(按投影重画时代替像素层里的墨线):在像素水陆图上走方格(marching squares),
+ * 海岸的交点按海拔过零处插值(和像素层画墨线的位置一样),湖岸取像素边中点再抹平两遍。东西相连:最右一列和第一列之间也走
+ */
+export function fantasyCoastLines(r: Raster): { sea: Float32Array[]; lake: Float32Array[] } {
+  let c = coastCache.get(r);
+  if (c) return c;
+  const { w, h, water } = r;
+  const sea = new Uint8Array(w * h);
+  const lake = new Uint8Array(w * h);
+  for (let k = 0; k < w * h; k++) {
+    if (water[k] === 1) sea[k] = 1;
+    else if (water[k] === 2) lake[k] = 1;
+  }
+  c = {
+    sea: traceMask(r, sea, true),
+    lake: traceMask(r, lake, false).map((p) => chaikinPts(chaikinPts(p))),
+  };
+  coastCache.set(r, c);
+  return c;
+}
+
+/** 折线(x, y 交错)Chaikin 抹平一遍,两端不动(首尾相同的环照样首尾相同) */
+function chaikinPts(p: Float32Array): Float32Array {
+  const m = p.length / 2;
+  if (m < 3) return p;
+  const closed = p[0] === p[p.length - 2] && p[1] === p[p.length - 1];
+  const out: number[] = [];
+  if (!closed) out.push(p[0], p[1]);
+  for (let i = 0; i < m - 1; i++) {
+    const ax = p[i * 2];
+    const ay = p[i * 2 + 1];
+    const bx = p[i * 2 + 2];
+    const by = p[i * 2 + 3];
+    out.push(0.75 * ax + 0.25 * bx, 0.75 * ay + 0.25 * by, 0.25 * ax + 0.75 * bx, 0.25 * ay + 0.75 * by);
+  }
+  if (!closed) out.push(p[p.length - 2], p[p.length - 1]);
+  else out.push(out[0], out[1]);
+  return Float32Array.from(out);
+}
+
+/**
+ * 方格里"从哪条边进、从哪条边出"(边:0 上 1 右 2 下 3 左;−1 = 这条边不过线)。
+ * 两个对角在里面的方格(5、10),里面的两角各自圈开
+ */
+const MS_EXIT = new Int8Array(16 * 4).fill(-1);
+{
+  const pair = (c: number, a: number, b: number) => {
+    MS_EXIT[c * 4 + a] = b;
+    MS_EXIT[c * 4 + b] = a;
+  };
+  for (const c of [1, 14]) pair(c, 3, 2);
+  for (const c of [2, 13]) pair(c, 2, 1);
+  for (const c of [3, 12]) pair(c, 3, 1);
+  for (const c of [4, 11]) pair(c, 0, 1);
+  pair(5, 0, 1);
+  pair(5, 3, 2);
+  for (const c of [6, 9]) pair(c, 0, 2);
+  for (const c of [7, 8]) pair(c, 0, 3);
+  pair(10, 0, 3);
+  pair(10, 2, 1);
+}
+
+/**
+ * 在二值图 inside 上走方格(marching squares 沿线追踪),描出里外的分界折线(世界坐标,x 展开成连续的)。
+ * 方格 (x, y) 的四角是像素 (x, y)、(x+1, y)、(x+1, y+1)、(x, y+1) 的中心(x 东西相连);
+ * 线过像素之间的边:byElev 时交点按海拔过零处插值,否则取中点。
+ * 边编号:横边 (x, y)—(x+1, y) = 2(y·w + x),竖边 (x, y)—(x, y+1) = 2(y·w + x) + 1
+ */
+function traceMask(r: Raster, inside: Uint8Array, byElev: boolean): Float32Array[] {
+  const { w, h, elev, scale: S } = r;
+  const W = w / S;
+  const visited = new Uint8Array(2 * w * h);
+  const caseAt = (x: number, y: number) => {
+    const x1 = x + 1 === w ? 0 : x + 1;
+    return (inside[y * w + x] << 3) | (inside[y * w + x1] << 2) | (inside[(y + 1) * w + x1] << 1) | inside[(y + 1) * w + x];
+  };
+  /** 方格 (x, y) 的第 side 条边的编号 */
+  const edgeOf = (x: number, y: number, side: number) =>
+    side === 0 ? (y * w + x) * 2 : side === 2 ? ((y + 1) * w + x) * 2 : side === 3 ? (y * w + x) * 2 + 1 : (y * w + (x + 1 === w ? 0 : x + 1)) * 2 + 1;
+  const pos = (id: number, out: number[]) => {
+    const e = id >> 1;
+    const x = e % w;
+    const y = (e - x) / w;
+    const vert = id & 1;
+    const ka = y * w + x;
+    const kb = vert ? ka + w : y * w + (x + 1 === w ? 0 : x + 1);
+    let t = 0.5;
+    if (byElev) {
+      const ea = elev[ka];
+      const eb = elev[kb];
+      if (ea < 0 !== eb < 0 && ea !== eb) t = Math.max(0.02, Math.min(0.98, ea / (ea - eb)));
+    }
+    out.push(vert ? (x + 0.5) / S : (x + 0.5 + t) / S, vert ? (y + 0.5 + t) / S : (y + 0.5) / S);
+  };
+  const out: Float32Array[] = [];
+  /** 从边 id 进方格 (x, y)(从它的第 side 条边进),一路走到回到起点或碰到上下边 */
+  const walk = (id: number, x: number, y: number, side: number) => {
+    const pts: number[] = [];
+    pos(id, pts);
+    visited[id] = 1;
+    const start = id;
+    for (;;) {
+      const ex = MS_EXIT[caseAt(x, y) * 4 + side];
+      if (ex < 0) break;
+      const e = edgeOf(x, y, ex);
+      if (e === start) {
+        pos(e, pts);
+        break;
+      }
+      if (visited[e]) break;
+      visited[e] = 1;
+      pos(e, pts);
+      // 走到这条边另一侧的方格
+      if (ex === 0) {
+        if (y === 0) break;
+        y--;
+        side = 2;
+      } else if (ex === 2) {
+        if (y + 1 >= h - 1) break;
+        y++;
+        side = 0;
+      } else if (ex === 1) {
+        x = x + 1 === w ? 0 : x + 1;
+        side = 3;
+      } else {
+        x = x === 0 ? w - 1 : x - 1;
+        side = 1;
+      }
+    }
+    for (let i = 2; i < pts.length; i += 2) pts[i] = nearX(pts[i], pts[i - 2], W);
+    if (pts.length >= 4) out.push(Float32Array.from(pts));
+  };
+  // 先从碰到上下边的线头出发(最上一行、最下一行的横边),再走剩下的环
+  for (const y of [0, h - 1]) {
+    for (let x = 0; x < w; x++) {
+      const k = y * w + x;
+      const id = k * 2;
+      if (visited[id] || inside[k] === inside[y * w + (x + 1 === w ? 0 : x + 1)]) continue;
+      if (y === 0) walk(id, x, 0, 0);
+      else walk(id, x, h - 2, 2);
+    }
+  }
+  for (let y = 0; y < h - 1; y++) {
+    for (let x = 0; x < w; x++) {
+      const k = y * w + x;
+      // 横边:进下面的方格(从它的上边进);竖边:进右边的方格(从它的左边进)
+      const hid = k * 2;
+      if (!visited[hid] && inside[k] !== inside[y * w + (x + 1 === w ? 0 : x + 1)]) walk(hid, x, y, 0);
+      const vid = k * 2 + 1;
+      if (!visited[vid] && inside[k] !== inside[k + w]) walk(vid, x, y, 3);
+    }
+  }
+  return out;
+}
+
+/** 海岸墨线、湖岸描边的投影路径(地图平面坐标,画的时候按视口变换;每个投影 + 中心一份) */
+let coastPaths: { raster: Raster; key: string; sea: Path2D; lake: Path2D } | null = null;
+
+/**
+ * 弯边投影下的海岸墨线、湖岸描边(代替像素层里的那两样,线宽处处一致):逐点投影,按屏幕宽度描。
+ * 放大后跟着符号一起按 glyphScale 变粗(比地图放大得慢)
+ */
+export function drawFantasyCoasts(ctx: CanvasRenderingContext2D, r: Raster, v: VecView): void {
+  const pj = v.proj;
+  if (!pj) return;
+  if (!coastPaths || coastPaths.raster !== r || coastPaths.key !== pj.mp.key) {
+    const lines = fantasyCoastLines(r);
+    const unit = { s: 1, ox: 0, oy: 0 };
+    const sea = new Path2D();
+    const lake = new Path2D();
+    for (const p of lines.sea) addProjectedLine(sea, p, 2, pj, unit);
+    for (const p of lines.lake) addProjectedLine(lake, p, 2, pj, unit);
+    coastPaths = { raster: r, key: pj.mp.key, sea, lake };
+  }
+  const gs = glyphScale(v.k);
+  ctx.save();
+  ctx.setTransform(v.s, 0, 0, v.s, v.ox, v.oy);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = INK_CSS + '0.65)';
+  ctx.lineWidth = 1.05 * gs;
+  ctx.stroke(coastPaths.lake);
+  ctx.strokeStyle = INK_CSS + '0.9)';
+  ctx.lineWidth = 1.45 * gs;
+  ctx.stroke(coastPaths.sea);
+  ctx.restore();
+}
+
+/** 弯边投影的符号层(缩放 1 倍,和地图平面一样大;林块、河、山……,不含海岸):地形图贴它,文明层按它的形状"让位" */
+let projSym: { raster: Raster; key: string; canvas: AnyCanvas; ink: { key: string; hard: AnyCanvas; soft: AnyCanvas } | null } | null = null;
+
+export function fantasySymbolLayerProj(world: World, r: Raster, mp: MapProj): AnyCanvas {
+  if (projSym && projSym.raster === r && projSym.key === mp.key) return projSym.canvas;
+  const cv = projSym && projSym.canvas.width === r.w && projSym.canvas.height === r.h ? projSym.canvas : makeCanvas(r.w, r.h);
+  if (projSym && projSym.canvas !== cv) {
+    projSym.canvas.width = projSym.canvas.height = 0;
+  }
+  if (projSym?.ink) projSym.ink.hard.width = projSym.ink.hard.height = projSym.ink.soft.width = projSym.ink.soft.height = 0;
+  const ctx = cv.getContext('2d') as CanvasRenderingContext2D;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, r.w, r.h);
+  const v = { s: r.scale, ox: 0, oy: 0, k: 1, proj: projector(mp) };
+  ctx.save();
+  clipOutline(ctx, mp, v);
+  drawFantasyVectors(ctx, world, v);
+  ctx.restore();
+  projSym = { raster: r, key: mp.key, canvas: cv, ink: null };
+  return cv;
+}
+
+/**
+ * 弯边投影下文明层的"让位"遮罩(和 fantasyInkMask 同一套分档,只是按投影后的符号层算):
+ * 两张和地图平面一样大的画布,透明度 = hard / soft(见 InkMask)。文明层拿它们在显卡上合成(render/civ/territory.ts)
+ */
+export function fantasyInkProj(world: World, r: Raster, mp: MapProj, forest: number, paper: number): { hard: AnyCanvas; soft: AnyCanvas } {
+  const cv = fantasySymbolLayerProj(world, r, mp);
+  const key = `${forest}|${paper}`;
+  if (projSym!.ink?.key === key) return projSym!.ink;
+  const px = (cv.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, r.w, r.h).data;
+  const hi = new ImageData(r.w, r.h);
+  const si = new ImageData(r.w, r.h);
+  const hd = hi.data;
+  const sd = si.data;
+  const N = r.w * r.h;
+  for (let k = 0; k < N; k++) {
+    const o = k * 4;
+    const a = px[o + 3];
+    if (!a) continue;
+    const lum = 0.3 * px[o] + 0.59 * px[o + 1] + 0.11 * px[o + 2];
+    const tInk = lum <= 95 ? 1 : lum >= 125 ? 0 : (125 - lum) / 30;
+    const wgt = lum <= 165 ? forest : lum >= 205 ? paper : forest + ((paper - forest) * (lum - 165)) / 40;
+    hd[o + 3] = a * tInk;
+    sd[o + 3] = a * (1 - tInk) * wgt;
+  }
+  const hard = makeCanvas(r.w, r.h);
+  const soft = makeCanvas(r.w, r.h);
+  (hard.getContext('2d') as CanvasRenderingContext2D).putImageData(hi, 0, 0);
+  (soft.getContext('2d') as CanvasRenderingContext2D).putImageData(si, 0, 0);
+  if (projSym!.ink) projSym!.ink.hard.width = projSym!.ink.hard.height = projSym!.ink.soft.width = projSym!.ink.soft.height = 0;
+  projSym!.ink = { key, hard, soft };
+  return projSym!.ink;
+}
+
+/** 回到等距圆柱时释放按投影重画用的缓存(符号层、遮罩、不带墨线的像素层几十 MB 显存) */
+export function releaseFantasyProjCaches(): void {
+  if (projSym) {
+    projSym.canvas.width = projSym.canvas.height = 0;
+    if (projSym.ink) projSym.ink.hard.width = projSym.ink.hard.height = projSym.ink.soft.width = projSym.ink.soft.height = 0;
+    projSym = null;
+  }
+  if (noInk) {
+    noInk.canvas.width = noInk.canvas.height = 0;
+    noInk = null;
+  }
+  coastPaths = null;
+  projCellCache = null;
+}
+
+/** 手绘风的河:全图细、小河不画;放大后大河按世界单位变粗,小溪不跟着变粗(见 realisticRiverStyle) */
+function fantasyRiverStyle(k: number, threshold: number): RiverStyle {
+  const kk = Math.max(1, k);
+  return {
+    color: 'rgba(48,82,110,0.9)',
+    minW: 0.5,
+    maxW: 0.5 + 1.5 * Math.pow(kk, -0.2),
+    fluxRef: 900,
+    thin: Math.pow(kk, -0.6),
+    minFlux: threshold * riverLod(kk),
+  };
+}
+
+/** 文明层的"让位"遮罩,见 fantasyInkMask */
+export interface InkMask {
+  /** 墨线、河流(0–255):水彩在这里总是让开,墨色不被染 */
+  hard: Uint8Array;
+  /** 林块、山的纸色底(0–255):国土内部让开,紧贴边界的一道色带照样上色(林多的国家也认得出疆域) */
+  soft: Uint8Array;
+}
+
+/** 当前这张地图的符号层和遮罩(只留一份:换了世界就把旧画布清掉,尽快释放显存) */
+let sym: { raster: Raster; canvas: AnyCanvas; mask: { key: string; ink: InkMask } | null } | null = null;
+
+/**
+ * 符号层(缩放 1 倍):林块、河流、山 / 丘陵 / 沙丘 / 草丛,画在一张和地图一样大的透明画布上(每张地图只画一次)。
+ * 手绘地图把它贴在像素层上;文明层按它的形状给水彩"让位"(fantasyInkMask),颜料不把符号染脏。
+ */
+export function fantasySymbolLayer(world: World, r: Raster): AnyCanvas {
+  if (sym?.raster === r) return sym.canvas;
+  if (sym) sym.canvas.width = sym.canvas.height = 0;
+  const cv = makeCanvas(r.w, r.h);
+  drawFantasyVectors(cv.getContext('2d') as CanvasRenderingContext2D, world, bakedView(r.scale));
+  sym = { raster: r, canvas: cv, mask: null };
+  return cv;
+}
+
+/** 地球仪的地形贴图、它的符号层和让位遮罩(只留一份,换了像素图就重画) */
+let globeBase: { raster: Raster; canvas: AnyCanvas; sym: AnyCanvas; mask: { key: string; ink: InkMask } | null } | null = null;
+
+/**
+ * 地球仪的地形贴图(手绘,等距圆柱):像素层 + 林块(按纬度横向拉宽,包到球上是圆)+ 河流,
+ * 不含山 / 丘陵 / 沙丘 / 草丛 / 火山 —— 这几样在地球仪上每帧正立着画(render/globeGlyphs.ts),
+ * 不跟着贴图在高纬度被压扁。平面主图不用它
+ */
+export function fantasyGlobeBase(world: World, r: Raster): AnyCanvas {
+  if (globeBase?.raster === r) return globeBase.canvas;
+  releaseFantasyGlobeBase();
+  // 符号(林块、河)先画在一张透明画布上(文明贴图的让位遮罩按它算,见 fantasyGlobeInkMask),再叠到像素层上
+  const symCv = makeCanvas(r.w, r.h);
+  const sctx = symCv.getContext('2d') as CanvasRenderingContext2D;
+  const v = { ...bakedView(r.scale), wrap: wrapOf(world) };
+  drawForests(sctx, world, planOf(world).forest, v, FOREST_TILE, undefined, true);
+  drawRivers(sctx, world.rivers, v, world.riverThreshold, fantasyRiverStyle(1, world.riverThreshold));
+  const cv = makeCanvas(r.w, r.h);
+  const ctx = cv.getContext('2d') as CanvasRenderingContext2D;
+  ctx.drawImage(fantasyBase(world, r), 0, 0);
+  ctx.drawImage(symCv, 0, 0);
+  globeBase = { raster: r, canvas: cv, sym: symCv, mask: null };
+  return cv;
+}
+
+/** 地球仪关掉时释放它的地形贴图 */
+export function releaseFantasyGlobeBase(): void {
+  if (!globeBase) return;
+  globeBase.canvas.width = globeBase.canvas.height = 0;
+  globeBase.sym.width = globeBase.sym.height = 0;
+  globeBase = null;
+}
+
+/**
+ * 文明层的"让位"遮罩(全分辨率,每张地图算一次):水彩在符号的像素上减淡多少。
+ * 把符号层读回来,按像素深浅分档:墨线 / 河流(深)→ hard;林块(中)→ soft × forest;
+ * 山 / 丘陵的纸色底(浅)→ soft × paper;之间线性过渡。乘上符号的覆盖度,抗锯齿的边也是软的。
+ */
+export function fantasyInkMask(world: World, r: Raster, forest: number, paper: number): InkMask {
+  const cv = fantasySymbolLayer(world, r);
+  const key = `${forest}|${paper}`;
+  if (sym!.mask?.key === key) return sym!.mask.ink;
+  const ink = inkFromPixels((cv.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, r.w, r.h).data, r.w * r.h, forest, paper);
+  sym!.mask = { key, ink };
+  return ink;
+}
+
+/** 符号层的像素 → 让位遮罩(见 fantasyInkMask) */
+function inkFromPixels(px: Uint8ClampedArray, N: number, forest: number, paper: number): InkMask {
+  const hard = new Uint8Array(N);
+  const soft = new Uint8Array(N);
+  for (let k = 0; k < N; k++) {
+    const o = k * 4;
+    const a = px[o + 3];
+    if (!a) continue;
+    const lum = 0.3 * px[o] + 0.59 * px[o + 1] + 0.11 * px[o + 2];
+    // 墨 ≤ 95 → hard;林 125–165 → forest;纸 ≥ 205 → paper
+    const tInk = lum <= 95 ? 1 : lum >= 125 ? 0 : (125 - lum) / 30;
+    const wgt = lum <= 165 ? forest : lum >= 205 ? paper : forest + ((paper - forest) * (lum - 165)) / 40;
+    hard[k] = a * tInk;
+    soft[k] = a * (1 - tInk) * wgt;
+  }
+  return { hard, soft };
+}
+
+/**
+ * 地球仪的文明贴图用的让位遮罩(和 fantasyInkMask 同一套分档):按地球仪贴图的符号(按纬度拉宽的林块、河流;
+ * 山丘等符号不在贴图里,正立着画在上面)算 —— 水彩的"让位"和球上的林块对得上
+ */
+export function fantasyGlobeInkMask(world: World, r: Raster, forest: number, paper: number): InkMask {
+  fantasyGlobeBase(world, r);
+  const g = globeBase!;
+  const key = `${forest}|${paper}`;
+  if (g.mask?.key === key) return g.mask.ink;
+  const ink = inkFromPixels((g.sym.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, r.w, r.h).data, r.w * r.h, forest, paper);
+  g.mask = { key, ink };
+  return ink;
+}
+
+/** 像素层用到的预先算好的场 */
+interface PixelFields {
+  dLand: Float32Array;
+  dSea: Float32Array;
+  shade: Float32Array;
+  calm: Uint8Array;
+  iceM: Uint8Array;
+  iceNear: Uint8Array;
+  pr: Float32Array;
+  pg: Float32Array;
+  pb: Float32Array;
+  /** 记下海岸墨线盖掉的像素原色(见 InkPatch) */
+  patch: InkPatch;
+}
+
+/** 逐像素铺纸色、水彩、海冰、海岸墨线(单独成函数:热循环单独编译优化,快一些) */
+function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
+  const { w, h, elev, water, temp } = r;
+  const N = w * h;
+  const S = r.scale;
+  const { dLand, dSea, shade, calm, iceM, iceNear, pr, pg, pb, patch } = f;
+  const snowR = Math.max(1, Math.round(3 * S)); // 雪地明暗的柔化半径
+  const rimD = Math.max(2, Math.round(2.5 * S)); // 冰块东南侧背光边的宽度
+  let iceHatch = Math.max(3, Math.round(3 * S));
+  const ripples = [4, 9, 15].map((v) => v * S);
+  const hatchRow = Math.max(2, Math.round(3 * S));
+  // 东西相连:纸纹、水彩斑驳的噪声格数取整,冰面排线的间距取图宽的约数 —— 左右两边对得上;
+  // 主图是一整圈星球,不是一页纸,这里不做纸边做旧(画在视窗上,见 drawPaperEdge)
+  while (w % iceHatch) iceHatch++;
+  const n90 = wrapCells(w, 90);
+  const n23 = wrapCells(w, 23);
+  const n14 = wrapCells(w, 14);
+  // 颜色都用标量 r/g/b 算(不建临时数组);整张图一个平铺循环(嵌套的行 / 列循环会让 V8 每行退出一次优化代码)
+  let px = -1;
+  let py = 0;
+  for (let k = 0; k < N; k++) {
+    if (++px === w) {
+      px = 0;
+      py++;
+    }
+    // 纸:低频斑驳 + 高频纤维
+    const mott = valueNoiseP((px * n90) / w, py / 90, 1, n90) * 0.6 + valueNoiseP((px * n23) / w, py / 23, 2, n23) * 0.4;
+    const fiber = hash2(px, py, 5);
+    const tp = 0.18 * (mott - 0.5);
+    const p0 = PAPER[0] + (PAPER_EDGE[0] - PAPER[0]) * tp;
+    const p1 = PAPER[1] + (PAPER_EDGE[1] - PAPER[1]) * tp;
+    const p2 = PAPER[2] + (PAPER_EDGE[2] - PAPER[2]) * tp;
+    let cr = p0;
+    let cg = p1;
+    let cb = p2;
+    let t: number;
+    const grain = 1 + 0.035 * (fiber - 0.5);
+
+    if (water[k] === 1) {
+      const nq = iceNear[k];
+      const nearIce = nq > 0; // 附近有海冰
+      const conc = nearIce ? (nq - 1) / 254 : 0; // 附近海面的结冰比例
+      // 3×3 邻域里海冰像素的比例 B(只数海面,陆地另有海岸墨线):0 开阔水面 / 1 冰面内部 / 之间 = 冰缘
+      let B = 0;
+      if (nearIce) {
+        const m0 = iceM[k];
+        // 左右邻居(东西相连时第 0 列 / 最后一列的邻居在另一头)
+        const kl = px > 0 ? k - 1 : k + w - 1;
+        const kr = px < w - 1 ? k + 1 : k - w + 1;
+        if (
+          py > 0 &&
+          py < h - 1 &&
+          (iceM[kl] !== m0 || iceM[kr] !== m0 || iceM[k - w] !== m0 || iceM[k + w] !== m0)
+        ) {
+          let sum = 0;
+          let cnt = 0;
+          for (let dy = -w; dy <= w; dy += w)
+            for (let i = 0; i < 3; i++) {
+              const q = (i === 0 ? kl : i === 1 ? k : kr) + dy;
+              if (water[q] !== 1) continue;
+              sum += iceM[q];
+              cnt++;
+            }
+          B = sum / cnt;
+        } else B = m0; // 上下左右都和自己一样:冰面内部或开阔水面(斜角的零星差别忽略)
+      }
+      if (B < 1) {
+        const dl = dLand[k];
+        // 海色按海底深浅(铺像素时的海深本来就平滑,直接用):
+        // 大陆架(< 200 米)浅、偏绿,过了坡折渐深,深海平原是本来的海色,洋中脊略浅,海沟最深
+        const dm = -elev[k];
+        const dep = dm < 200 ? (dm > 0 ? dm / 200 : 0) * 0.15 : 0.15 + 0.55 * smoothstep(200, 3800, dm) + 0.3 * smoothstep(3800, 5600, dm);
+        let sr: number;
+        let sg: number;
+        let sb: number;
+        if (dep < 0.7) {
+          const q = dep / 0.7;
+          sr = SEA_SHELF[0] + (SEA[0] - SEA_SHELF[0]) * q;
+          sg = SEA_SHELF[1] + (SEA[1] - SEA_SHELF[1]) * q;
+          sb = SEA_SHELF[2] + (SEA[2] - SEA_SHELF[2]) * q;
+        } else {
+          const q = (dep - 0.7) / 0.3;
+          sr = SEA[0] + (SEA_DEEP[0] - SEA[0]) * q;
+          sg = SEA[1] + (SEA_DEEP[1] - SEA[1]) * q;
+          sb = SEA[2] + (SEA_DEEP[2] - SEA[2]) * q;
+        }
+        t = 0.52 + 0.16 * dep;
+        cr += (sr - cr) * t;
+        cg += (sg - cg) * t;
+        cb += (sb - cb) * t;
+        let open = 1; // 1 = 开阔水面;冰区里淡出波纹和排线
+        if (nearIce) {
+          // 冰区里的水面:碎冰、冰泥让海色发浅
+          t = 0.28 * smoothstep(0.05, 0.9, conc);
+          cr += (p0 - cr) * t;
+          cg += (p1 - cg) * t;
+          cb += (p2 - cb) * t;
+          open = 1 - smoothstep(0.02, 0.3, conc);
+        }
+        if (open > 0) {
+          // 近岸排线
+          if (dl < 9 * S && py % hatchRow === 0) {
+            t = 0.16 * (1 - dl / (9 * S)) * open;
+            cr += (INK[0] - cr) * t;
+            cg += (INK[1] - cg) * t;
+            cb += (INK[2] - cb) * t;
+          }
+          // 岸线外的波纹
+          let a = 0;
+          for (let i = 0; i < ripples.length; i++) {
+            const u = (dl - ripples[i]) / (0.55 * S);
+            a = Math.max(a, Math.exp(-u * u) * (0.42 - i * 0.12));
+          }
+          t = a * open;
+          cr += (INK[0] - cr) * t;
+          cg += (INK[1] - cg) * t;
+          cb += (INK[2] - cb) * t;
+        }
+      }
+      if (B > 0) {
+        // 冰面:纸色平涂;东南侧一窄条背光边,画淡蓝灰短排线(和林块的阴影排线同一个方向)
+        const ice = B >= 1 ? 1 : Math.min(1, Math.max(0, (B - 0.5) * 1.5 + 0.5));
+        let ir = p0 + (ICE_PAPER[0] - p0) * 0.7;
+        let ig = p1 + (ICE_PAPER[1] - p1) * 0.7;
+        let ib = p2 + (ICE_PAPER[2] - p2) * 0.7;
+        const qx = px + rimD >= w ? px + rimD - w : px + rimD;
+        const qy = py + rimD;
+        if (qy < h) {
+          const q = qy * w + qx;
+          const rim = water[q] === 1 ? ice - iceM[q] : 0;
+          if (rim > 0) {
+            t = rim * ((px + py) % iceHatch === 0 ? 0.52 : 0.12);
+            ir += (ICE_SHADOW[0] - ir) * t;
+            ig += (ICE_SHADOW[1] - ig) * t;
+            ib += (ICE_SHADOW[2] - ib) * t;
+          }
+        }
+        cr += (ir - cr) * ice;
+        cg += (ig - cg) * ice;
+        cb += (ib - cb) * ice;
+        // 冰缘墨线(B≈0.5);冰区稀疏处(零星碎冰)线条更淡
+        const e = 4 * B * (1 - B);
+        if (e > 0.3) {
+          t = 0.62 * smoothstep(0.3, 0.95, e) * (0.4 + 0.6 * smoothstep(0.1, 0.6, conc));
+          cr += (ICE_INK[0] - cr) * t;
+          cg += (ICE_INK[1] - cg) * t;
+          cb += (ICE_INK[2] - cb) * t;
+        }
+      }
+    } else if (water[k] === 2) {
+      cr += (SEA[0] - cr) * 0.55;
+      cg += (SEA[1] - cg) * 0.55;
+      cb += (SEA[2] - cb) * 0.55;
+    } else {
+      const wn = valueNoiseP((px * n14) / w, py / 14, 9, n14);
+      const wash = 0.66 + 0.22 * (wn - 0.5);
+      cr += (pr[k] - cr) * wash;
+      cg += (pg[k] - cg) * wash;
+      cb += (pb[k] - cb) * wash;
+      // 水彩在岸边积色
+      const ds = dSea[k];
+      if (ds < 5 * S) {
+        t = 0.5 * (1 - ds / (5 * S));
+        cr += (cr * 0.8 - cr) * t;
+        cg += (cg * 0.78 - cg) * t;
+        cb += (cb * 0.7 - cb) * t;
+      }
+      let s = shade[k];
+      // 纸上的起伏晕染:平原上的小起伏压淡(世界地图上平原看着平),丘陵、山地照旧
+      const el = elev[k];
+      let relief = 0.22 * (el >= 1200 ? 1 : el <= 150 ? 0.3 : 0.3 + 0.7 * smoothstep(150, 1200, el));
+      // 高山雪地:明暗压淡、换成柔化过的明暗(大片晕染,不要细碎斑驳),背光面用淡蓝灰;
+      // 山符号底边下渐变成符号底色,不留横向硬边
+      const tk = temp[k];
+      const sn = tk < -7.5 ? smoothstep(-7.5, -10.5, tk) : 0;
+      if (sn > 0) {
+        s += (boxAvg(shade, w, h, px, py, snowR) - s) * sn;
+        const cm = (calm[k] / 255) * sn;
+        relief *= (1 - 0.75 * sn - 0.25 * cm) * (s > 1 ? 1 - 0.6 * sn : 1); // 向光面几乎不再提亮:雪就是纸的留白
+        if (s < 1) {
+          t = sn * (1 - cm) * Math.min(0.3, (1 - s) * 0.9);
+          cr += (SNOW_SHADOW[0] - cr) * t;
+          cg += (SNOW_SHADOW[1] - cg) * t;
+          cb += (SNOW_SHADOW[2] - cb) * t;
+        }
+        if (cm > 0) {
+          t = 0.9 * cm;
+          cr += (GLYPH_PAPER[0] - cr) * t;
+          cg += (GLYPH_PAPER[1] - cg) * t;
+          cb += (GLYPH_PAPER[2] - cb) * t;
+        }
+      }
+      const f = 1 + (s - 1) * relief;
+      cr *= f;
+      cg *= f;
+      cb *= f;
+    }
+
+    // 墨线海岸:用海拔过零点的亚像素距离做抗锯齿(东西相连,左右邻居在图边上取另一头)
+    if (dLand[k] <= 2 * S && dSea[k] <= 2 * S) {
+      const e = elev[k];
+      const gx = (elev[px < w - 1 ? k + 1 : k - w + 1] - elev[px > 0 ? k - 1 : k + w - 1]) / 2;
+      const gy = (elev[Math.min(N - 1, k + w)] - elev[Math.max(0, k - w)]) / 2;
+      const g = Math.sqrt(gx * gx + gy * gy) || 1;
+      const sd = Math.abs(e / g);
+      const a = Math.max(0, Math.min(1, (1.15 * S - sd) / (0.8 * S)));
+      t = a * 0.95;
+      if (t > 0) {
+        patch.coastK.push(k);
+        patch.coastC.push(cr * grain, cg * grain, cb * grain);
+      }
+      cr += (INK[0] - cr) * t;
+      cg += (INK[1] - cg) * t;
+      cb += (INK[2] - cb) * t;
+    }
+    const o = k * 4;
+    d[o] = cr * grain;
+    d[o + 1] = cg * grain;
+    d[o + 2] = cb * grain;
+    d[o + 3] = 255;
+  }
+}
+
+/** (px, py) 周围 (2R+1)² 方块里的平均值(方块超出上下边的部分不算;东西相连,左右超出的部分取另一头) */
+function boxAvg(f: Float32Array, w: number, h: number, px: number, py: number, R: number) {
+  const x0 = px - R;
+  const x1 = px + R;
+  const y0 = Math.max(0, py - R);
+  const y1 = Math.min(h - 1, py + R);
+  let sum = 0;
+  for (let y = y0; y <= y1; y++) {
+    const row = y * w;
+    for (let x = x0; x <= x1; x++) sum += f[row + (x < 0 ? x + w : x >= w ? x - w : x)];
+  }
+  return sum / ((x1 - x0 + 1) * (y1 - y0 + 1));
+}
+
+/**
+ * 海冰像素场。铺像素时已经把每个海面像素分成"海冰 / 海洋"(r.ice 覆盖 ≥ 0.5 算冰,
+ * 见 raster.ts / seaice.ts),这里直接读这张分类图:画成冰的地方和群落图层、悬停信息逐像素一致,
+ * 又不用把冰区重新取样一遍(整片重算要多花 150 ms 以上)。冰缘的抗锯齿交给 3×3 邻域平均 + 墨线。
+ * mask:1 = 海冰像素。
+ * near:方圆约 20 像素内结冰的比例,0 = 附近没冰,1–255 对应比例 0–1(平滑,当"冰区程度"用)。
+ */
+function seaIceField(r: Raster) {
+  const { w, h, biome } = r;
+  const mask = new Uint8Array(w * h);
+  const near = new Uint8Array(w * h);
+  // 粗网格:每块数结冰像素
+  const G = Math.max(4, Math.round(8 * r.scale));
+  const gw = Math.ceil(w / G);
+  const gh = Math.ceil(h / G);
+  const gIce = new Float32Array(gw * gh);
+  let any = false;
+  for (let py = 0; py < h; py++) {
+    const row = py * w;
+    const grow = Math.floor(py / G) * gw;
+    for (let px = 0; px < w; px++) {
+      if (biome[row + px] !== Biome.SeaIce) continue;
+      mask[row + px] = 1;
+      gIce[grow + Math.floor(px / G)]++;
+      any = true;
+    }
+  }
+  if (!any) return { mask, near };
+  boxBlurWrap(gIce, gw, gh, 2);
+  // 比例 = 冰像素 / 块面积(陆地也算在分母里,海岸边偏低一点,不影响观感)
+  const inv = 1 / (G * G);
+  const colX0 = new Int32Array(w);
+  const colX1 = new Int32Array(w);
+  const colT = new Float32Array(w);
+  for (let px = 0; px < w; px++) {
+    // 东西相连:左右边的像素插在最后一格和第一格之间
+    const fx = (px + 0.5) / G - 0.5;
+    const x0 = Math.floor(fx);
+    colX0[px] = x0 < 0 ? x0 + gw : x0;
+    colX1[px] = x0 + 1 >= gw ? x0 + 1 - gw : x0 + 1;
+    colT[px] = fx - x0;
+  }
+  for (let by = 0; by < gh; by++) {
+    for (let bx = 0; bx < gw; bx++) {
+      if (gIce[by * gw + bx] < 1e-3) continue; // 附近两块内都没冰
+      const x0 = bx * G;
+      const y0 = by * G;
+      const x1 = Math.min(w, x0 + G);
+      const y1 = Math.min(h, y0 + G);
+      for (let py = y0; py < y1; py++) {
+        // 粗网格双线性插值
+        const fy = Math.min(gh - 1, Math.max(0, (py + 0.5) / G - 0.5));
+        const gy0 = Math.floor(fy);
+        const ty = fy - gy0;
+        const r0 = gy0 * gw;
+        const r1 = Math.min(gh - 1, gy0 + 1) * gw;
+        for (let px = x0; px < x1; px++) {
+          const a = colX0[px];
+          const b = colX1[px];
+          const tx = colT[px];
+          const v =
+            ((gIce[r0 + a] * (1 - tx) + gIce[r0 + b] * tx) * (1 - ty) + (gIce[r1 + a] * (1 - tx) + gIce[r1 + b] * tx) * ty) *
+            inv;
+          near[py * w + px] = 1 + Math.round(Math.min(1, v) * 254);
+        }
+      }
+    }
+  }
+  return { mask, near };
+}
+
+/**
+ * a = 山脊走向角(弧度,-90°..90°),c = 走向的可信度 0..1;s = 缩放 1 倍时的大小(世界单位);
+ * z = 从缩放几倍起画(GLYPH_TIERS 里的一级:1 = 全图就有)
+ */
+export type Glyph = { x: number; y: number; kind: number; s: number; v: number; a: number; c: number; cell: number; z: number };
+export const G_MOUNTAIN = 0;
+export const G_HILL = 1;
+export const G_DUNE = 5;
+export const G_TUFT = 6;
+export const G_VOLCANO = 7;
+
+/** 林块种类:0 无 / 1 阔叶 / 2 针叶 / 3 雨林 */
+const F_BROAD = 1;
+const F_PINE = 2;
+const F_JUNGLE = 3;
+const FOREST_OF: Record<number, [kind: number, threshold: number]> = {
+  [Biome.TemperateForest]: [F_BROAD, 0.43],
+  [Biome.TropicalDryForest]: [F_BROAD, 0.52],
+  [Biome.Taiga]: [F_PINE, 0.44],
+  [Biome.TemperateRainforest]: [F_PINE, 0.36],
+  [Biome.Rainforest]: [F_JUNGLE, 0.32],
+};
+
+export type Plan = { glyphs: Glyph[]; forest: Uint8Array };
+
+/** 山符号的半宽(世界单位):东西走向的脊宽一点,南北走向的窄一点(a = 画面上的山脊走向,弯边投影里是换算过的) */
+function mountainHalfWidth(g: Glyph, a = g.a) {
+  const cos2 = Math.cos(a) ** 2;
+  return g.s * (1 + g.c * (0.18 * cos2 - 0.14 * (1 - cos2)));
+}
+
+/**
+ * 山 / 丘陵符号底边下的"羽化带"(0–255):底边处为 255,往下约 3/4 个符号高度内渐变到 0,
+ * 两端在底角附近收掉。像素层用它把雪地颜色过渡成符号底色。
+ */
+function glyphSkirts(world: World, glyphs: Glyph[], w: number, h: number, S: number) {
+  const out = new Uint8Array(w * h); // 0–255
+  const wrap = w;
+  for (const g of glyphs) {
+    // 只管全图就有的符号(铺进地形图的那一份);放大后才出现的小符号不羽化
+    if ((g.kind !== G_MOUNTAIN && g.kind !== G_HILL) || g.z > 1) continue;
+    // 只有雪地上才用得到:符号所在地块明显不冷就跳过(留几度余量,像素温度带细节起伏)
+    if (world.temperature[g.cell] > -2) continue;
+    const hw = (g.kind === G_MOUNTAIN ? mountainHalfWidth(g) : g.s) * S;
+    // 挨着左右边的符号(东西相连),另一边也羽化一份
+    for (const sh of wrapShifts(g.x * S - hw, g.x * S + hw, wrap)) skirt(out, g, g.x * S + sh, w, h, S, hw);
+  }
+  return out;
+}
+
+/** 一个符号(画在像素横坐标 gx 处)的羽化带,取最大值写进 out */
+function skirt(out: Uint8Array, g: Glyph, gx: number, w: number, h: number, S: number, hw: number) {
+  const gy = g.y * S;
+  const s = g.s * S;
+  const depth = s * (g.kind === G_MOUNTAIN ? 0.75 : 0.55);
+  const x0 = Math.max(0, Math.floor(gx - hw));
+  const x1 = Math.min(w - 1, Math.ceil(gx + hw));
+  const y0 = Math.max(0, Math.floor(gy - s * 0.25));
+  const y1 = Math.min(h - 1, Math.ceil(gy + depth));
+  for (let py = y0; py <= y1; py++) {
+    const t = (py + 0.5 - gy) / depth;
+    const wy = t <= 0 ? 1 : 1 - smoothstep(0, 1, t);
+    if (wy <= 0) continue;
+    const row = py * w;
+    for (let px = x0; px <= x1; px++) {
+      const u = Math.abs(px + 0.5 - gx) / hw;
+      if (u >= 1) continue;
+      const v = Math.round(255 * wy * smoothstep(1, 0.55, u));
+      if (v > out[row + px]) out[row + px] = v;
+    }
+  }
+}
+
+/** 只在陆地内部做邻居平均(海当作"没有数据",避免海岸被误判成山脊)。 */
+function landBlur(world: World, f: Float32Array, land: Uint8Array, passes: number) {
+  const { n, adjStart, adj } = world.mesh;
+  let a = f.slice();
+  let b = new Float32Array(n);
+  for (let p = 0; p < passes; p++) {
+    for (let i = 0; i < n; i++) {
+      if (!land[i]) {
+        b[i] = a[i];
+        continue;
+      }
+      let s = a[i];
+      let c = 1;
+      for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+        const j = adj[k];
+        if (land[j]) {
+          s += a[j];
+          c++;
+        }
+      }
+      b[i] = s / c;
+    }
+    const t = a;
+    a = b;
+    b = t;
+  }
+  return a;
+}
+
+/**
+ * 大范围"基准面":方圆几十像素内陆地的平均海拔(在粗网格上盒式模糊,很便宜)。
+ * 海拔减基准面 = 比周围的大地形高出多少 —— 真正的山脉很突出,起伏的高原不突出。
+ */
+function baseLevel(world: World, e0: Float32Array, land: Uint8Array, radius: number) {
+  const { n, x, y } = world.mesh;
+  const G = 8;
+  // 东西相连:网格左右首尾相接(列下标取模),东西向半径按纬度放宽(按地面距离平均)
+  const gw = Math.ceil(world.width / G);
+  const gh = Math.ceil(world.height / G) + 1;
+  const sum = new Float32Array(gw * gh);
+  const cnt = new Float32Array(gw * gh);
+  for (let i = 0; i < n; i++) {
+    if (!land[i]) continue;
+    const k = Math.floor(y[i] / G) * gw + Math.floor(x[i] / G);
+    sum[k] += e0[i];
+    cnt[k] += 1;
+  }
+  const R = Math.max(1, Math.round(radius / G));
+  const stretch = Float32Array.from({ length: gh }, (_, r) => 1 / Math.max(1e-3, rowCos(r, gh - 1)));
+  for (let pass = 0; pass < 2; pass++) {
+    boxBlurWrap(sum, gw, gh, R, stretch);
+    boxBlurWrap(cnt, gw, gh, R, stretch);
+  }
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!land[i]) continue;
+    const fx = x[i] / G - 0.5;
+    const fy = Math.min(gh - 1.001, Math.max(0, y[i] / G - 0.5));
+    const xa = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const tx = fx - xa;
+    const ty = fy - y0;
+    const x0 = xa < 0 ? xa + gw : xa;
+    const x1 = xa + 1 >= gw ? xa + 1 - gw : xa + 1;
+    let s = 0;
+    let c = 0;
+    for (let dy = 0; dy < 2; dy++)
+      for (let dx = 0; dx < 2; dx++) {
+        const wgt = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty);
+        const k = (y0 + dy) * gw + (dx ? x1 : x0);
+        s += sum[k] * wgt;
+        c += cnt[k] * wgt;
+      }
+    out[i] = c > 1e-6 ? s / c : e0[i];
+  }
+  return out;
+}
+
+/**
+ * 符号的随机数"用途"编号(keyed 的第二个参数)。每个符号的抖动、大小、取舍 = keyed(种子, 地块, 用途):
+ * 按"哪个地块、做什么"直接算出来,和规划的先后无关 —— 改地形后哪里多了 / 少了一个符号,
+ * 别处的符号一个都不挪(原来用一条按先后取的随机数,多取一个,后面所有符号都跟着变)。
+ * 地块网格只由种子决定,改地形也不变(见 gen/civ/rand.ts)。
+ */
+const R_MTN_LEAN = 1; // 山:峰顶左右偏一点
+const R_FOREST_DROP = 2; // 太小的林块去不去掉(按这块林子编号最小的地块)
+const R_HILL_PICK = 3; // 丘陵:放不放
+const R_HILL_SIZE = 4; // 丘陵:大小
+const R_HILL_LEAN = 5;
+const R_DOT_PICK = 6; // 沙丘 / 草丛:放不放
+const R_DOT_X = 7; // 沙丘 / 草丛:在地块里的位置
+const R_DOT_Y = 8;
+const R_DOT_LEAN = 9;
+
+/**
+ * 决定每个符号放哪、多大(纯计算,不画;导出给单测用)。
+ * metric:弯边投影按投影重画时的"尺子"(render/projection.ts 的 glyphMetric)—— 符号之间的距离按投影后的地图平面量,
+ * 符号按屏幕大小画时在那种投影里也不挤成一团、不稀稀拉拉;不给 = 等距圆柱(世界坐标就是地图平面)
+ */
+export function planGlyphs(world: World, metric?: GlyphMetric): Plan {
+  const { mesh, elevation, water, biome, maxElevation } = world;
+  // 东西相连:间距、走向、噪声都按左右相连算
+  const WR = wrapOf(world);
+  const geo = geometryOf(mesh);
+  const { n, x, y, spacing, adjStart, adj } = mesh;
+  const gSeed = subSeed(world.params.seed, 'glyphs');
+  /** 地块 cell 上、做 use 这件事的随机数 [0, 1)(见上面的 R_*) */
+  const rnd = (cell: number, use: number) => keyed(gSeed, cell, use);
+  const glyphs: Glyph[] = [];
+
+  // ---- 地形量:脊度(比周围高多少)、坡度 ----
+  const land = new Uint8Array(n);
+  const e0 = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (water[i] === 0) {
+      land[i] = 1;
+      e0[i] = Math.max(0, elevation[i]);
+    }
+  }
+  const b4 = landBlur(world, e0, land, 4);
+  const b1 = landBlur(world, e0, land, 1);
+  const ridge = new Float32Array(n);
+  const slope = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!land[i]) continue;
+    ridge[i] = e0[i] - b4[i];
+    let m = 0;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (!land[j]) continue;
+      // 两地块的地面距离(跨 180° 经线的邻居在主图上隔着整张图)
+      const g = Math.abs(b1[i] - b1[j]) / geo.dist(i, j);
+      if (g > m) m = g;
+    }
+    slope[i] = m;
+  }
+
+  const base = baseLevel(world, e0, land, 40);
+  const maxE = Math.max(1, maxElevation);
+  const mtnMin = Math.max(900, maxE * 0.16);
+  const mtnBase = mtnMin * 0.8;
+  const ridgeMin = Math.max(70, maxE * 0.022);
+  const hillMin = Math.max(260, maxE * 0.045);
+  const promMin = Math.max(150, maxE * 0.042);
+
+  // ---- 山脊:脊线、主脊 / 侧脊、走向(候选,按分数排好) ----
+  // 脊线 = 平滑后的地形上"两侧都更低"的地块。平滑得狠 → 只剩主脊;平滑得轻 → 还有侧脊。
+  // 主脊先占位、画得大;侧脊后占位、画得小;山坡和高原不放山。
+  const bMain = landBlur(world, e0, land, 9);
+  const bSpur = landBlur(world, e0, land, 2);
+  const crest = (bf: Float32Array, i: number) => {
+    let lo = 0;
+    let deg = 0;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (!land[j]) continue;
+      deg++;
+      if (bf[j] < bf[i]) lo++;
+    }
+    return deg > 0 && lo / deg >= 0.66;
+  };
+  // 另外要比方圆几十像素的"基准面"高出一截:起伏的高原上那些小脊不算山
+  const level = new Uint8Array(n); // 0 非脊 / 1 侧脊 / 2 主脊
+  const mCand: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!land[i] || e0[i] < mtnBase) continue;
+    const prom = e0[i] - base[i];
+    if (crest(bMain, i) && e0[i] - bMain[i] > ridgeMin && prom > promMin * 0.8) level[i] = 2;
+    else if (crest(bSpur, i) && ridge[i] > ridgeMin * 0.6 && prom > promMin) level[i] = 1;
+    else continue;
+    mCand.push(i);
+  }
+  const mScore = (i: number) => (level[i] === 2 ? 1e5 + e0[i] : e0[i] + ridge[i]);
+  mCand.sort((a, b) => mScore(b) - mScore(a));
+  const stamp = new Int32Array(n).fill(-1);
+  const ring: number[] = [];
+  /** 山脊走向:周围两圈内同级脊点的加权主方向 → [角度, 可信度] */
+  const ridgeAxis = (i: number): [number, number] => {
+    ring.length = 0;
+    stamp[i] = i;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (stamp[j] !== i) {
+        stamp[j] = i;
+        ring.push(j);
+      }
+    }
+    const r1 = ring.length;
+    for (let q = 0; q < r1; q++) {
+      const j0 = ring[q];
+      for (let k = adjStart[j0]; k < adjStart[j0 + 1]; k++) {
+        const j = adj[k];
+        if (stamp[j] !== i) {
+          stamp[j] = i;
+          ring.push(j);
+        }
+      }
+    }
+    let sxx = 0;
+    let syy = 0;
+    let sxy = 0;
+    for (const j of ring) {
+      if (level[j] < level[i]) continue;
+      const dx = nearX(x[j], x[i], WR) - x[i];
+      const dy = y[j] - y[i];
+      sxx += dx * dx;
+      syy += dy * dy;
+      sxy += dx * dy;
+    }
+    const tr = sxx + syy;
+    if (tr <= 0) return [0, 0];
+    const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    const conf = Math.sqrt((sxx - syy) ** 2 + 4 * sxy * sxy) / tr;
+    return [ang, conf];
+  };
+  // ---- 林块:群落 + 低频噪声 → 一团团连通的林地 ----
+  const forest = new Uint8Array(n);
+  const nSalt = gSeed & 0xffff; // 每个种子一张不同的林块分布
+  const n85 = wrapCells(world.width, 85);
+  const n26 = wrapCells(world.width, 26);
+  for (let i = 0; i < n; i++) {
+    if (!land[i]) continue;
+    const f = FOREST_OF[biome[i]];
+    if (!f) continue;
+    const nz = 0.62 * valueNoiseP((x[i] * n85) / WR, y[i] / 85, nSalt, n85) + 0.38 * valueNoiseP((x[i] * n26) / WR, y[i] / 26, nSalt + 1, n26);
+    if (nz > f[1]) forest[i] = f[0];
+  }
+  // 太小的林块(1–2 个地块)大多去掉,留一点零星树丛(按地块顺序找连通块:i = 这块林子编号最小的地块,拿它定去留)
+  const comp = new Int32Array(n).fill(-1);
+  const stack: number[] = [];
+  const members: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!forest[i] || comp[i] >= 0) continue;
+    const kind = forest[i];
+    members.length = 0;
+    stack.push(i);
+    comp[i] = i;
+    while (stack.length) {
+      const c = stack.pop()!;
+      members.push(c);
+      for (let k = adjStart[c]; k < adjStart[c + 1]; k++) {
+        const j = adj[k];
+        if (forest[j] === kind && comp[j] < 0) {
+          comp[j] = i;
+          stack.push(j);
+        }
+      }
+    }
+    if (members.length <= 2 && rnd(i, R_FOREST_DROP) < 0.6) for (const c of members) forest[c] = 0;
+  }
+
+  // ---- 丘陵候选:山脚下坡度中等的小鼓包;高原(高但平)只放零星几个 ----
+  const hCand: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!land[i] || forest[i]) continue;
+    if (e0[i] < hillMin || ridge[i] <= 0) continue;
+    hCand.push(i);
+  }
+  hCand.sort((a, b) => e0[b] + ridge[b] - (e0[a] + ridge[a]));
+
+  // ---- 沙丘 / 草丛候选:荒漠、草原、苔原里(不在林子里)的地块 ----
+  const dCand: number[] = [];
+  const dKind = new Int8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!land[i] || forest[i]) continue;
+    const b = biome[i];
+    if (b === Biome.HotDesert || b === Biome.TemperateDesert) dKind[i] = G_DUNE;
+    else if (b === Biome.Steppe || b === Biome.Savanna || b === Biome.Tundra) dKind[i] = G_TUFT;
+    else continue;
+    dCand.push(i);
+  }
+
+  // ---- 占位网格:符号互相保持距离 ----
+  // 分级放(GLYPH_TIERS):第 t 级按这一级的符号大小(glyphScale)占位 —— 先把前几级已放的符号按这一级的大小占上,
+  // 再在空当里放这一级新的。放大到这一级时,老符号在世界坐标里变小,新符号正好补进空出来的地方,
+  // 所以越放大越密、不会一放大就稀;全图(第 0 级)的符号也照样在,只是更小。
+  const placed: { x: number; y: number; r: number }[] = [];
+  const cellSize = 24;
+  const gw = Math.ceil(world.width / cellSize);
+  let grid = new Map<number, number[]>();
+  const near = (px: number, py: number, rad: number) => {
+    const gx = Math.floor(px / cellSize);
+    const gy = Math.floor(py / cellSize);
+    if (metric) return nearM(px, py, rad, gx, gy, metric);
+    for (let yy = gy - 2; yy <= gy + 2; yy++)
+      for (let x0 = gx - 2; x0 <= gx + 2; x0++) {
+        // 东西相连:格子列号取模,距离按短的那边
+        const xx = x0 < 0 ? x0 + gw : x0 >= gw ? x0 - gw : x0;
+        const l = grid.get(yy * gw + xx);
+        if (!l) continue;
+        for (const id of l) {
+          const q = placed[id];
+          const need = Math.max(rad, q.r) * tf;
+          if ((nearX(q.x, px, WR) - px) ** 2 + (q.y - py) ** 2 < need * need) return true;
+        }
+      }
+    return false;
+  };
+  /** 按投影后的距离查(横向、纵向各乘这一带的倍数;倍数小的地方多查几格) */
+  const nearM = (px: number, py: number, rad: number, gx: number, gy: number, m: GlyphMetric) => {
+    const rx = Math.min((gw - 1) >> 1, Math.max(2, Math.ceil(2 / m.fx(py))));
+    const ry = Math.max(2, Math.ceil(2 / m.fy(py)));
+    for (let yy = gy - ry; yy <= gy + ry; yy++)
+      for (let x0 = gx - rx; x0 <= gx + rx; x0++) {
+        const xx = ((x0 % gw) + gw) % gw;
+        const l = grid.get(yy * gw + xx);
+        if (!l) continue;
+        for (const id of l) {
+          const q = placed[id];
+          const need = Math.max(rad, q.r) * tf;
+          const my = (q.y + py) / 2;
+          const dx = (nearX(q.x, px, WR) - px) * m.fx(my);
+          const dy = (q.y - py) * m.fy(my);
+          if (dx * dx + dy * dy < need * need) return true;
+        }
+      }
+    return false;
+  };
+  const index = (id: number) => {
+    const q = placed[id];
+    const key = Math.floor(q.y / cellSize) * gw + Math.floor(q.x / cellSize);
+    const l = grid.get(key);
+    if (l) l.push(id);
+    else grid.set(key, [id]);
+  };
+  /** rad = 缩放 1 倍时的占位半径;比较时乘这一级的大小倍数 tf */
+  const add = (px: number, py: number, rad: number) => {
+    placed.push({ x: px, y: py, r: rad });
+    index(placed.length - 1);
+  };
+  let tf = 1;
+  const used = new Uint8Array(n); // 已经有符号的地块
+  const mtnCell = new Uint8Array(n);
+
+  for (let tier = 0; tier < GLYPH_TIERS.length; tier++) {
+    const z = GLYPH_TIERS[tier];
+    tf = glyphScale(z);
+    if (tier > 0) {
+      grid = new Map();
+      for (let id = 0; id < placed.length; id++) index(id);
+    }
+
+    // ---- 火山(阶段 4 改地形):作者放的火山,峰顶画一座冒烟的山;先占位,周围不再放普通的山 ----
+    if (tier === 0) {
+      for (const i of world.volcanoes ?? []) {
+        if (!land[i]) continue;
+        const tE = Math.min(1, Math.max(0, e0[i] / maxE));
+        const s = 6 + 7 * Math.sqrt(tE);
+        add(x[i], y[i], s * 1.15);
+        used[i] = 1;
+        glyphs.push({ x: x[i], y: y[i], kind: G_VOLCANO, s, v: 0.5, a: 0, c: 0, cell: i, z });
+      }
+    }
+
+    // ---- 山:只放在山脊上。全图只放主脊和够大的侧脊,放大后侧脊补齐 ----
+    for (const i of mCand) {
+      if (used[i]) continue;
+      // 大小 = 海拔 + 突出程度:主峰大、侧峰小
+      const tE = Math.min(1, Math.max(0, (e0[i] - mtnBase) / Math.max(1, maxE - mtnBase)));
+      const tP = Math.min(1, Math.max(0, (e0[i] - base[i]) / (maxE * 0.3)));
+      const tR = Math.min(1, Math.max(0, ridge[i] / (maxE * 0.12)));
+      const main = level[i] === 2;
+      const s = main ? 4.6 + 8.4 * Math.sqrt(0.6 * tE + 0.4 * tP) : 3.5 + 4.2 * Math.sqrt(0.6 * tE + 0.4 * tP) * (0.55 + 0.45 * tR);
+      if (tier === 0 && !main && s < 5.3) continue;
+      const rad = main ? s * 0.62 : s * 0.9;
+      if (near(x[i], y[i], rad)) continue;
+      add(x[i], y[i], rad);
+      used[i] = mtnCell[i] = 1;
+      const [a, c] = ridgeAxis(i);
+      glyphs.push({ x: x[i], y: y[i], kind: G_MOUNTAIN, s, v: rnd(i, R_MTN_LEAN), a, c, cell: i, z });
+    }
+
+    // ---- 丘陵:每升一级,放的概率高一点 ----
+    const boost = 0.55 + 0.45 * tier;
+    for (const i of hCand) {
+      if (used[i]) continue;
+      const e = e0[i];
+      const sl = slope[i];
+      const plateau = e > mtnBase && !level[i];
+      let p: number;
+      let spread: number;
+      if (plateau) {
+        // 高原:又高又平 → 很稀疏
+        p = sl > 18 ? 0.35 : 0.12;
+        spread = 4;
+      } else if (level[i]) {
+        // 山脊上没轮到山的空当,补小丘
+        p = 0.5;
+        spread = 1.8;
+      } else {
+        // 山脚 / 丘陵地:坡度中等最密,太平的不放
+        const tS = Math.min(1, Math.max(0, (sl - 8) / 30));
+        p = 0.75 * tS;
+        spread = 2;
+      }
+      if (rnd(i, R_HILL_PICK) >= Math.min(0.95, p * boost)) continue;
+      const s = 2.8 + rnd(i, R_HILL_SIZE) * 1.1 + Math.min(0.9, ridge[i] / 450);
+      const rad = s * spread;
+      if (near(x[i], y[i], rad)) continue;
+      add(x[i], y[i], rad);
+      used[i] = 1;
+      glyphs.push({ x: x[i], y: y[i], kind: G_HILL, s, v: rnd(i, R_HILL_LEAN), a: 0, c: 0, cell: i, z });
+    }
+
+    // ---- 沙漠 / 草原:稀疏点缀,每升一级密一点 ----
+    for (const i of dCand) {
+      if (used[i]) continue;
+      const kind = dKind[i];
+      const dens = kind === G_DUNE ? 0.14 : 0.16;
+      if (rnd(i, R_DOT_PICK) > dens * (1 + 0.9 * tier)) continue;
+      let px = x[i] + (rnd(i, R_DOT_X) - 0.5) * spacing * 1.2;
+      const py = y[i] + (rnd(i, R_DOT_Y) - 0.5) * spacing * 1.2;
+      // 东西相连:挪出左右边的放回图里(画的时候挨着边的会在另一边再画一份)
+      px = px < 0 ? px + WR : px >= WR ? px - WR : px;
+      const rad = kind === G_DUNE ? 5 : 2.6;
+      if (near(px, py, rad)) continue;
+      add(px, py, rad);
+      used[i] = 1;
+      glyphs.push({ x: px, y: py, kind, s: 1, v: rnd(i, R_DOT_LEAN), a: 0, c: 0, cell: i, z });
+    }
+  }
+
+  glyphs.sort((a, b) => a.y - b.y);
+  return { glyphs, forest };
+}
+
+const CANOPY: Record<number, string> = {
+  [F_BROAD]: 'rgb(150,165,108)',
+  [F_PINE]: 'rgb(118,140,104)',
+  [F_JUNGLE]: 'rgb(118,145,90)',
+};
+
+/** 林块分块画的方格边长(像素,整数:方格边落在像素边上,相邻两格的裁剪不重叠、不留缝) */
+const FOREST_TILE = 128;
+/** 林块的墨线半宽、阴影排线间距(世界单位,缩放 1 倍时;放大后按 glyphScale 收) */
+const FOREST_LW = 0.55;
+const FOREST_HATCH = 1.7;
+
+/**
+ * 林块:扇贝边轮廓 + 平涂树冠色 + 东南侧阴影排线 + 内部一片小树冠。
+ * 全图时树冠小而密(一片林区的质感);放大后树冠按 glyphScale 收、每个地块多长几棵(GLYPH_TIERS),越放大越细密。
+ * 按整张图的固定方格分块画:每一格只用它附近的地块拼路径、裁在自己的格子里。
+ * 整片林子拼成一条大路径时,浏览器(GPU)栅格化的抗锯齿会随整条路径的范围变一点 ——
+ * 别处多出一块林子,这里的边缘也跟着差几个色阶;分块后远处的格子路径一模一样,画出来逐像素不变。
+ * v = 画布变换(铺进地形图时是整张图;细节层是视口,画布外的地块不画)。
+ * sphere:地球仪的贴图(等距圆柱,包到球上以后纬度 φ 处横向被压成 cos φ):每个地块的圆、树冠按 1 / cos φ 横向拉宽成椭圆,
+ * 包到球上正好是圆 —— 高纬度的林块、树冠在球上不扁(平面主图不用这个)
+ */
+function drawForests(ctx: CanvasRenderingContext2D, world: World, forest: Uint8Array, v: VecView, T: number, pc?: ProjCells, sphere = false) {
+  const { mesh, water } = world;
+  const { n, x, y, spacing, adjStart, adj } = mesh;
+  const seed = subSeed(world.params.seed, 'glyphs');
+  const S = v.s;
+  const gs = glyphScale(v.k);
+  const lw = FOREST_LW * gs * S;
+  const shadeD = spacing * 0.42 * gs * S;
+  let hatchGap = FOREST_HATCH * gs * S;
+  // 东西相连:排线间距微调到一整圈正好是整数条,左右接缝处排线对得上
+  if (v.wrap) hatchGap = (v.wrap * S) / Math.max(1, Math.round((v.wrap * S) / hatchGap));
+  /** 每个内部地块画几棵树冠:全图 1 棵(一部分地块),每升一级多一棵 */
+  let crownsPer = 1;
+  for (let t = 1; t < GLYPH_TIERS.length; t++) if (v.k >= GLYPH_TIERS[t] * 0.95) crownsPer++;
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  const tw = Math.ceil(W / T);
+  const th = Math.ceil(H / T);
+  // 一个地块的林子最远画到中心外多远:针叶尖顶(1.55 × 0.94 个间距)、内部的大圆(1.35),
+  // 加墨线半宽、往西北平移的阴影(shadeD)、留一点余量
+  const reach = spacing * 1.8 * S + shadeD + lw + 2;
+
+  // 每一格、每种林子一组路径:shape = 每个地块一个小圆(边界上的圆大小、位置随机 → 扇贝边;
+  // 内部的圆大一些,保证连成一片不漏纸色),crown* = 内部的树冠
+  type Paths = { shape: Path2D; crowns: Path2D; crownShade: Path2D; crownFill: Path2D };
+  const tiles = new Map<number, (Paths | null)[]>(); // 格子编号 → [无, 阔叶, 针叶, 雨林]
+  const hit: Paths[] = [];
+  /** (cx, cy) 处的林子会画到的格子(这种林子的路径组,没有就建);横向够得着的范围 rch × ax */
+  const tilesNear = (cx: number, cy: number, kind: number, rch = reach, ax = 1) => {
+    hit.length = 0;
+    const tx0 = Math.max(0, Math.floor((cx - rch * ax) / T));
+    const tx1 = Math.min(tw - 1, Math.floor((cx + rch * ax) / T));
+    const ty0 = Math.max(0, Math.floor((cy - rch) / T));
+    const ty1 = Math.min(th - 1, Math.floor((cy + rch) / T));
+    for (let ty = ty0; ty <= ty1; ty++)
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const key = ty * tw + tx;
+        let t = tiles.get(key);
+        if (!t) tiles.set(key, (t = [null, null, null, null]));
+        let g = t[kind];
+        if (!g) t[kind] = g = { shape: new Path2D(), crowns: new Path2D(), crownShade: new Path2D(), crownFill: new Path2D() };
+        hit.push(g);
+      }
+    return hit;
+  };
+  // 东西相连:挨着左右边的地块在另一边再铺一份(平移一整圈),两边的格子各裁各的,拼起来左右相接
+  const wrap = v.wrap ?? 0;
+  const reachW = reach / S;
+  if (pc) {
+    // 弯边投影:地块中心投影过去;林块的圆按这一带地块在投影里的间距放缩(sig,连成一片不漏纸色),
+    // 树冠、墨线、阴影、排线按屏幕大小。挨着 ±180° 的地块在另一边再铺一份(落在外轮廓外的那半由外轮廓裁掉)
+    for (let i = 0; i < n; i++) {
+      const kind = forest[i];
+      if (!kind) continue;
+      const sg = pc.sig[i];
+      const rch = spacing * 1.8 * S * sg + shadeD + lw + 2;
+      const K = pc.K[i];
+      for (const sh of relShifts(pc.rel[i], rch / (Math.max(1e-6, K) * S))) forestCell(i, kind, (pc.X[i] + sh * K) * S + v.ox, pc.Y[i] * S + v.oy, sg, rch);
+    }
+  } else if (sphere) {
+    // 地球仪贴图:按这个地块所在纬度横向拉宽 1 / cos φ(包到球上是圆)
+    for (let i = 0; i < n; i++) {
+      const kind = forest[i];
+      if (!kind) continue;
+      const ax = sphereStretch(y[i], world.height);
+      for (const sh of wrapShifts(x[i] - reachW * ax, x[i] + reachW * ax, wrap)) forestCell(i, kind, (x[i] + sh) * S + v.ox, y[i] * S + v.oy, 1, reach, ax);
+    }
+  } else
+    for (let i = 0; i < n; i++) {
+      const kind = forest[i];
+      if (!kind) continue;
+      for (const sh of wrapShifts(x[i] - reachW, x[i] + reachW, wrap)) forestCell(i, kind, (x[i] + sh) * S + v.ox, y[i] * S + v.oy);
+    }
+  /** ax = 横向拉宽倍数(地球仪贴图;平面 = 1,乘 1 不改变任何数) */
+  function forestCell(i: number, kind: number, X: number, Y: number, sg = 1, rch = reach, ax = 1) {
+    if (X < -rch * ax || Y < -rch || X > W + rch * ax || Y > H + rch) return;
+    let boundary = false;
+    let coast = false;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (forest[j] !== kind) boundary = true;
+      if (water[j] !== 0) coast = true;
+    }
+    const pointy = kind === F_PINE;
+    const h1 = hash2(i, 1, seed);
+    if (boundary) {
+      let R = spacing * (0.62 + 0.32 * h1) * S * sg;
+      if (coast) R *= 0.62;
+      const cx = X + (hash2(i, 2, seed) - 0.5) * spacing * 0.6 * S * sg * ax;
+      const cy = Y + (hash2(i, 3, seed) - 0.5) * spacing * 0.6 * S * sg;
+      for (const g of tilesNear(cx, cy, kind, rch, ax)) {
+        if (ax !== 1) {
+          if (pointy) addPineTopX(g.shape, cx, cy, R, ax);
+          else addEllipse(g.shape, cx, cy, R, ax);
+        } else if (pointy) addPineTop(g.shape, cx, cy, R);
+        else addCircle(g.shape, cx, cy, R);
+      }
+      return;
+    }
+    const gs0 = tilesNear(X, Y, kind, rch, ax);
+    for (const g of gs0) {
+      if (ax !== 1) addEllipse(g.shape, X, Y, spacing * 1.35 * S * sg, ax);
+      else addCircle(g.shape, X, Y, spacing * 1.35 * S * sg);
+    }
+    // 内部树冠:东南侧一弯阴影 + 顶上一道墨弧(针叶是小尖角)。第一棵只长在一部分地块上,之后每级每个地块多一棵
+    for (let c = 0; c < crownsPer; c++) {
+      if (c === 0 && hash2(i, 4, seed) >= (kind === F_JUNGLE ? 0.72 : 0.6)) continue;
+      const jx = c === 0 ? hash2(i, 2, seed) : hash2(i, 10 + c * 2, seed);
+      const jy = c === 0 ? hash2(i, 3, seed) : hash2(i, 11 + c * 2, seed);
+      const spread = c === 0 ? 0.6 : 1.05;
+      const tx = X + (jx - 0.5) * spacing * spread * S * sg * ax;
+      const ty = Y + (jy - 0.5) * spacing * spread * S * sg;
+      const rr = spacing * (0.3 + 0.14 * (c === 0 ? h1 : hash2(i, 20 + c, seed))) * gs * S;
+      const off = rr * 0.32;
+      for (const g of gs0) {
+        if (ax !== 1) {
+          if (pointy) {
+            addChevronX(g.crownShade, tx + off * ax, ty + off, rr, ax, true);
+            addChevronX(g.crownFill, tx, ty, rr, ax, true);
+            addChevronX(g.crowns, tx, ty, rr, ax, false);
+          } else {
+            addEllipse(g.crownShade, tx + off * ax, ty + off, rr, ax);
+            addEllipse(g.crownFill, tx, ty, rr, ax);
+            g.crowns.moveTo(tx - rr * ax, ty);
+            g.crowns.ellipse(tx, ty, rr * ax, rr, 0, Math.PI, Math.PI * 2);
+          }
+        } else if (pointy) {
+          addChevron(g.crownShade, tx + off, ty + off, rr, true);
+          addChevron(g.crownFill, tx, ty, rr, true);
+          addChevron(g.crowns, tx, ty, rr, false);
+        } else {
+          addCircle(g.crownShade, tx + off, ty + off, rr);
+          addCircle(g.crownFill, tx, ty, rr);
+          g.crowns.moveTo(tx - rr, ty);
+          g.crowns.arc(tx, ty, rr, Math.PI, Math.PI * 2);
+        }
+      }
+    }
+  }
+
+  // 排线的相位跟着世界坐标走(细节层平移后排线不"游动")
+  const phase = v.ox + v.oy;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const [key, t] of tiles) {
+    const X0 = (key % tw) * T;
+    const Y0 = Math.floor(key / tw) * T;
+    const X1 = Math.min(W, X0 + T);
+    const Y1 = Math.min(H, Y0 + T);
+    // 地球仪贴图:往西北的阴影平移量也按这一格的纬度横向拉宽(平面 = 1)
+    const tax = sphere ? sphereStretch(((Y0 + Y1) / 2 - v.oy) / S, world.height) : 1;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(X0, Y0, X1 - X0, Y1 - Y0);
+    ctx.clip();
+    for (const kind of [F_BROAD, F_JUNGLE, F_PINE]) {
+      const g = t[kind];
+      if (!g) continue;
+      const canopy = CANOPY[kind];
+      // 1. 轮廓:所有小圆先描一道粗墨线,再用树冠色填满 → 内部的线全被盖住,只剩外圈的扇贝边
+      ctx.strokeStyle = INK_CSS + '0.85)';
+      ctx.lineWidth = lw * 2;
+      ctx.stroke(g.shape);
+      ctx.fillStyle = canopy;
+      ctx.fill(g.shape);
+      // 2. 东南侧阴影:林块内部、且往西北平移后盖不到的一圈 → 背光的边
+      ctx.save();
+      ctx.clip(g.shape);
+      ctx.fillStyle = INK_CSS + '0.10)';
+      ctx.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+      ctx.beginPath();
+      // 排线:线 x + y = c(方向"/"),c = 第几条 × 间距 + 相位(整张图一套),每条画满这一格
+      for (let q = Math.ceil((X0 + Y0 - phase) / hatchGap), qEnd = (X1 + Y1 - phase) / hatchGap; q < qEnd; q++) {
+        const c = q * hatchGap + phase;
+        const ax = Math.max(X0 - 2, c - Y1 - 2);
+        const bx = Math.min(X1 + 2, c - Y0 + 2);
+        if (ax >= bx) continue;
+        ctx.moveTo(ax, c - ax);
+        ctx.lineTo(bx, c - bx);
+      }
+      ctx.strokeStyle = INK_CSS + '0.42)';
+      ctx.lineWidth = 0.55 * gs * S;
+      ctx.stroke();
+      ctx.translate(-shadeD * tax, -shadeD);
+      ctx.fillStyle = canopy;
+      ctx.fill(g.shape);
+      ctx.restore();
+      // 3. 内部树冠
+      ctx.fillStyle = INK_CSS + '0.22)';
+      ctx.fill(g.crownShade);
+      ctx.fillStyle = canopy;
+      ctx.fill(g.crownFill);
+      ctx.strokeStyle = INK_CSS + '0.6)';
+      ctx.lineWidth = 0.55 * gs * S;
+      ctx.stroke(g.crowns);
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/** 地球仪贴图横向拉宽多少(世界 y 处的 1 / cos 纬度;两极附近封顶,极点本身是奇点) */
+export const SPHERE_STRETCH_MAX = 24;
+export function sphereStretch(wy: number, H: number): number {
+  const c = Math.cos(Math.PI / 2 - (wy / H) * Math.PI);
+  return c > 1 / SPHERE_STRETCH_MAX ? 1 / c : SPHERE_STRETCH_MAX;
+}
+
+/** 横向拉宽 ax 倍的圆(椭圆) */
+function addEllipse(p: Path2D, cx: number, cy: number, R: number, ax: number) {
+  p.moveTo(cx + R * ax, cy);
+  p.ellipse(cx, cy, R * ax, R, 0, 0, Math.PI * 2);
+}
+
+/** 横向拉宽 ax 倍的针叶小尖角 */
+function addChevronX(p: Path2D, cx: number, cy: number, r: number, ax: number, closed: boolean) {
+  p.moveTo(cx - r * 0.75 * ax, cy + r * 0.35);
+  p.lineTo(cx, cy - r * 0.95);
+  p.lineTo(cx + r * 0.75 * ax, cy + r * 0.35);
+  if (closed) p.closePath();
+}
+
+/** 横向拉宽 ax 倍的"尖头扇贝" */
+function addPineTopX(p: Path2D, cx: number, cy: number, R: number, ax: number) {
+  p.moveTo(cx, cy - R * 1.55);
+  p.quadraticCurveTo(cx + R * 0.35 * ax, cy - R * 0.45, cx + R * ax, cy + R * 0.3);
+  p.quadraticCurveTo(cx, cy + R * 1.15, cx - R * ax, cy + R * 0.3);
+  p.quadraticCurveTo(cx - R * 0.35 * ax, cy - R * 0.45, cx, cy - R * 1.55);
+  p.closePath();
+}
+
+/** 针叶树冠的小尖角(closed = 封闭三角形,否则只画 ∧ 两笔) */
+function addChevron(p: Path2D, cx: number, cy: number, r: number, closed: boolean) {
+  p.moveTo(cx - r * 0.75, cy + r * 0.35);
+  p.lineTo(cx, cy - r * 0.95);
+  p.lineTo(cx + r * 0.75, cy + r * 0.35);
+  if (closed) p.closePath();
+}
+
+function addCircle(p: Path2D, cx: number, cy: number, R: number) {
+  p.moveTo(cx + R, cy);
+  p.arc(cx, cy, R, 0, Math.PI * 2);
+}
+
+/** 针叶林的"尖头扇贝":上尖下圆的小树顶 */
+function addPineTop(p: Path2D, cx: number, cy: number, R: number) {
+  p.moveTo(cx, cy - R * 1.55);
+  p.quadraticCurveTo(cx + R * 0.35, cy - R * 0.45, cx + R, cy + R * 0.3);
+  p.quadraticCurveTo(cx, cy + R * 1.15, cx - R, cy + R * 0.3);
+  p.quadraticCurveTo(cx - R * 0.35, cy - R * 0.45, cx, cy - R * 1.55);
+  p.closePath();
+}
+
+/**
+ * 山 / 丘陵 / 沙丘 / 草丛 / 火山。v = 画布变换;只画出现门槛 g.z ≤ v.k 的符号(细节层级),
+ * 符号本身按 S = glyphScale(k) × v.s 画(位置按 v.s:符号钉在世界坐标上,大小比地图放大得慢)。
+ */
+function drawSymbols(ctx: CanvasRenderingContext2D, glyphs: Glyph[], v: VecView) {
+  const S = glyphScale(v.k) * v.s;
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  const pad = 30 * S;
+  const kz = v.k * 1.0001;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // 东西相连:挨着左右边的符号在另一边再画一份(各被画布裁掉一半,拼起来是一整个)
+  const wrap = v.wrap ?? 0;
+  const padW = pad / v.s;
+  const pj = v.proj;
+  for (const g of glyphs) {
+    if (g.z > kz) continue;
+    if (pj) {
+      // 弯边投影:符号钉在投影后的位置上,正立、按屏幕大小画;山脊走向按投影换算。
+      // 挨着 ±180° 的在另一边再画一份(外轮廓外的那半由外轮廓裁掉)
+      const rel = pj.rel(g.x);
+      const K = pj.K(g.y);
+      const mx = pj.W / 2 + K * rel;
+      const gy = pj.Y(g.y) * v.s + v.oy;
+      const a = g.kind === G_MOUNTAIN ? projectedAngle(pj, g, rel) : g.a;
+      for (const sh of relShifts(rel, pad / (Math.max(1e-6, K) * v.s))) glyph(g, (mx + sh * K) * v.s + v.ox, gy, a);
+      continue;
+    }
+    for (const sh of wrapShifts(g.x - padW, g.x + padW, wrap)) glyph(g, (g.x + sh) * v.s + v.ox, g.y * v.s + v.oy, g.a);
+  }
+  function glyph(g: Glyph, gx: number, gy: number, ga: number) {
+    if (gx < -pad || gy < -pad || gx > W + pad || gy > H + pad) return;
+    drawGlyph(ctx, g, gx, gy, ga, S);
+  }
+}
+
+/**
+ * 画一个符号(山 / 丘陵 / 沙丘 / 草丛 / 火山):(gx, gy) = 符号底边中点(画布像素),ga = 画面上的山脊走向(弧度),
+ * S = 一个世界单位的符号尺寸(画布像素;符号多大按 g.s × S)。调用前设好 lineCap / lineJoin = 'round'。
+ * 平面主图(drawSymbols)和地球仪(render/globeGlyphs.ts:每帧在球上正立着画)共用这一份画法
+ */
+export function drawGlyph(ctx: CanvasRenderingContext2D, g: Glyph, gx: number, gy: number, ga: number, S: number): void {
+  const paper = 'rgb(236,224,193)';
+  const s = g.s * S;
+  switch (g.kind) {
+    case G_MOUNTAIN: {
+      // 沿山脊走向微微倾斜:东北—西南走向的脊,峰顶偏右;西北—东南走向偏左
+      const sin2 = Math.sin(2 * ga);
+      const lean = (-sin2 * 0.32 * g.c + (g.v - 0.5) * 0.22) * s;
+      // 东西走向的脊符号宽一点,南北走向的窄一点(叠成一列)
+      const ws = mountainHalfWidth(g, ga) * S;
+      const px = gx + lean;
+      const py = gy - s * 1.15;
+      const lx = gx - ws;
+      const rx = gx + ws;
+      // 底色遮挡后面的符号
+      ctx.beginPath();
+      ctx.moveTo(lx, gy);
+      ctx.quadraticCurveTo(gx - ws * 0.5 + lean * 0.5, gy - s * 0.55, px, py);
+      ctx.quadraticCurveTo(gx + ws * 0.45 + lean * 0.5, gy - s * 0.6, rx, gy);
+      ctx.quadraticCurveTo(gx, gy + s * 0.12, lx, gy);
+      ctx.fillStyle = paper;
+      ctx.fill();
+      // 背光面
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.quadraticCurveTo(gx + ws * 0.05 + lean * 0.3, gy - s * 0.45, gx + ws * 0.12, gy + s * 0.04);
+      ctx.quadraticCurveTo(gx + ws * 0.6, gy + s * 0.06, rx, gy);
+      ctx.quadraticCurveTo(gx + ws * 0.45 + lean * 0.5, gy - s * 0.6, px, py);
+      ctx.fillStyle = 'rgba(128,104,76,0.48)';
+      ctx.fill();
+      // 轮廓
+      ctx.beginPath();
+      ctx.moveTo(lx, gy);
+      ctx.quadraticCurveTo(gx - ws * 0.5 + lean * 0.5, gy - s * 0.55, px, py);
+      ctx.quadraticCurveTo(gx + ws * 0.45 + lean * 0.5, gy - s * 0.6, rx, gy);
+      ctx.strokeStyle = INK_CSS + '0.95)';
+      ctx.lineWidth = (0.7 + 0.035 * g.s) * S;
+      ctx.stroke();
+      // 山脊线 + 排线
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.quadraticCurveTo(gx + ws * 0.05 + lean * 0.3, gy - s * 0.45, gx + ws * 0.12, gy - s * 0.05);
+      const hatch = Math.max(2, Math.round(g.s / 2.6));
+      for (let hI = 1; hI <= hatch; hI++) {
+        const t = hI / (hatch + 1);
+        const ax = px + (rx - px) * t;
+        const ay = py + (gy - py) * t;
+        ctx.moveTo(ax - s * 0.05, ay + s * 0.02);
+        ctx.lineTo(ax - s * 0.22, ay + s * 0.26);
+      }
+      ctx.lineWidth = 0.5 * S;
+      ctx.strokeStyle = INK_CSS + '0.7)';
+      ctx.stroke();
+      break;
+    }
+    case G_VOLCANO:
+      drawVolcano(ctx, gx, gy, s, S);
+      break;
+    case G_HILL: {
+      ctx.beginPath();
+      ctx.moveTo(gx - s, gy);
+      ctx.quadraticCurveTo(gx, gy - s * 1.1, gx + s, gy);
+      ctx.fillStyle = paper;
+      ctx.fill();
+      ctx.strokeStyle = INK_CSS + '0.85)';
+      ctx.lineWidth = 0.7 * S;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(gx + s * 0.25, gy - s * 0.35);
+      ctx.lineTo(gx + s * 0.55, gy - s * 0.05);
+      ctx.lineWidth = 0.5 * S;
+      ctx.stroke();
+      break;
+    }
+    case G_DUNE: {
+      ctx.beginPath();
+      ctx.moveTo(gx - 3 * S, gy);
+      ctx.quadraticCurveTo(gx - 0.75 * S, gy - 1.95 * S, gx + 2.6 * S, gy - 0.22 * S);
+      ctx.strokeStyle = INK_CSS + '0.5)';
+      ctx.lineWidth = 0.55 * S;
+      ctx.stroke();
+      break;
+    }
+    case G_TUFT: {
+      ctx.beginPath();
+      ctx.moveTo(gx - 1.25 * S, gy - 1.25 * S);
+      ctx.lineTo(gx - 0.45 * S, gy);
+      ctx.moveTo(gx, gy - 1.85 * S);
+      ctx.lineTo(gx, gy);
+      ctx.moveTo(gx + 1.25 * S, gy - 1.25 * S);
+      ctx.lineTo(gx + 0.45 * S, gy);
+      ctx.strokeStyle = INK_CSS + '0.45)';
+      ctx.lineWidth = 0.45 * S;
+      ctx.stroke();
+      break;
+    }
+  }
+}
+
+/** 火山:平顶的锥(山口一圈椭圆)、背光面排线、山口冒出的一缕烟(几团往上飘、往右偏的烟卷) */
+function drawVolcano(ctx: CanvasRenderingContext2D, gx: number, gy: number, s: number, S: number) {
+  const paper = 'rgb(236,224,193)';
+  const hw = s * 1.05; // 山脚半宽
+  const top = gy - s * 1.05; // 山口高度
+  const cw = s * 0.26; // 山口半宽
+  const flankL = (p: Path2D | CanvasRenderingContext2D) => {
+    p.moveTo(gx - hw, gy);
+    p.quadraticCurveTo(gx - hw * 0.42, gy - s * 0.3, gx - cw, top);
+  };
+  const flankR = (p: Path2D | CanvasRenderingContext2D) => {
+    p.moveTo(gx + cw, top);
+    p.quadraticCurveTo(gx + hw * 0.42, gy - s * 0.3, gx + hw, gy);
+  };
+  // 底色遮挡后面的符号
+  ctx.beginPath();
+  flankL(ctx);
+  ctx.lineTo(gx + cw, top);
+  ctx.quadraticCurveTo(gx + hw * 0.42, gy - s * 0.3, gx + hw, gy);
+  ctx.quadraticCurveTo(gx, gy + s * 0.12, gx - hw, gy);
+  ctx.fillStyle = paper;
+  ctx.fill();
+  // 背光面
+  ctx.beginPath();
+  ctx.moveTo(gx + cw * 0.3, top + s * 0.06);
+  ctx.quadraticCurveTo(gx + s * 0.08, gy - s * 0.4, gx + hw * 0.14, gy + s * 0.04);
+  ctx.quadraticCurveTo(gx + hw * 0.6, gy + s * 0.06, gx + hw, gy);
+  ctx.quadraticCurveTo(gx + hw * 0.42, gy - s * 0.3, gx + cw, top);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(128,104,76,0.42)';
+  ctx.fill();
+  // 顺坡流下的几道岩浆冷凝的沟(淡赭色)
+  ctx.beginPath();
+  ctx.moveTo(gx - cw * 0.35, top + s * 0.08);
+  ctx.quadraticCurveTo(gx - s * 0.2, gy - s * 0.45, gx - s * 0.34, gy - s * 0.08);
+  ctx.moveTo(gx + cw * 0.1, top + s * 0.1);
+  ctx.quadraticCurveTo(gx + s * 0.02, gy - s * 0.5, gx - s * 0.04, gy - s * 0.18);
+  ctx.strokeStyle = 'rgba(150,72,42,0.55)';
+  ctx.lineWidth = 0.75 * S;
+  ctx.stroke();
+  // 轮廓
+  ctx.beginPath();
+  flankL(ctx);
+  flankR(ctx);
+  ctx.strokeStyle = INK_CSS + '0.95)';
+  ctx.lineWidth = (0.8 + 0.02 * s / S) * S;
+  ctx.stroke();
+  // 山口
+  ctx.beginPath();
+  ctx.ellipse(gx, top, cw, cw * 0.36, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(96,70,50,0.75)';
+  ctx.fill();
+  ctx.lineWidth = 0.7 * S;
+  ctx.strokeStyle = INK_CSS + '0.9)';
+  ctx.stroke();
+  // 排线
+  ctx.beginPath();
+  const hatch = Math.max(2, Math.round(s / (3 * S)));
+  for (let k = 1; k <= hatch; k++) {
+    const t = k / (hatch + 1);
+    const ax = gx + cw + (hw - cw) * t * 0.9;
+    const ay = top + (gy - top) * t;
+    ctx.moveTo(ax - s * 0.04, ay + s * 0.02);
+    ctx.lineTo(ax - s * 0.2, ay + s * 0.24);
+  }
+  ctx.lineWidth = 0.7 * S;
+  ctx.strokeStyle = INK_CSS + '0.7)';
+  ctx.stroke();
+  // 烟:三团烟卷,越往上越大、越往右飘
+  const puffs: [number, number, number][] = [
+    [gx + s * 0.06, top - s * 0.34, s * 0.2],
+    [gx + s * 0.3, top - s * 0.78, s * 0.26],
+    [gx + s * 0.7, top - s * 1.18, s * 0.3],
+  ];
+  for (let k = puffs.length - 1; k >= 0; k--) {
+    const [px, py, pr] = puffs[k];
+    ctx.beginPath();
+    // 一团烟 = 三个挨着的小弧(上沿起伏),底边平一点
+    ctx.moveTo(px - pr, py + pr * 0.35);
+    ctx.arc(px - pr * 0.45, py, pr * 0.62, Math.PI * 0.85, Math.PI * 1.75);
+    ctx.arc(px + pr * 0.2, py - pr * 0.25, pr * 0.62, Math.PI * 1.15, Math.PI * 1.95);
+    ctx.arc(px + pr * 0.62, py + pr * 0.05, pr * 0.5, Math.PI * 1.35, Math.PI * 2.3);
+    ctx.quadraticCurveTo(px, py + pr * 0.62, px - pr, py + pr * 0.35);
+    ctx.fillStyle = 'rgba(236,228,206,0.92)';
+    ctx.fill();
+    ctx.lineWidth = 0.65 * S;
+    ctx.strokeStyle = INK_CSS + '0.6)';
+    ctx.stroke();
+  }
+}
+
+/**
+ * 图框(双线)和左下角的罗盘:外框 = 世界坐标 [0, w] × [0, h] 经 v 变换到画布上。
+ * 主图是一整圈星球,图框画在视窗上(ui/MapDecor.tsx、导出),不随地图左右平移
+ */
+export function drawFrame(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: number, h: number, v: VecView) {
+  const S = v.s;
+  const ox = v.ox;
+  const oy = v.oy;
+  ctx.save();
+  ctx.strokeStyle = INK_CSS + '0.9)';
+  ctx.lineWidth = 3 * S;
+  ctx.strokeRect(6 * S + ox, 6 * S + oy, (w - 12) * S, (h - 12) * S);
+  ctx.lineWidth = 1 * S;
+  ctx.strokeRect(13 * S + ox, 13 * S + oy, (w - 26) * S, (h - 26) * S);
+  ctx.restore();
+  drawCompass(ctx, 95 * S + ox, (h - 95) * S + oy, S);
+}
+
+/**
+ * 弯边投影的图框:外轮廓一道细墨线(盖住轮廓边缘),往外一点再一道粗线(双线);罗盘在外框左下角(轮廓外面的纸上)。
+ * 地图平面 [0, W] × [0, H] 经 v 变换到画布上
+ */
+export function drawProjFrame(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, mp: MapProj, v: VecView) {
+  const S = v.s;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = INK_CSS + '0.9)';
+  outlineOnCanvas(ctx, mp, S, v.ox, v.oy, 0);
+  ctx.lineWidth = 1.2 * S;
+  ctx.stroke();
+  outlineOnCanvas(ctx, mp, S, v.ox, v.oy, 7);
+  ctx.lineWidth = 3 * S;
+  ctx.stroke();
+  ctx.restore();
+  const [cx, cy] = compassSpot(mp);
+  drawCompass(ctx, cx * S + v.ox, cy * S + v.oy, S);
+}
+
+/** 弯边投影时罗盘放哪(地图平面坐标):外框左下角,离轮廓(和外面那道粗线)够远;挪不开就缩到更靠角 */
+export function compassSpot(mp: MapProj): [number, number] {
+  for (const d of [95, 80, 66]) {
+    const x = d;
+    const y = mp.H - d;
+    let clear = true;
+    for (let a = 0; a < 16 && clear; a++) {
+      const t = (a / 16) * Math.PI * 2;
+      if (insideProj(mp, x + Math.cos(t) * 64, y + Math.sin(t) * 64, -12)) clear = false;
+    }
+    if (clear) return [x, y];
+  }
+  return [66, mp.H - 66];
+}
+
+/** 罗盘(手绘风):中心 (cx, cy)(画布像素),S = 世界单位 → 画布像素 */
+function drawCompass(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, cx: number, cy: number, S: number) {
+  ctx.save();
+  ctx.strokeStyle = INK_CSS + '0.9)';
+  const R = 46 * S;
+  ctx.translate(cx, cy);
+  ctx.beginPath();
+  ctx.arc(0, 0, R * 0.72, 0, Math.PI * 2);
+  ctx.lineWidth = 0.9 * S;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, 0, R * 0.78, 0, Math.PI * 2);
+  ctx.lineWidth = 0.6 * S;
+  ctx.stroke();
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4 - Math.PI / 2;
+    const long = i % 2 === 0;
+    const L = long ? R : R * 0.58;
+    const wv = long ? R * 0.14 : R * 0.1;
+    const tx = Math.cos(a) * L;
+    const ty = Math.sin(a) * L;
+    const nx = -Math.sin(a) * wv;
+    const ny = Math.cos(a) * wv;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(nx, ny);
+    ctx.closePath();
+    ctx.fillStyle = INK_CSS + '0.9)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(-nx, -ny);
+    ctx.closePath();
+    ctx.fillStyle = 'rgb(240,228,198)';
+    ctx.fill();
+    ctx.lineWidth = 0.7 * S;
+    ctx.stroke();
+  }
+  ctx.fillStyle = INK_CSS + '0.95)';
+  ctx.font = `600 ${14 * S}px "Songti SC", "STSong", serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('北', 0, -R - 3 * S);
+  ctx.restore();
+}
+
+/**
+ * 纸边做旧:越靠边、越靠四角纸色越深(以外框中心为圆心的椭圆,外框四边处 r = 1,纸色往 PAPER_EDGE 调 0.55 × vig(r))。
+ * 画在视窗上(ui/MapDecor.tsx、导出),不随地图左右平移。外框 = [0, w] × [0, h] 经 v 变换
+ */
+export function drawPaperVignette(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: number, h: number, v: VecView) {
+  const R = Math.SQRT2;
+  ctx.save();
+  ctx.translate(v.ox + (w / 2) * v.s, v.oy + (h / 2) * v.s);
+  ctx.scale((w / 2) * v.s, (h / 2) * v.s);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+  const N = 28;
+  for (let i = 0; i <= N; i++) {
+    const r = (R * i) / N;
+    const vr = 0.9 * r - 0.55;
+    const vig = vr > 0 ? Math.min(1, Math.pow(vr * 1.9, 1.6)) : 0;
+    g.addColorStop(i / N, `rgba(${PAPER_EDGE[0]},${PAPER_EDGE[1]},${PAPER_EDGE[2]},${(0.55 * vig).toFixed(3)})`);
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(-1, -1, 2, 2);
+  ctx.restore();
+}

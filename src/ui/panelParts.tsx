@@ -1,0 +1,387 @@
+/**
+ * 右侧面板的公共零件:国家(CountryPanel)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)四种面板共用,
+ * 保证它们看起来是同一套东西(样式都在 countryPanel.css)。
+ *
+ *   PanelHead    顶部:颜色块、"国家 · 第 N 年"、关闭;下面放名字和一行关键信息
+ *   Link         面板里可以点的名字(选中那个国家 / 城 / 州)
+ *   CenterLink   "设为中心":把地图的中央经线转到选中的东西
+ *   Stats        三格数字(两格也行)
+ *   SegBar       分段色条(朝代、历任归属):按时长分段,点一段跳到它开始的那年;OwnerBar = 历任归属(城、州)
+ *   Spark        小柱图(疆域、兴衰)
+ *   EventList    相关事件(最近几条,点了跳到那一年、地图上闪出事发地)
+ *   Foot         底部按钮(2×2;三个按钮时一行三个)
+ *   YearStepper  生效年份:−100 −10 [年份] +10,下面一句"该年之前的历史不变,之后重新推演。"
+ *   useRevealAi  名字由来 / AI 起名:内容在面板最下面,点了滚过去让它露出来
+ */
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import type { Civ } from '../gen/civ/types';
+import type { Raster } from '../gen/raster';
+import type { World } from '../gen/world';
+import { nameAt } from './Interventions';
+import type { OwnerSpan } from './panelData';
+import type { ChronicleEntry } from '../gen/civ/chronicle';
+import { clearSelection, pickChronicleEntry, setCivTime, setSelection, type MapSelection } from './civView';
+import { useAiName, type AiName, type AiNameProps } from './AiNamePanel';
+import { selectionLon } from './ProjectionPanel';
+import { requestMapCenter } from './mapWrap';
+import { evLabel, evText, evType } from './timelineLayout';
+import './countryPanel.css';
+
+/** 四种面板共同的参数 */
+export interface DetailProps {
+  /** 套上改名的 Civ(界面上显示的那一份) */
+  civ: Civ;
+  /** 没套改名的 Civ(恢复默认、AI 起名用) */
+  raw: Civ;
+  raster: Raster | null;
+  world: World;
+  id: number;
+  /** 时间轴当前那一年(取整) */
+  year: number;
+  names: Record<string, string>;
+}
+
+/** 时间轴跳到某一年(暂停) */
+export const jumpTo = (y: number) => setCivTime({ year: y, playing: false, scrubbing: false, story: false });
+
+export const rgb = (c: readonly number[]) => `rgb(${c.join(',')})`;
+export const rgba = (c: readonly number[], a: number) => `rgba(${c.join(',')},${a})`;
+
+/** 面板顶部:颜色块、"国家 · 第 N 年"、关闭;下面是名字和一行小字 */
+export function PanelHead({ color, tag, year, children }: { color?: string; tag: string; year: number; children?: ReactNode }) {
+  return (
+    <div className="cp-head">
+      <div className="cp-tag">
+        {color && <i className="cp-sw" style={{ background: color }} />}
+        <span>
+          {tag} · 第 {year} 年
+        </span>
+        <button className="cp-x ins-close" onClick={clearSelection} title="关闭(Esc)" aria-label="关闭">
+          ✕
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** 面板里可以点的名字:选中那个国家 / 城 / 州 */
+export function Link({ to, children }: { to: MapSelection; children: ReactNode }) {
+  return (
+    <button className="ins-link" onClick={() => setSelection(to)}>
+      {children}
+    </button>
+  );
+}
+
+/** "设为中心":把地图的中央经线转到选中的东西 */
+export function CenterLink({ world, civ, sel, year }: { world: World; civ: Civ; sel: MapSelection; year: number }) {
+  const lon = selectionLon(world, civ, sel, year);
+  if (lon === null) return null;
+  return (
+    <button className="ins-link" data-act="set-center" onClick={() => requestMapCenter(lon)}>
+      设为中心
+    </button>
+  );
+}
+
+/** 一行关键信息:几段用" · "连起来(空的段不写) */
+export function SubLine({ parts, className }: { parts: ReactNode[]; className?: string }) {
+  const shown = parts.filter((x) => x !== null && x !== undefined && x !== false && x !== '');
+  return (
+    <div className={`cp-sub${className ? ` ${className}` : ''}`}>
+      {shown.map((x, i) => (
+        <span key={i}>
+          {i > 0 && ' · '}
+          {x}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 三格数字
+
+export interface Stat {
+  k: string;
+  v: ReactNode;
+  /** num 宋体大数字(默认)/ small 稍小的数字(人口)/ text 一般文字(民族名) */
+  size?: 'num' | 'small' | 'text';
+  /** 数字后面的小字("富饶") */
+  note?: ReactNode;
+  title?: string;
+}
+
+export function Stats({ items }: { items: Stat[] }) {
+  const style: CSSProperties | undefined = items.length !== 3 ? { gridTemplateColumns: `repeat(${items.length}, 1fr)` } : undefined;
+  return (
+    <div className="cp-stats" style={style}>
+      {items.map((s, i) => (
+        <div key={i} className="cp-stat" data-stat={s.k} title={s.title}>
+          <span className="cp-k">{s.k}</span>
+          <span className={s.size === 'text' ? 'cp-folk' : s.size === 'small' ? 'cp-num small' : 'cp-num'}>
+            {s.v}
+            {s.note && <em className="cp-num-note">{s.note}</em>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 分段色条
+
+export interface Seg {
+  name: string;
+  /** 占整条的比例(0..1) */
+  frac: number;
+  background: string;
+  on: boolean;
+  title: string;
+  /** 没人的一段(无主):不写字、不可点 */
+  blank?: boolean;
+  onClick?: () => void;
+}
+
+/** 分段色条(朝代、历任归属):上面一行小字标题,下面两头的年份 */
+export function SegBar({ label, segs, years, className }: { label: string; segs: Seg[]; years: [number, number]; className?: string }) {
+  return (
+    <div className={`cp-dyn${className ? ` ${className}` : ''}`}>
+      <span className="cp-k">{label}</span>
+      <div className="cp-dyn-bar">
+        {segs.map((s, i) => (
+          <button
+            key={i}
+            className={`cp-seg${s.on ? ' on' : ''}${s.blank ? ' blank' : ''}`}
+            style={{ width: `${s.frac * 100}%`, background: s.background }}
+            title={s.title}
+            disabled={s.blank}
+            onClick={s.onClick}
+          >
+            {s.blank ? '' : s.name}
+          </button>
+        ))}
+      </div>
+      <div className="cp-dyn-years">
+        <span>{Math.floor(years[0])}</span>
+        <span>{Math.floor(years[1])}</span>
+      </div>
+    </div>
+  );
+}
+
+/** 色条大约多宽(面板 340 减去两边的内边距) */
+const OWNER_BAR_W = 300;
+
+/** 历任归属(城、州):每段一个国家的颜色,当年那一段实色;无主的一段留空。spans 空 = 不显示 */
+export function OwnerBar({ civ, spans, year, label = '历任归属' }: { civ: Civ; spans: readonly OwnerSpan[]; year: number; label?: string }) {
+  if (!spans.length) return null;
+  const from = spans[0].from;
+  const to = spans[spans.length - 1].to;
+  const total = Math.max(1e-6, to - from);
+  const segs: Seg[] = spans.map((s, i) => {
+    const frac = (s.to - s.from) / total;
+    const P = civ.polities[s.polity];
+    const years = `${Math.floor(s.from)}–${Math.floor(s.to)}`;
+    if (!P) return { name: '', frac, background: 'var(--btn)', on: false, title: `无主 · ${years}`, blank: true };
+    const on = year >= s.from && (year < s.to || (i === spans.length - 1 && year >= to));
+    const name = nameAt(P, Math.max(s.from, Math.min(year, s.to - 1 / 512)));
+    // 放不下整个国名的一段不写字(悬停提示里有)
+    const fits = frac * OWNER_BAR_W >= name.length * 12 + 10;
+    return {
+      name: fits ? name : '',
+      frac,
+      background: on ? rgb(P.color) : rgba(P.color, 0.4),
+      on,
+      title: `${name} · ${years}`,
+      onClick: () => jumpTo(Math.ceil(s.from)),
+    };
+  });
+  return <SegBar label={label} segs={segs} years={[from, to]} className="cp-owners" />;
+}
+
+// ---------------------------------------------------------------------------
+// 小柱图
+
+export interface Bar {
+  /** 高度(像素) */
+  h: number;
+  background: string;
+  opacity: number;
+  title?: string;
+  onClick?: () => void;
+}
+
+/** 小柱图:fill = 柱子按宽度均分(兴衰);不给 = 每根 10 像素(疆域) */
+export function Spark({ bars, title, fill }: { bars: Bar[]; title?: string; fill?: boolean }) {
+  return (
+    <span className={`cp-spark${fill ? ' fill' : ''}`} title={title}>
+      {bars.map((b, i) =>
+        b.onClick ? (
+          <button key={i} className="cp-bar" title={b.title} onClick={b.onClick}>
+            <i style={{ height: `${b.h}px`, background: b.background, opacity: b.opacity }} />
+          </button>
+        ) : (
+          <i key={i} style={{ height: `${b.h}px`, background: b.background, opacity: b.opacity }} />
+        ),
+      )}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 相关事件
+
+/**
+ * 相关事件:upTo = 到当前年份为止的(按年份排好),显示最近 5 条(新的在上)。
+ * more = 标题右边的"全部 ›";empty = 一条都没有时写的一行(不给 = 整块不显示)
+ */
+export function EventList({ upTo, more, empty }: { upTo: readonly ChronicleEntry[]; more?: ReactNode; empty?: string }) {
+  if (!upTo.length && empty === undefined) return null;
+  const recent = upTo.slice(-5).reverse();
+  return (
+    <div className="cp-events">
+      <div className="cp-events-head">
+        <span className="cp-k">相关事件 · {upTo.length} 条</span>
+        {more}
+      </div>
+      {recent.map((e: ChronicleEntry) => (
+        <button key={e.id} className="cp-ev" data-ev={evType(e)} onClick={() => pickChronicleEntry(e)}>
+          <span className="cp-ev-year">{Math.floor(e.year)}</span>
+          <b className="tb-ev">{evLabel(e)}</b>
+          <span className="cp-ev-text">{evText(e)}</span>
+        </button>
+      ))}
+      {!recent.length && <span className="cp-none">{empty}</span>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 底部按钮
+
+export function Foot({ children, cols = 2 }: { children: ReactNode; cols?: 2 | 3 }) {
+  return <div className={`cp-foot ${cols === 3 ? 'cp-grid3' : 'cp-grid2'}`}>{children}</div>;
+}
+
+// ---------------------------------------------------------------------------
+// 生效年份
+
+const digits = (s: string) => s.replace(/[^\d]/g, '').slice(0, 5);
+
+export interface YearInput {
+  text: string;
+  /** 改输入框(算"改过":清掉上一次的提示) */
+  setText: (s: string) => void;
+  /** 只换输入框里的字(失焦时整理成合格的年份) */
+  setRaw: (s: string) => void;
+  /** 生效年份(输入不合格时 = 夹到范围里的值) */
+  y: number;
+  valid: boolean;
+  lo: number;
+  hi: number;
+  nudge: (d: number) => void;
+}
+
+/** 生效年份的输入状态:初值 = 夹到 [lo, hi] 里的 initial;onChange = 改过(清掉上一次的提示) */
+export function useYearInput(initial: number, lo: number, hi: number, onChange?: () => void): YearInput {
+  const clampY = (v: number) => Math.min(hi, Math.max(lo, Math.round(v)));
+  const [text, setRaw] = useState(() => String(clampY(initial)));
+  const typed = text.trim() === '' ? NaN : Number(text);
+  const valid = Number.isFinite(typed) && typed >= lo && typed <= hi;
+  const y = valid ? Math.floor(typed) : clampY(Number.isFinite(typed) ? typed : lo);
+  const setText = (s: string) => {
+    setRaw(s);
+    onChange?.();
+  };
+  return { text, setText, setRaw, y, valid, lo, hi, nudge: (d: number) => setText(String(clampY(y + d))) };
+}
+
+/** 生效年份:−100 −10 [年份] +10,下面一句说明 */
+export function YearStepper({ yi }: { yi: YearInput }) {
+  const { text, setText, setRaw, y, lo, hi, nudge } = yi;
+  return (
+    <div className="cp-from">
+      <span className="cp-k">生效年份</span>
+      <div className="cp-from-row">
+        <button className="cp-step" onClick={() => nudge(-100)} disabled={y <= lo}>
+          −100
+        </button>
+        <button className="cp-step" onClick={() => nudge(-10)} disabled={y <= lo}>
+          −10
+        </button>
+        <label className="cp-year">
+          <input
+            value={text}
+            inputMode="numeric"
+            aria-label="生效年份"
+            onChange={(e) => setText(digits(e.target.value))}
+            onBlur={() => setRaw(String(y))}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            style={{ width: `${Math.max(2, text.length) + 0.6}ch` }}
+          />
+          年
+        </label>
+        <button className="cp-step" onClick={() => nudge(10)} disabled={y >= hi}>
+          +10
+        </button>
+      </div>
+      <span className="cp-note">该年之前的历史不变,之后重新推演。</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 名字由来 / AI 起名
+
+/**
+ * useAiName + "点了滚过去":底部"名字由来"、改名时的"AI 起名"打开的内容在面板最下面(AiBox),
+ * 点了以后滚过去让它露出来
+ */
+export function useRevealAi(props: AiNameProps): { ai: AiName; aiRef: RefObject<HTMLDivElement> } {
+  const ai0 = useAiName(props);
+  const aiRef = useRef<HTMLDivElement>(null);
+  const [reveal, setReveal] = useState(0);
+  useEffect(() => {
+    if (reveal) aiRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [reveal]);
+  const ai: AiName = {
+    ...ai0,
+    ask: () => {
+      ai0.ask();
+      setReveal((n) => n + 1);
+    },
+    suggest: () => {
+      ai0.suggest();
+      setReveal((n) => n + 1);
+    },
+    suggestNow: () => {
+      ai0.suggestNow();
+      setReveal((n) => n + 1);
+    },
+  };
+  return { ai, aiRef };
+}
+
+/** 名字由来 / AI 起名的内容(面板最下面) */
+export function AiBox({ ai, aiRef }: { ai: AiName; aiRef: RefObject<HTMLDivElement> }) {
+  if (!ai.panel) return null;
+  return (
+    <div className="cp-ai" ref={aiRef}>
+      {ai.panel}
+    </div>
+  );
+}
+
+/** 改名时输入框下面的"AI 起名" */
+export function AiSuggestLink({ ai }: { ai: AiName }) {
+  return (
+    <div className="cp-rename-more">
+      <button className="ins-link" data-ain="suggest" onMouseDown={(e) => e.preventDefault()} onClick={ai.suggest}>
+        AI 起名
+      </button>
+    </div>
+  );
+}

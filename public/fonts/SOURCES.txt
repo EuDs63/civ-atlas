@@ -1,0 +1,20 @@
+地图文字用的字体子集(由 scripts/subset-fonts.ts 生成,按地名字表裁剪,请勿手改)。
+两款字体都以 SIL Open Font License 1.1 授权,许可证全文见同目录的 OFL-*.txt。
+霞鹜文楷的许可证附加条款允许为网页字体裁剪 / 转换成 WOFF2 后沿用原名。
+
+lxgw-wenkai-gb-500.woff2
+  霞鹜文楷 GB Medium
+  来源:https://github.com/lxgw/LxgwWenkaiGB/releases/download/v1.522/LXGWWenKaiGB-Medium.ttf
+  sha256(源文件):b885c51ec0d3f325974013801dfcefda1a9ba0bf385c607cf5f2582dafa2e5ab
+  字体内的版权声明:Copyright 2022-2026 LXGW (https://github.com/lxgw/LxgwWenkaiGB)
+Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee)
+noto-serif-sc-500.woff2
+  Noto Serif SC Medium(500)
+  来源:https://raw.githubusercontent.com/google/fonts/2e61f4355afd22b801791b0df176065082423b87/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf
+  sha256(源文件):050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9
+  字体内的版权声明:(c) 2017-2024 Adobe (http://www.adobe.com/).
+noto-serif-sc-700.woff2
+  Noto Serif SC Bold(700)
+  来源:https://raw.githubusercontent.com/google/fonts/2e61f4355afd22b801791b0df176065082423b87/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf
+  sha256(源文件):050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9
+  字体内的版权声明:(c) 2017-2024 Adobe (http://www.adobe.com/).

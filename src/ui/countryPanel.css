@@ -1,0 +1,1194 @@
+/*
+ * 右侧面板:国家(CountryPanel / CommandPage)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)和它们共用的零件
+ * (panelParts)、名字(NameEdit)、AI 释名 / 起名(AiNamePanel);地图上的选目标层(TargetPlates:压暗、名牌、国都圆环)。
+ *
+ * 颜色一律用主题变量(theme.css:浅 / 深两套随图层切换):--ink --ink-2 --panel --panel-solid --line --line-strong --btn --link
+ * --accent --accent-hover --halo。
+ */
+
+.inspector.cpanel,
+.tp-layer,
+.tp-mark {
+  /* 宋体不写地图文字那份子集字体(只有地名用字),数字、改过的名字缺字会换成别的字体 */
+  --cp-serif: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', 'SimSun', serif;
+}
+
+/* ---- 面板外壳:右侧,宽 340,上 72、下 84 ---- */
+.inspector.cpanel {
+  position: absolute;
+  left: auto;
+  right: 20px;
+  top: 72px;
+  bottom: 84px;
+  width: 340px;
+  max-width: calc(100% - 40px);
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel, 4px);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: default;
+  /* 比底部一行(3)低一层:"图层与投影"弹层打开时盖在面板上面 */
+  z-index: 2;
+  animation: cp-in 0.18s ease-out;
+}
+.inspector.cpanel.hidden {
+  display: none;
+}
+/* 城 / 地理实体 / 州:内容少的时候面板按内容缩短(最长到底部一行上面) */
+.inspector.cpanel:not(.k-polity) {
+  bottom: auto;
+  max-height: calc(100% - 72px - 84px);
+}
+@keyframes cp-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.cpanel button {
+  font: inherit;
+  color: inherit;
+}
+.cp {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- 顶部 ---- */
+.cp-head {
+  padding: 16px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.cp-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.cp-sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+.cpanel .cp-x {
+  position: static;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--r-btn, 3px);
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.cpanel .cp-x:hover {
+  background: var(--hover-bg);
+}
+.cp-sub {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.cpanel .ins-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--link);
+  cursor: pointer;
+  text-align: left;
+}
+.cpanel .ins-link:hover {
+  color: var(--accent);
+}
+.cpanel .ins-link:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+/* ---- 名字(NameEdit) ---- */
+.cpanel .ins-name-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.cpanel .ins-name {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+  font-size: 14px;
+  cursor: text;
+}
+.cpanel .ins-name-row.big .ins-name {
+  font: 700 26px/1.25 var(--cp-serif);
+  letter-spacing: 0.04em;
+}
+.nm-pen::after {
+  content: '✎';
+  margin-left: 6px;
+  font: 400 13px var(--font-sans);
+  color: var(--ink-2);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.ins-name:hover .nm-pen::after {
+  opacity: 0.8;
+}
+.cpanel .ins-reset {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 12px;
+  color: var(--link);
+  cursor: pointer;
+}
+.cpanel .ins-reset:hover {
+  color: var(--accent);
+}
+.cpanel .ins-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cpanel .ins-edit input {
+  width: 100%;
+  box-sizing: border-box;
+  font: 500 14px var(--font-sans);
+  color: var(--ink);
+  background: var(--btn);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-btn, 3px);
+  padding: 3px 8px;
+  outline: none;
+}
+.cpanel .ins-edit.big input {
+  font: 700 24px/1.3 var(--cp-serif);
+  padding: 2px 8px;
+}
+.cpanel .ins-edit input:focus {
+  border-color: var(--accent);
+}
+.cpanel .ins-preview {
+  font-size: 13px;
+  color: var(--ink);
+}
+.cpanel .ins-hint {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.cp-rename-more {
+  font-size: 13px;
+}
+
+/* ---- 内容(可滚动) ---- */
+.cp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+.cp-k {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.cp-none {
+  color: var(--ink-2);
+}
+
+/* 三格数字:州 / 人口 / 主体民族 */
+.cp-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.cp-stat {
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cp-stat:first-child {
+  padding-left: 18px;
+}
+.cp-stat + .cp-stat {
+  border-left: 1px solid var(--line);
+}
+.cp-num {
+  font: 600 20px/1.3 var(--cp-serif);
+}
+.cp-num.small {
+  font-size: 17px;
+  padding-top: 2px;
+}
+.cp-folk {
+  font-size: 14px;
+  line-height: 1.35;
+  padding-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+/* 朝代条 */
+.cp-dyn {
+  padding: 14px 18px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: none;
+}
+.cp-dyn-bar {
+  display: flex;
+  height: 24px;
+  gap: 2px;
+  font-size: 12px;
+}
+.cpanel .cp-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-tag, 2px);
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cpanel .cp-seg.on {
+  color: #231c13;
+  font-weight: 700;
+}
+.cpanel .cp-seg:hover {
+  filter: brightness(0.94);
+}
+.cp-dyn-years {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+/* 疆域 / 邻国 / 来历 / 结局 / 历任国都 */
+.cp-grid {
+  padding: 0 18px 12px;
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  row-gap: 10px;
+  font-size: 14px;
+  align-items: center;
+  flex: none;
+}
+.cp-grid > .cp-k {
+  font-size: 13px;
+  align-self: start;
+  padding-top: 1px;
+}
+.cp-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 26px;
+}
+.cp-spark i {
+  width: 10px;
+  border-radius: 1px;
+}
+.cp-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.cp-links em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-2);
+  margin-left: 3px;
+}
+.cp-now .ins-link {
+  font-weight: 700;
+}
+
+/* 相关事件 */
+.cp-events {
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+}
+.cp-events-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.cpanel .cp-more {
+  font-size: 12px;
+}
+.cpanel .cp-ev {
+  display: grid;
+  grid-template-columns: 38px 30px 1fr;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-btn, 3px);
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+.cpanel .cp-ev:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+.cp-ev-year {
+  color: var(--ink-2);
+}
+.cp-ev .tb-ev {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c, var(--accent));
+}
+.cp-ai {
+  margin: 0 18px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 底部按钮 */
+.cp-foot {
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+.cp-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.cpanel .cp-btn {
+  padding: 10px 0;
+  border: 0;
+  border-radius: var(--r-btn, 3px);
+  background: var(--btn);
+  color: var(--ink);
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+.cpanel .cp-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 13%, transparent);
+}
+.cpanel .cp-btn.primary {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.cpanel .cp-btn.primary:hover {
+  background: var(--accent-hover);
+}
+.cpanel .cp-btn.wide {
+  display: block;
+  width: 100%;
+}
+.cpanel .cp-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- 干预页 ---- */
+.cp-from {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.cp-from-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cpanel .cp-step {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: var(--r-btn, 3px);
+  background: var(--btn);
+  font-size: 13px;
+  cursor: pointer;
+}
+.cpanel .cp-step:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 13%, transparent);
+}
+.cpanel .cp-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cp-year {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 4px;
+  font: 600 20px var(--cp-serif);
+}
+.cp-year input {
+  min-width: 2ch;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  outline: none;
+}
+.cp-year input:hover {
+  border-bottom-color: var(--line-strong);
+}
+.cp-year input:focus {
+  border-bottom-color: var(--accent);
+}
+.cp-note {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+.cp-cmds {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+}
+.cpanel .cp-cmd {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.cpanel .cp-cmd:hover:not(:disabled) {
+  background: rgba(128, 128, 128, 0.12);
+}
+.cpanel .cp-cmd.off {
+  opacity: 0.4;
+  cursor: default;
+}
+.cp-cmd-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cp-cmd-name {
+  font-size: 15px;
+  font-weight: 500;
+}
+.cp-cmd-desc {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.cp-cmd-go {
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.cp-msg {
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--err);
+}
+
+/* ---- 城 / 地理实体 / 州的面板(CityPanel / PlacePanel / RegionPanel)多出来的零件 ---- */
+/* 数字后面的单位 / 小字("米""富饶") */
+.cp-num-note {
+  margin-left: 3px;
+  font: 400 12px var(--font-sans);
+  font-style: normal;
+  color: var(--ink-2);
+}
+/* 三格里的族名(可改) */
+.cpanel .cp-stat .ins-name {
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.cpanel .cp-stat .ins-name-row {
+  gap: 0 6px;
+}
+.cpanel .cp-stat .ins-edit input {
+  font-size: 13px;
+  padding: 2px 5px;
+}
+.cpanel .cp-stat .ins-hint {
+  display: none;
+}
+.cpanel .cp-stat .ins-preview {
+  font-size: 12px;
+}
+
+/* 历任归属:无主的一段留空 */
+.cpanel .cp-seg.blank {
+  cursor: default;
+}
+.cpanel .cp-seg.blank:hover {
+  filter: none;
+}
+.cp-trend + .cp-owners {
+  padding-top: 4px;
+}
+
+/* 兴衰:人口小柱图 + 上面的记号(掠 / 毁 / 建 / 衰) */
+.cp-trend {
+  gap: 4px;
+}
+.cp-trend-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.cp-marks {
+  position: relative;
+  height: 16px;
+  margin: 0 4px;
+}
+.cpanel .cp-mark {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--r-tag, 2px);
+  background: transparent;
+  color: var(--c, var(--accent));
+  font: 700 11px/16px var(--font-sans);
+  cursor: pointer;
+}
+.cpanel .cp-mark:hover {
+  background: var(--hover-bg);
+}
+.cp-spark.fill {
+  width: 100%;
+  gap: 2px;
+  height: 30px;
+}
+.cpanel .cp-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.cp-bar i {
+  display: block;
+  width: 100%;
+  border-radius: 1px;
+}
+.cpanel .cp-bar:hover i {
+  filter: brightness(0.85);
+}
+
+/* 所在州、民族、国都、故址、州里的城 */
+.cp-grid-top {
+  padding-top: 14px;
+}
+.cp-em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-left: 4px;
+}
+.cp-later,
+.cp-gone {
+  opacity: 0.55;
+}
+.cp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.cpanel .ins-latin {
+  font-style: italic;
+  font-family: var(--cp-serif);
+}
+
+/* 底部三个按钮一行 */
+.cp-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+/* 州的干预页:国名 / 永久 */
+.cp-form {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.cp-form-title {
+  font-size: 15px;
+  font-weight: 500;
+}
+.cp-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cpanel .cp-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-btn, 3px);
+  background: var(--field);
+  color: var(--ink);
+  font: 500 14px var(--font-sans);
+  outline: none;
+}
+.cpanel .cp-field input:focus {
+  border-color: var(--accent);
+}
+.cp-check {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.cp-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* 这一州的干预(可撤销) */
+.cp-mine {
+  gap: 6px;
+}
+.cpanel .iv-mine {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cpanel .iv-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+.cpanel .ins-years {
+  display: inline-block;
+  min-width: 38px;
+  color: var(--ink-2);
+}
+.cpanel .iv-item-text {
+  flex: 1;
+  min-width: 0;
+}
+.cpanel .iv-del {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--link);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cpanel .iv-del:hover {
+  color: var(--accent);
+}
+
+/* ---- AI 释名 / 起名 ---- */
+.cpanel .ain-bar {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+.cpanel .ain-btn {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--r-btn, 3px);
+  background: var(--btn);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cpanel .ain-bar.compact .ain-btn {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.cpanel .ain-btn:hover:not(:disabled),
+.cpanel .ain-btn.on {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.cpanel .ain-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cpanel .ain-bar.compact {
+  display: inline-flex;
+  margin: 0 0 0 6px;
+}
+.cpanel .ain-box {
+  padding: 10px 12px;
+  border-radius: var(--r-btn, 3px);
+  background: var(--btn);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cpanel .ain-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.cpanel .ain-title {
+  color: var(--ink-2);
+}
+.cpanel .ain-status {
+  color: var(--ink-2);
+}
+.cpanel .ain-x {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.cpanel .ain-x:hover {
+  color: var(--ink);
+}
+.cpanel .ain-stale {
+  font-size: 11px;
+  color: var(--warn);
+}
+.cpanel .ain-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.cpanel .ain-text.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+.ain-wait-text {
+  color: var(--ink-2);
+}
+.cpanel .ain-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: var(--accent);
+  animation: ain-blink 1s steps(2) infinite;
+}
+@keyframes ain-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.cpanel .ain-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.cpanel .ain-actions button,
+.cpanel .ain-err button,
+.cpanel .ain-wait button,
+.cpanel .ain-confirm button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--link);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cpanel .ain-actions button:hover,
+.cpanel .ain-err button:hover,
+.cpanel .ain-wait button:hover,
+.cpanel .ain-confirm button:hover {
+  color: var(--accent);
+}
+.cpanel .ain-actions button:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+.cpanel .ain-by {
+  margin-left: auto;
+  color: var(--ink-2);
+  font-size: 11px;
+}
+.cpanel .ain-err {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--err);
+}
+.cpanel .ain-err.soft,
+.cpanel .ain-err.unset {
+  color: var(--ink-2);
+}
+.cpanel .ain-err .ain-link {
+  font-size: 13px;
+}
+.cpanel .ain-hint {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.cpanel .ain-wish {
+  display: flex;
+  gap: 6px;
+}
+.cpanel .ain-wish input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn, 3px);
+  background: var(--field);
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+}
+.cpanel .ain-wish input:focus {
+  border-color: var(--accent);
+}
+.cpanel .ain-go {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--r-btn, 3px);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-size: 13px;
+  cursor: pointer;
+}
+.cpanel .ain-go:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.cpanel .ain-go:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cpanel .ain-wait {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.cpanel .ain-dots::after {
+  content: '…';
+}
+.cpanel .ain-cands {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cpanel .ain-cand-btn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--r-btn, 3px);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.cpanel .ain-cand-btn:hover:not(:disabled),
+.cpanel .ain-cand.on .ain-cand-btn {
+  background: rgba(128, 128, 128, 0.14);
+}
+.cpanel .ain-cand-btn:disabled {
+  cursor: default;
+}
+.cpanel .ain-cand-name {
+  font: 600 15px var(--cp-serif);
+}
+.cpanel .ain-latin {
+  font-style: italic;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.cpanel .ain-cand-now {
+  font-size: 11px;
+  color: var(--accent);
+}
+.cpanel .ain-cand-mean {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.cpanel .ain-confirm {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 6px 6px;
+}
+.cpanel .ain-preview {
+  flex-basis: 100%;
+  font-size: 13px;
+}
+.cpanel .ain-confirm .ain-ok {
+  color: var(--accent);
+  font-weight: 600;
+}
+.cpanel .ain-done {
+  font-size: 12px;
+  color: var(--ok);
+}
+
+/* ---- 地图上的选目标层 ---- */
+[data-theme='light'] {
+  --tp-dim: rgba(35, 28, 19, 0.3);
+}
+[data-theme='dark'] {
+  --tp-dim: rgba(0, 0, 0, 0.38);
+}
+.tp-dim {
+  position: absolute;
+  inset: 0;
+  background: var(--tp-dim, rgba(35, 28, 19, 0.3));
+  pointer-events: none;
+  z-index: 1;
+  animation: tp-fade 0.2s ease-out;
+}
+/* 推演中:不接受点击 */
+.tp-dim.busy {
+  pointer-events: auto;
+  cursor: progress;
+}
+@keyframes tp-fade {
+  from {
+    opacity: 0;
+  }
+}
+.tp-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.tp-plate {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-panel, 4px);
+  background: var(--panel);
+  color: var(--ink);
+  font: 600 14px/1.25 var(--cp-serif);
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+  cursor: pointer;
+  will-change: transform;
+}
+.tp-plate:disabled {
+  cursor: default;
+}
+.tp-plate.on,
+.tp-plate:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--panel-solid);
+}
+.tp-plate.self {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent, #fff);
+}
+.tp-sw {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+.tp-note {
+  font: 400 12px var(--font-sans);
+  opacity: 0.75;
+}
+
+/* 选中国家:国都画直径 24 的主色圆环,旁边"竹影城 · 国都" */
+.tp-mark {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.tp-ring {
+  position: absolute;
+  left: -12px;
+  top: -12px;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px rgba(184, 67, 47, 0.22);
+}
+/* 字默认写在圆环下面(地图自己的城名多半在城镇符号左右两边);压着地图上的字时 TargetPlates 换个地方(改 transform) */
+.tp-mark-text {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, 15px);
+  white-space: nowrap;
+  font: 600 14px/22px var(--cp-serif);
+  color: var(--ink);
+  text-shadow: var(--halo);
+}
+
+/* ---- 窄屏(手机):面板是底部抽屉(Inspector.tsx),从时间轴上面升起;半高 / 展开的位置见 app.css 的 --sheet-half / --sheet-full ---- */
+.sheet-grip {
+  display: none;
+}
+@media (max-width: 760px) {
+  .inspector.cpanel,
+  .inspector.cpanel:not(.k-polity) {
+    left: var(--safe-l, 0px);
+    right: var(--safe-r, 0px);
+    width: auto;
+    max-width: none;
+    top: var(--sheet-half, 50%);
+    bottom: var(--row-h, 92px);
+    height: auto;
+    max-height: none;
+    border-bottom: 0;
+    border-left: 0;
+    border-right: 0;
+    border-radius: var(--r-panel, 4px) var(--r-panel, 4px) 0 0;
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.18);
+    transition: top 0.26s cubic-bezier(0.33, 1, 0.68, 1);
+    animation: sheet-up 0.26s ease-out;
+  }
+  .inspector.cpanel.sheet-full {
+    top: var(--sheet-full, 12%);
+  }
+  /* 手指拖着:跟手,不过渡 */
+  .inspector.cpanel.dragging {
+    transition: none;
+  }
+  /* 往下拖到底:滑下去再关掉 */
+  .inspector.cpanel.closing {
+    transform: translateY(100%);
+    opacity: 0;
+    transition: transform 0.2s ease-in, opacity 0.2s ease-in;
+  }
+  /* 顶上的拖动条(点一下 = 展开 / 收起) */
+  .cpanel .sheet-grip {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: grab;
+    touch-action: none;
+  }
+  .sheet-grip i {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line-strong);
+  }
+  .sheet-grip:hover i {
+    background: var(--ink-2);
+  }
+  /* 头部也能拖(不让浏览器拿去滚动) */
+  .inspector.sheet .cp-head {
+    padding: 0 16px 10px;
+    gap: 4px;
+    touch-action: none;
+  }
+  .inspector.sheet .cp-body {
+    touch-action: pan-y;
+  }
+  /* 半高时要露出头部、三格数字和下一块的开头:三格、底部按钮稍微紧一点 */
+  .inspector.sheet .cp-stat {
+    padding: 8px 12px;
+  }
+  .inspector.sheet .cp-stat:first-child {
+    padding-left: 16px;
+  }
+  .inspector.sheet .cp-dyn {
+    padding: 10px 16px;
+  }
+  .inspector.sheet .cp-foot {
+    padding: 6px 12px;
+  }
+  .inspector.sheet .cp-btn {
+    padding: 10px 0;
+  }
+  /* 小字的输入框放到 16px:iOS 不会在点进去时自动放大页面(国名的大输入框、年份本来就够大) */
+  .inspector.sheet .ins-edit:not(.big) input,
+  .inspector.sheet .cp-stat .ins-edit input,
+  .inspector.sheet .cp-field input,
+  .inspector.sheet .ain-wish input {
+    font-size: 16px;
+  }
+  /* 顶部提示条(选目标、推演中、已生效):左右留 12px 铺开(app.css) */
+}

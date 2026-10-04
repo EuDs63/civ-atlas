@@ -1,0 +1,399 @@
+/**
+ * AI 接入层:流式解析、DeepSeek / 百炼 / 我们的 AI 三个服务商(全部用假 fetch,不联网)。
+ */
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { SseParser, readSse } from '../src/ai/sse';
+import { aiChat, getAiStatus } from '../src/ai/client';
+import { chooseProvider, setSecret, updateAiSettings } from '../src/ai/settings';
+import { setupAi } from '../src/ai/setup';
+import { getCallLog } from '../src/ai/callLog';
+import { compatBody, compatChat } from '../src/ai/providers/compat';
+import { DEEPSEEK_URL } from '../src/ai/providers/deepseek';
+import { BAILIAN_URLS } from '../src/ai/providers/bailian';
+import {
+  getOfficialAccount,
+  loginOfficial,
+  logoutOfficial,
+  refreshOfficialAccount,
+  sendLoginCode,
+  setOfficialServerForTest,
+} from '../src/ai/providers/official';
+import { AiError, type AiRequest } from '../src/ai/types';
+import { createFakeAiServer, FAKE_CODE } from '../scripts/lib/fakeAiServer';
+
+const KEY = 'sk-test-secret-0123456789';
+
+/** 把字符串按给定的字节块切开,做成一个流(模拟网络上任意位置断开) */
+function byteStream(text: string, cut = 7): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text);
+  let i = 0;
+  return new ReadableStream({
+    pull(ctl) {
+      if (i >= bytes.length) return ctl.close();
+      ctl.enqueue(bytes.slice(i, i + cut));
+      i += cut;
+    },
+  });
+}
+
+const sseBody = (events: unknown[], done = true) =>
+  events.map((e) => `data: ${typeof e === 'string' ? e : JSON.stringify(e)}\n\n`).join('') + (done ? 'data: [DONE]\n\n' : '');
+
+const chunk = (content: string, extra: Record<string, unknown> = {}) => ({ id: 'x', model: 'deepseek-flash', choices: [{ index: 0, delta: { content, ...extra } }] });
+
+function sseResponse(body: string, cut = 7) {
+  return new Response(byteStream(body, cut), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
+function errResponse(status: number, error: unknown) {
+  return new Response(JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+interface Captured {
+  url: string;
+  headers: Record<string, string>;
+  body: any;
+}
+
+/** 装一个假 fetch:记下请求,回 reply 给的 Response */
+function fakeFetch(reply: (c: Captured) => Response | Promise<Response>) {
+  const calls: Captured[] = [];
+  const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const c: Captured = {
+      url: String(url),
+      headers: Object.fromEntries(new Headers(init?.headers).entries()),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    };
+    calls.push(c);
+    if (init?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+    return reply(c);
+  });
+  vi.stubGlobal('fetch', f);
+  return calls;
+}
+
+const REQ: AiRequest = { feature: '史书', title: '大昌', messages: [{ role: 'user', content: '写一段大昌的兴起' }] };
+
+beforeAll(() => {
+  setupAi();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('SSE 流式解析', () => {
+  it('任意位置断开(含 CRLF、注释、多行 data、事件名)都能拼回完整消息', () => {
+    const text = ': keep-alive\r\n\r\nevent: delta\r\ndata: {"a":1}\r\n\r\ndata: 第一行\ndata: 第二行\n\nid: 7\ndata: x\n\n';
+    const whole = new SseParser();
+    const expected = [...whole.push(text), ...whole.end()];
+    expect(expected).toEqual([
+      { event: 'delta', data: '{"a":1}' },
+      { event: 'message', data: '第一行\n第二行' },
+      { event: 'message', data: 'x', id: '7' },
+    ]);
+    for (const step of [1, 2, 3, 5]) {
+      const p = new SseParser();
+      const got = [];
+      for (let i = 0; i < text.length; i += step) got.push(...p.push(text.slice(i, i + step)));
+      got.push(...p.end());
+      expect(got).toEqual(expected);
+    }
+  });
+
+  it('汉字的 UTF-8 字节被切开也能拼回;最后一条没有空行收尾也算', async () => {
+    const out = [];
+    for await (const ev of readSse(byteStream('data: 大昌王朝兴起于碧溪谷\n\ndata: 尾巴', 1))) out.push(ev.data);
+    expect(out).toEqual(['大昌王朝兴起于碧溪谷', '尾巴']);
+  });
+});
+
+describe('DeepSeek(假 fetch)', () => {
+  it('只发给 DeepSeek;密钥只在请求头里;流式拼出全文、读出用量;深度思考默认关;思考过程不算正文', async () => {
+    setSecret('deepseek', KEY);
+    chooseProvider('deepseek');
+    const calls = fakeFetch(() =>
+      sseResponse(
+        sseBody([
+          chunk('', { reasoning_content: '先想一想……' }),
+          chunk('大昌'),
+          chunk('兴于'),
+          chunk('碧溪谷。'),
+          { id: 'x', choices: [], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } },
+        ]),
+      ),
+    );
+    const deltas: string[] = [];
+    const r = await aiChat(REQ, { onDelta: (c) => deltas.push(c) });
+    expect(r.text).toBe('大昌兴于碧溪谷。');
+    expect(deltas.join('')).toBe(r.text);
+    expect(r.usage).toEqual({ inputTokens: 12, outputTokens: 8 });
+    expect(r.provider).toBe('deepseek');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(DEEPSEEK_URL);
+    expect(calls[0].url).not.toContain(KEY);
+    expect(calls[0].headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(calls[0].body).toMatchObject({ model: 'deepseek-flash', stream: true, stream_options: { include_usage: true }, thinking: { type: 'disabled' } });
+    expect(calls[0].body.response_format).toBeUndefined();
+    // 调用记录里有这一条,且哪里都没有密钥
+    const rec = getCallLog().calls[0];
+    expect(rec.ok).toBe(true);
+    expect(rec.usage).toEqual({ inputTokens: 12, outputTokens: 8 });
+    expect(JSON.stringify(rec)).not.toContain(KEY);
+  });
+
+  it('json 模式:带 response_format json_object;提示词里没有 "json" 字样时补一句', () => {
+    const b = compatBody({ model: 'm' }, { ...REQ, json: true, temperature: 0.3, maxTokens: 500 });
+    expect(b.response_format).toEqual({ type: 'json_object' });
+    expect(b.temperature).toBe(0.3);
+    expect(b.max_tokens).toBe(500);
+    const msgs = b.messages as { role: string; content: string }[];
+    expect(msgs[0].role).toBe('system');
+    expect(msgs[0].content).toMatch(/json/i);
+    const b2 = compatBody({ model: 'm' }, { feature: 'x', json: true, messages: [{ role: 'user', content: '回一个 JSON' }] });
+    expect(b2.messages).toHaveLength(1);
+  });
+
+  it('深度思考开着时 thinking.type = enabled', async () => {
+    updateAiSettings({ deepseek: { thinking: true } });
+    const calls = fakeFetch(() => sseResponse(sseBody([chunk('好')])));
+    await aiChat(REQ);
+    expect(calls[0].body.thinking).toEqual({ type: 'enabled' });
+    updateAiSettings({ deepseek: { thinking: false } });
+  });
+
+  it.each([
+    [401, { message: `Authentication Fails, Your api key: ${KEY} is invalid`, type: 'authentication_error' }, 'auth'],
+    [402, { message: 'Insufficient Balance', type: 'unknown_error' }, 'quota'],
+    [429, { message: 'Rate Limit Reached' }, 'rate-limit'],
+    [503, { message: 'Server Overloaded' }, 'rate-limit'],
+    [500, { message: 'Server Error' }, 'other'],
+    [400, { message: 'Model Not Exist', type: 'invalid_request_error' }, 'other'],
+    [400, { message: 'Content Exists Risk', type: 'invalid_request_error' }, 'content-filter'],
+  ] as const)('HTTP %i → %s(中文说明,不带密钥)', async (status, error, code) => {
+    fakeFetch(() => errResponse(status, error));
+    const e = (await aiChat(REQ).catch((x) => x)) as AiError;
+    expect(e).toBeInstanceOf(AiError);
+    expect(e.code).toBe(code);
+    expect(e.message).toMatch(/[一-鿿]/);
+    expect(e.message).not.toContain(KEY);
+    if (code === 'other' && status === 400) expect(e.message).toContain('deepseek-flash');
+    if (code === 'content-filter') expect(e.message).toContain('审核');
+    const rec = getCallLog().calls[0];
+    expect(rec.ok).toBe(false);
+    expect(rec.error?.code).toBe(code);
+    expect(JSON.stringify(rec)).not.toContain(KEY);
+  });
+
+  it('断网 → network;流中途断 → network;取消 → aborted', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+    await expect(aiChat(REQ)).rejects.toMatchObject({ code: 'network' });
+
+    // 发了两段就断
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const enc = new TextEncoder();
+        let n = 0;
+        const body = new ReadableStream<Uint8Array>({
+          pull(ctl) {
+            if (n++ === 0) ctl.enqueue(enc.encode(`data: ${JSON.stringify(chunk('一半'))}\n\n`));
+            else ctl.error(new TypeError('network error'));
+          },
+        });
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }),
+    );
+    await expect(aiChat(REQ)).rejects.toMatchObject({ code: 'network' });
+
+    fakeFetch(() => sseResponse(sseBody([chunk('好')])));
+    const ac = new AbortController();
+    ac.abort();
+    await expect(aiChat(REQ, { signal: ac.signal })).rejects.toMatchObject({ code: 'aborted' });
+  });
+
+  it('很久没回应 → network(超时)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(ctl) {
+            init.signal?.addEventListener('abort', () => ctl.error(new DOMException('aborted', 'AbortError')));
+          },
+        });
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }),
+    );
+    const e = await compatChat({ name: 'DeepSeek', url: DEEPSEEK_URL, key: KEY, model: 'm', idleMs: 30 }, REQ, {}).catch((x) => x);
+    expect(e).toMatchObject({ code: 'network' });
+    expect(e.message).toContain('没有回应');
+  });
+
+  it('流里只有思考、没有正文(到长度上限)→ bad-response,并提示关掉深度思考', async () => {
+    fakeFetch(() =>
+      sseResponse(sseBody([chunk('', { reasoning_content: '想了很久' }), { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] }])),
+    );
+    const e = (await aiChat(REQ).catch((x) => x)) as AiError;
+    expect(e.code).toBe('bad-response');
+    expect(e.message).toContain('深度思考');
+  });
+
+  it('没填密钥时不发请求,抛 not-configured', async () => {
+    setSecret('deepseek', undefined);
+    const calls = fakeFetch(() => sseResponse(sseBody([chunk('好')])));
+    expect(getAiStatus().ready).toBe(false);
+    await expect(aiChat(REQ)).rejects.toMatchObject({ code: 'not-configured' });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('阿里云百炼(假 fetch)', () => {
+  it('按地域选地址;流式 + 用量;深度思考开关一律明说(关 = false);json 模式', async () => {
+    setSecret('bailian', KEY);
+    chooseProvider('bailian');
+    updateAiSettings({ bailian: { region: 'intl', model: 'qwen-max' } });
+    const calls = fakeFetch(() =>
+      sseResponse(
+        sseBody([
+          { choices: [{ delta: { content: '{"名":', role: 'assistant' }, index: 0 }], model: 'qwen-max' },
+          { choices: [{ delta: { content: '"碧溪"}' }, index: 0, finish_reason: 'stop' }], model: 'qwen-max' },
+          { choices: [], usage: { prompt_tokens: 30, completion_tokens: 6, total_tokens: 36 } },
+        ]),
+        5,
+      ),
+    );
+    const r = await aiChat({ ...REQ, json: true });
+    expect(JSON.parse(r.text)).toEqual({ 名: '碧溪' });
+    expect(r.usage).toEqual({ inputTokens: 30, outputTokens: 6 });
+    expect(r.model).toBe('qwen-max');
+    expect(calls[0].url).toBe(BAILIAN_URLS.intl);
+    expect(calls[0].body.response_format).toEqual({ type: 'json_object' });
+    // 新一代模型不传就默认思考:关着时也要明说 false
+    expect(calls[0].body.enable_thinking).toBe(false);
+    expect(calls[0].body.model).toBe('qwen-max');
+
+    updateAiSettings({ bailian: { region: 'cn', thinking: true } });
+    const calls2 = fakeFetch(() => sseResponse(sseBody([chunk('好')])));
+    await aiChat(REQ);
+    expect(calls2[0].url).toBe(BAILIAN_URLS.cn);
+    expect(calls2[0].body.enable_thinking).toBe(true);
+    // json 模式时不开思考(思考模式不支持结构化输出)
+    const calls3 = fakeFetch(() => sseResponse(sseBody([chunk('{}')])));
+    await aiChat({ ...REQ, json: true });
+    expect(calls3[0].body.enable_thinking).toBe(false);
+    updateAiSettings({ bailian: { thinking: false, model: 'qwen-plus' } });
+  });
+
+  it.each([
+    [401, { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' }, 'auth', '地域'],
+    [400, { message: 'Access denied, please make sure your account is in good standing.', code: 'Arrearage' }, 'quota', '欠费'],
+    [403, { message: 'The free tier of the model has been exhausted.', code: 'AllocationQuota.FreeTierOnly' }, 'quota', '免费额度'],
+    [400, { message: 'Input data may contain inappropriate content.', code: 'data_inspection_failed' }, 'content-filter', '审核'],
+    [429, { message: 'Requests rate limit exceeded', code: 'Throttling' }, 'rate-limit', '限流'],
+    [404, { message: 'The model `qwen-xxx` does not exist', code: 'model_not_found' }, 'other', '模型'],
+  ] as const)('HTTP %i %o → %s', async (status, error, code, word) => {
+    fakeFetch(() => errResponse(status, error));
+    const e = (await aiChat(REQ).catch((x) => x)) as AiError;
+    expect(e.code).toBe(code);
+    expect(e.message).toContain(word);
+  });
+
+  it('报错里百炼附带的 "For details, see: 链接" 去掉(实测 401 就带这一句)', async () => {
+    fakeFetch(() =>
+      errResponse(401, { message: 'Incorrect API key provided. For details, see: https://help.aliyun.com/zh/model-studio/error-code#apikey-error', code: 'invalid_api_key' }),
+    );
+    const e = (await aiChat(REQ).catch((x) => x)) as AiError;
+    expect(e.message).toContain('Incorrect API key provided.');
+    expect(e.message).not.toContain('https://');
+  });
+
+  it('流中途返回错误对象 → 按错误码翻译', async () => {
+    fakeFetch(() => sseResponse(sseBody([chunk('一'), { error: { code: 'DataInspectionFailed', message: 'Output data may contain inappropriate content.' } }], false)));
+    await expect(aiChat(REQ)).rejects.toMatchObject({ code: 'content-filter', message: expect.stringContaining('拦下了 AI 写出来的内容') });
+  });
+});
+
+describe('我们的 AI(开发假服务器,假 fetch 直连,不开端口)', () => {
+  it('没配置服务器地址:不可用,说明"还在内测"', () => {
+    setOfficialServerForTest(null);
+    chooseProvider('official');
+    const s = getAiStatus();
+    expect(s.ready).toBe(false);
+    expect(s.reason).toContain('内测');
+  });
+
+  it('没选 AI 时的说明:我们的 AI 开放了才提它', () => {
+    chooseProvider(null);
+    setOfficialServerForTest(null);
+    expect(getAiStatus().reason).toBe('还没有设置 AI:可以填上自己的 DeepSeek / 阿里云百炼密钥');
+    setOfficialServerForTest('http://fake-ai.test');
+    expect(getAiStatus().reason).toBe('还没有设置 AI:可以用我们提供的 AI(消耗积分),或填上自己的 DeepSeek / 阿里云百炼密钥');
+    setOfficialServerForTest(undefined);
+  });
+
+  it('登录 → 看积分 → 调用扣积分 → 积分不够报错 → 令牌失效要重新登录', async () => {
+    const fake = createFakeAiServer({ startCredits: 7, chunkDelayMs: 0 });
+    const BASE = 'http://fake-ai.test';
+    const seen: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (u: string, init?: RequestInit) => {
+        seen.push(String(u));
+        return fake.handle(new Request(String(u), init));
+      }),
+    );
+    setOfficialServerForTest(BASE);
+    chooseProvider('official');
+    expect(getAiStatus().reason).toContain('登录');
+    await expect(aiChat(REQ)).rejects.toMatchObject({ code: 'not-configured' });
+
+    const sent = await sendLoginCode('writer@example.com');
+    expect(sent.devCode).toBe(FAKE_CODE);
+    await expect(loginOfficial('writer@example.com', '000000')).rejects.toMatchObject({ code: 'auth' });
+    await loginOfficial('writer@example.com', FAKE_CODE);
+    await refreshOfficialAccount();
+    expect(getOfficialAccount()).toMatchObject({ loggedIn: true, account: 'writer@example.com', credits: 7 });
+    expect(getAiStatus().ready).toBe(true);
+
+    const deltas: string[] = [];
+    const r = await aiChat(REQ, { onDelta: (c) => deltas.push(c) });
+    expect(r.provider).toBe('official');
+    expect(r.credits).toBe(3);
+    expect(r.model).toBe('fake-ai-1');
+    expect(deltas.join('')).toBe(r.text);
+    expect(r.usage?.outputTokens).toBe(r.text.length);
+    expect(getOfficialAccount().credits).toBe(4);
+    expect(getCallLog().calls[0]).toMatchObject({ ok: true, provider: 'official', credits: 3 });
+
+    await aiChat(REQ);
+    expect(getOfficialAccount().credits).toBe(1);
+    const e = (await aiChat(REQ).catch((x) => x)) as AiError;
+    expect(e.code).toBe('quota');
+    expect(e.message).toContain('积分不够');
+    expect(getOfficialAccount().credits).toBe(1);
+    expect(getCallLog().calls[0]).toMatchObject({ ok: false, error: { code: 'quota' } });
+
+    // 请求只发给我们的服务器
+    expect(seen.every((u) => u.startsWith(BASE))).toBe(true);
+
+    // 服务器那边令牌作废 → 401 → 本地清掉令牌,请用户重新登录
+    await logoutOfficial();
+    expect(getOfficialAccount().loggedIn).toBe(false);
+    await loginOfficial('writer@example.com', FAKE_CODE);
+    // 让服务器忘掉所有令牌:换一个新的假服务器
+    const fake2 = createFakeAiServer({ chunkDelayMs: 0 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (u: string, init?: RequestInit) => fake2.handle(new Request(String(u), init))),
+    );
+    await expect(aiChat(REQ)).rejects.toMatchObject({ code: 'auth' });
+    expect(getOfficialAccount().loggedIn).toBe(false);
+    expect(getAiStatus().ready).toBe(false);
+    setOfficialServerForTest(undefined);
+  });
+});

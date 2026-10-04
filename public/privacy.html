@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>隐私政策 · 文明与地图</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%231d4e74'/><path d='M7 18c3-6 7-2 9-6s6-3 9 1c-2 6-6 9-10 9s-7-1-8-4z' fill='%2346683a'/></svg>" />
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #f6f1e6;
+        --ink: #231c13;
+        --ink-2: #65594a;
+        --line: rgba(35, 28, 19, 0.15);
+        --link: #2f5d7c;
+        --accent: #b8432f;
+        --serif: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif;
+        --sans: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.8 var(--sans);
+        -webkit-text-size-adjust: 100%;
+      }
+      main {
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 40px 24px 32px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--ink-2);
+        font: 15px var(--serif);
+        letter-spacing: 0.08em;
+        text-decoration: none;
+      }
+      .brand::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        background: var(--accent);
+        transform: rotate(45deg);
+      }
+      h1 {
+        margin: 20px 0 4px;
+        font: 700 30px/1.3 var(--serif);
+        letter-spacing: 0.06em;
+      }
+      .date {
+        margin: 0 0 24px;
+        font-size: 13px;
+        color: var(--ink-2);
+      }
+      .lead {
+        padding: 14px 18px;
+        border-left: 3px solid var(--accent);
+        background: rgba(35, 28, 19, 0.05);
+      }
+      h2 {
+        margin: 28px 0 6px;
+        font: 700 19px/1.5 var(--serif);
+        letter-spacing: 0.04em;
+      }
+      p {
+        margin: 0 0 10px;
+      }
+      ul {
+        margin: 0 0 10px;
+        padding-left: 1.3em;
+      }
+      li {
+        margin: 2px 0;
+      }
+      li::marker {
+        color: var(--ink-2);
+      }
+      b {
+        font-weight: 600;
+      }
+      .note {
+        font-size: 14px;
+        color: var(--ink-2);
+      }
+      a {
+        color: var(--link);
+        text-underline-offset: 2px;
+        overflow-wrap: anywhere;
+      }
+      code {
+        font: 14px ui-monospace, Menlo, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+      footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 18px;
+        margin-top: 40px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+        font-size: 14px;
+        color: var(--ink-2);
+      }
+      footer .back {
+        margin-right: auto;
+        font-size: 15px;
+        text-decoration: none;
+      }
+      footer .back:hover {
+        text-decoration: underline;
+      }
+      footer a:not(.back) {
+        color: var(--ink-2);
+      }
+      @media (max-width: 760px) {
+        main {
+          padding: 24px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+        }
+        h1 {
+          margin-top: 16px;
+          font-size: 26px;
+        }
+        h2 {
+          margin-top: 26px;
+          font-size: 18px;
+        }
+        .lead {
+          padding: 12px 14px;
+        }
+        footer a {
+          display: inline-block;
+          padding: 6px 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="brand" href="./">文明与地图</a>
+      <h1>隐私政策</h1>
+      <p class="date">更新日期:2026 年 9 月 30 日</p>
+
+      <p class="lead">「文明与地图」<b>不用注册,没有账号</b>,也不会问你的姓名、手机号、邮箱。世界的生成和历史推演全部在你的浏览器里完成,我们没有替你保存数据的服务器;只有你自己设置了 AI,浏览器才会把要写的材料直接发给你选的 AI 服务商。</p>
+
+      <h2>你的数据存在哪里、怎么删</h2>
+      <p>下面这些只存在你这台设备的浏览器里(浏览器的本地存储 localStorage 和 IndexedDB),不会上传给我们:</p>
+      <ul>
+        <li>你改过或起过名字的世界:种子、参数、世界名、改过的名字、干预、改过的地形、一张缩略图</li>
+        <li>AI 写的内容(史书、释名)和 AI 调用记录(每次发出去的内容、收到的回复、用量;不含密钥)</li>
+        <li>AI 设置(用哪家、模型、地域),以及你选择记住时的 API 密钥</li>
+        <li>一个"看过操作提示"的小标记</li>
+      </ul>
+      <p>删除:世界在概览的"存档 → 我的世界"里删;史书在阅读页里删;调用记录在"AI 设置 → 调用记录"里清空;密钥在 AI 设置里点"清除"。想一次删光,在浏览器设置里清除本网站的数据即可。删掉的东西无法恢复,重要的世界请先"存成文件"。</p>
+
+      <h2>分享链接</h2>
+      <p>"复制分享链接"会把世界的存档(种子、参数、世界名、改名、干预、地形修改)压缩后放进网址 <code>#</code> 号后面。浏览器不会把 <code>#</code> 后面的内容发给网站服务器,所以它不经过我们的服务器。链接里没有密钥、AI 写的内容和调用记录;但拿到链接的人能看到里面的全部内容,请只发给你想分享的人。</p>
+
+      <h2>AI 和密钥</h2>
+      <p>AI 功能目前只能用你自己的 DeepSeek 或阿里云百炼 API 密钥。</p>
+      <ul>
+        <li>密钥只存在你的浏览器里。勾着"下次打开时记住密钥和登录"时存在本地存储里;不勾时只留在当前页面,刷新或关掉就忘。</li>
+        <li>用 AI 时,你的浏览器直接把请求发给你选的服务商(<code>api.deepseek.com</code>,或百炼的 <code>dashscope.aliyuncs.com</code> / <code>dashscope-intl.aliyuncs.com</code>),不经过我们的服务器。</li>
+        <li>发过去的是:从推演出的历史里整理的材料(国名、地名、年份、事件等)、你填的附加要求,以及提示词。每一次发了什么,都能在"AI 设置 → 调用记录"里看到。</li>
+        <li>这些内容到了服务商那里,按服务商自己的规则处理:<a href="https://cdn.deepseek.com/policies/zh-CN/deepseek-privacy-policy.html" target="_blank" rel="noreferrer">DeepSeek 隐私政策</a>;阿里云百炼的<a href="https://help.aliyun.com/zh/model-studio/privacy-notice" target="_blank" rel="noreferrer">合规资质与隐私说明</a>和<a href="https://terms.aliyun.com/legal-agreement/terms/suit_bu1_ali_cloud/suit_bu1_ali_cloud201902141711_54837.html" target="_blank" rel="noreferrer">阿里云隐私权政策</a>(选"国际(新加坡)"地域时见<a href="https://www.alibabacloud.com/help/zh/model-studio/privacy-notice" target="_blank" rel="noreferrer">国际站的说明</a>)。</li>
+        <li>"我们的 AI"还在内测,暂未开放;开放前会先更新这份政策。</li>
+      </ul>
+      <p class="note">本网站的代码全部公开在 <a href="https://github.com/guaner-334/civ-atlas" target="_blank" rel="noreferrer">GitHub</a> 上,以上说法都可以对照源代码核实。</p>
+
+      <h2>统计、广告和 cookie</h2>
+      <p>网页里没有任何统计分析、广告或跟踪代码,也不使用 cookie。</p>
+
+      <h2>访问日志</h2>
+      <p>网页放在第三方托管服务上。和几乎所有网站一样,托管服务商会按惯例记录访问日志(IP 地址、访问时间、请求的网址、浏览器信息),用于安全防护和运维。网址里 <code>?</code> 后面的种子、画风等参数是网址的一部分,也会出现在这些日志里。除此之外我们不另外收集任何信息。</p>
+
+      <h2>其他</h2>
+      <ul>
+        <li>未满 14 周岁的朋友,请在父母或其他监护人同意后使用。</li>
+        <li>有疑问,或发现网页的实际行为和这里写的不一致,请到 <a href="https://github.com/guaner-334/civ-atlas/issues" target="_blank" rel="noreferrer">GitHub issue</a> 告诉我们。issue 是公开的,请不要在里面贴密钥或个人信息。</li>
+        <li>政策有变化时,我们会更新这一页,并修改顶部的更新日期。</li>
+      </ul>
+
+      <footer>
+        <a class="back" href="./">← 回到地图</a>
+        <a href="./terms.html">用户协议</a>
+        <a href="https://github.com/guaner-334/civ-atlas" target="_blank" rel="noreferrer">源代码</a>
+      </footer>
+    </main>
+  </body>
+</html>

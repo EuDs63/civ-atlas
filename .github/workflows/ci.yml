@@ -1,0 +1,128 @@
+name: CI
+
+# 什么时候跑:
+# - PR:改了代码就全查;只改文档(*.md)的不跑
+# - 合并进 main 后不重跑(PR 合并前已经在最新的 main 上查过);改成每天在 main 上跑一次兜底,
+#   前一天 main 上没有代码改动就跳过
+# - 需要时可以在 Actions 页面手动跑
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+  schedule:
+    - cron: '0 18 * * *' # 每天 UTC 18:00(北京时间 02:00)
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 三个任务并行跑,总时长 ≈ 最慢的那个(冒烟)
+jobs:
+  # 每天的兜底:最近一天 main 上有没有代码改动(文档不算)
+  changed:
+    name: 最近一天有没有代码改动
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      any: ${{ steps.c.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 100
+      - id: c
+        run: |
+          n=$(git log --since='25 hours ago' --format=%H -- . ':!*.md' | wc -l)
+          echo "any=$([ "$n" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: 类型检查 / 单测 / 压力 / 构建
+    needs: changed
+    if: ${{ !cancelled() && (github.event_name != 'schedule' || needs.changed.outputs.any == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 类型检查
+        run: pnpm typecheck
+      - name: 单元测试
+        run: pnpm test
+      - name: 极端参数压力测试
+        run: pnpm stress
+      - name: 生产构建
+        run: pnpm build
+
+  smoke:
+    name: 冒烟
+    needs: changed
+    if: ${{ !cancelled() && (github.event_name != 'schedule' || needs.changed.outputs.any == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 读取 Playwright 版本
+        id: pw
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      # 浏览器按 Playwright 版本缓存;升级 Playwright 时自动重新下载
+      - name: 缓存无头浏览器
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-shell
+      - name: 安装无头浏览器(缓存未命中时)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+      - name: 冒烟测试(页面加载 / 回放 / 悬停 / 各界面流程)
+        run: pnpm smoke
+
+  visual:
+    name: 画面回归
+    needs: changed
+    if: ${{ !cancelled() && (github.event_name != 'schedule' || needs.changed.outputs.any == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 读取 Playwright 版本
+        id: pw
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      # 浏览器按 Playwright 版本缓存;升级 Playwright 时自动重新下载
+      - name: 缓存无头浏览器
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-shell
+      - name: 安装无头浏览器(缓存未命中时)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+      - name: 画面回归检查
+        id: visual
+        run: pnpm test:visual
+      - name: 上传画面差异图
+        if: failure() && steps.visual.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff
+          path: snaps/visual-diff/
+          retention-days: 14

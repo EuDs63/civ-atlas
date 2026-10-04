@@ -1,0 +1,632 @@
+/**
+ * 用户的修改(阶段 4「干预与编辑」):不改种子,记成"在基础世界上的修改",每次生成完再套上去。
+ * 改名(本文件的 applyNames)、干预(civ/interventions.ts)、存档 / 读档(savefile.ts)都用这里的格式。纯计算,不碰 DOM。
+ *
+ * ## 稳定键
+ *
+ * 干预会改写历史:干预年份之后,国家、城镇的编号(数组下标)可能变;改地形会重新生成世界,州也重新划分、重新编号。
+ * 所以修改里引用实体一律用"稳定键" —— 按**地块**(网格只由种子决定,改地形也不变,是天然的位置锚)定位,
+ * 历史改写、改地形以后尽量指回同一个地方。键是人能看懂的字符串:
+ *
+ * | 键                          | 指的是                                                                      |
+ * |-----------------------------|-----------------------------------------------------------------------------|
+ * | `polity:c4567#0`            | 国家:立国时国都所在的州(4567 = 那座城的地块,也就是这州的治所地块),这州第 0 个立国的(按立国先后) |
+ * | `settlement:c4567#1`        | 城:地块 4567 所在的州里第 1 座城(按建城先后;0 = 最早的,毁了又在故址重建的 +1)   |
+ * | `place:mountains@c4567#0`   | 地理实体:种类(sea / mountains / river / lake / island / desert)+ 锚点地块 4567;同种类同锚点的第 0 个(几乎总是 0) |
+ * | `culture:c4567#0`           | 民族:发源在地块 4567 所在的州(4567 = 发源州的治所地块),这州第 0 个发源的(几乎总是 0) |
+ * | `dynasty:c4567#0/2`         | 朝代:国家 `polity:c4567#0` 的第 2 朝(Polity.dynasties 的下标,0 = 立国时那一朝)  |
+ * | `region:c4567`              | 州:包含地块 4567 的那一州(4567 = 这州的治所地块)                              |
+ *
+ * 解析(resolveKey):先找"现在包含这个地块的州",再在这州里按"第几个"找国家 / 城 / 民族。同一个世界里和按州号找完全一样;
+ * 改地形以后州重新划分,键跟着地块走 —— 指到"同一块地方"现在的那一州、那里立的国、建的城;那块地方变成了水、
+ * 或者新历史里那里没有第几个国家 / 城,就是找不到(改名忽略,干预不生效,界面上标"暂未生效")。
+ *
+ * **旧键**(`polity:r123#0`、`settlement:r123#1`、`culture:r45#0`、`dynasty:r123#0/2`、`region:r123`,r 后面是州号;
+ * GENERATOR_VERSION 2 以前写的存档、分享链接里都是这种):照样能读,按原来的方式(州号)解析。新写入的一律是 c 格式。
+ * 读档、打开分享链接、自动恢复时,界面先用 upgradeLegacyKeys 把旧键就地换成 c 格式(州号 → 那一州的治所地块;
+ * 按读档那一刻生成的世界解析,自动存跟着写回去)。州只由地形定、和历史无关;GENERATOR_VERSION 3 改了小湖的位置,
+ * 大多数州的划分不受影响,附近有小湖挪了的那几州可能错开 —— 升级以后就按地块定位了,以后不会再错开。
+ * 没有锚点地块的地理实体(旧数据)用 `place:{种类}@i{places 下标}`。
+ * 东方国家第一朝的国号就是国名词根:改它用 polityKey(`dynasty:…/0` 也认,同时给了以 polityKey 为准)。
+ *
+ * ## 改名
+ *
+ * WorldEdits.names:稳定键 → 新名字。国家改的是国名词根(全称 = 词根 + 当年的国号,见 gen/civ/growth.ts),
+ * 东方的朝代改的是那一朝的国号词根,西幻的朝代改的是王室名(显示为"某某王朝");城、地名、民族直接改(民族不带"族"字)。
+ * 州名写进新 Civ 的 regionNames(civ.regions 保持同一份:画国土、国界的缓存都按它存,改州名不重画底图)。
+ * applyNames 返回套上名字的新 Civ(原 Civ 不改;没有任何名字生效时直接返回原 Civ)。连带跟着变的(用户没单独改过的):
+ * - 复国的国家("后昌")跟着故国的国号变("昌" 改成 "秦" → "后秦")
+ * - 同族在故址上重建、沿用旧名的城,跟着旧城的名字变
+ *
+ * ## 干预
+ *
+ * WorldEdits.interventions:作者在某一年给历史下的"命令"。改名只是换字,干预会改写历史 —— 带着干预从第 0 年整段重推
+ * (gen/civ/interventions.ts 执行):**干预年份之前的历史和不干预时逐字节一致**,之后按新规则展开。
+ * 国家、州、城一律用稳定键(`polity:c4567#0`、`region:c890`、`settlement:c890#1`),推演到要用的时候才解析成当时的编号;
+ * 国家键指不到(新历史里这个国家没出现、或者到那一年还没立国)= 这条干预不生效,不报错。
+ *
+ * | kind      | 意思     | 字段                              | from(整数年份)                          | 可选                          |
+ * |-----------|----------|-----------------------------------|-------------------------------------------|-------------------------------|
+ * | `protect` | 不许灭   | a = 国家                          | 从这一年起:国都攻不下、不会被并掉(国土照样会丢、会分裂、会改朝换代) | —                  |
+ * | `ally`    | 结盟     | a = 国家,b = 另一国               | 从这一年起两国不互相宣战(那一刻正在交战的当即议和);一方被第三国攻打,另一方多半参战 | until:到这一年止(不含;不给 = 一直) |
+ * | `declare` | 宣战     | a = 攻方,b = 守方                 | 这一年年初强制开战(两国不接壤 / 已在交战 / 有一方已亡 = 打不成,编年史照记一条) | —   |
+ * | `unity`   | 禁止分裂 | a = 国家                          | 从这一年起不会有州叛离(分裂、遗民复国都不会从它的国土里起事) | —                     |
+ * | `cede`    | 划州     | a = 得到它的国家,region = 州      | 这一年年初这州归 a(州里有人住才行;原主国照常,不算战争;划走的是原主的国都就迁都,原主只剩这一州就亡) | permanent: true = 永久:之后战争、分裂、复国、合并、议和割地都拿不走它(只要还在 a 手里) |
+ * | `found`   | 立国     | region = 州                       | 这一年年初以这州的城为国都立一个新国家(州里没城就先建城;民族 = 当地民族;州原来有主的,算从原主分出来) | name:国名(国名词根,同改名) |
+ * | `move`    | 迁都     | a = 国家,city = 城                | 这一年年初迁都到这座城(城要在 a 的国土里、没被毁) | —                            |
+ * | `halt`    | 不许扩张 | a = 国家                          | 从这一年起不进无主的州、不主动宣战、不援盟、不并小国;那一刻它挑起的战争当即议和。被打时照常防守、反攻夺回自己的州 | until:到这一年止(不含;不给 = 一直) |
+ *
+ * 立国出来的新国家也有稳定键:`polity:c{州的治所地块}#{n}`(n = 新历史里这州之前立过几国;干预年份之前的历史不变,所以 n 是定的),
+ * 和别的国家一样能改名、能被别的干预引用。
+ * 年份语义:from 那一年的年初(第 from 年的第一刻)生效,同一刻里先于别的一切事件;干预在列表里的先后 = 同一年里的先后。
+ * 列表里的先后也是史事 intervene 的 war 列(下标)。读进来的列表先过 cleanInterventions(种类不认识、键的格式不对的丢掉)。
+ *
+ * ## 地形修改
+ *
+ * WorldEdits.terrain:作者动手改的地形("这里放一座火山"),按先后排。和干预不同,改地形要**从头重新生成世界**:
+ * 修改在生成流程里对应的那一步套上(gen/terrainEdits.ts),侵蚀、河流、气候、群落照常跑,再重推文明 ——
+ * 改过的地形和天然长出来的一样。州会重新划分、历史整个重来,改名和干预按稳定键(按地块定位)尽量套上 ——
+ * 指回同一块地方,套不上的不生效(先留着)。旧格式的键(`region:r123` 这类州号)仍按州号解析:州重新划分以后,
+ * 它指到新划分里编号相同的那一州(多半不是原来那块地方),所以新写入的键一律是按地块的 c 格式。
+ * 没有地形修改时生成结果和不改一模一样(逐字节)。
+ *
+ * | kind      | 意思       | pts(世界坐标)    | r(世界坐标)    | s(强度,1 = 普通)                |
+ * |-----------|------------|--------------------|------------------|-----------------------------------|
+ * | `volcano` | 火山       | 一个点 [x, y]      | 山体底半径       | 高低;放在海里 = 火山岛           |
+ * | `range`   | 山脉       | 折线 [x0, y0, x1, y1, …] | 半宽       | 高低;穿过海面的一段成岛链 / 半岛 |
+ * | `lake`    | 湖         | 一个点 [x, y]      | 湖的半径         | 深浅;点在海里不生效              |
+ * | `raise`   | 抬起陆地   | 折线(画笔走过的路) | 画笔半径         | 抬起的新陆地的高低                |
+ * | `sink`    | 沉成海     | 折线(画笔走过的路) | 画笔半径         | 沉下去的海的深浅                  |
+ *
+ * 世界坐标 = 主图(等距圆柱)原图的像素坐标(宽 2048、高 1024,左上角为原点;和精细度无关),取整存:
+ * x 是经度(0 = 180°W,1024 = 0°,2048 = 180°E,绕一圈回到原处),y 是纬度(0 = 北极,512 = 赤道,1024 = 南极)。
+ * 折线的第一个点 x 在 [0, 2048) 里,之后每个点按离上一个点近的那边写(跨 180° 经线的一笔 x 可以超出 [0, 2048),是连着的一笔)。
+ * 读进来的列表先过 terrainEdits.ts 的 cleanTerrainOps(种类不认识、坐标不是数的丢掉;x 按上面的规则规整,y、大小、强度夹回范围内)。
+ *
+ * GENERATOR_VERSION:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对,不一致就提示"存档来自旧版本")。
+ *   2:名字按位置取(gen/civ/naming.ts、places.ts;地形、历史不变,默认的名字换了一遍),稳定键改按地块定位(c 格式)。
+ *   3:推演里的随机数按位置锚取(gen/civ/rand.ts:州 = 治所地块,国家 / 城 / 民族 = 它们的锚点地块,不按编号),
+ *      超越函数舍入到 24 位(不同 CPU、浏览器逐位一致);民族的语感、配色按发源地位置先后挑;
+ *      地形里的随机小洼地(小湖)按地块取(world.ts)。小湖的位置和附近的河、群落变了,历史换了一遍。
+ *   4:地形生成改成"一颗星球"(tectonics.ts):板块有大有小、默认 30 块,2~5 块大小悬殊的大陆 + 微大陆 + 岛弧 / 热点岛链 / 群岛,
+ *      多尺度海岸;大陆内部平缓、山脉窄长、碰撞带后面有高原;海底有洋中脊、海沟、宽窄不一的大陆架。地形、历史全换了一遍。
+ *   5:世界长在一颗球上:东西相连、有真正的南北极,主图是等距圆柱投影;约一半的世界有一块极地大陆。
+ *      地形、历史、稳定键里的地块编号全换了一遍(旧存档照常打开,提示"来自旧版本",指不到的改名 / 干预标"暂未生效");
+ *      地形修改的坐标按经纬度解释(x = 经度、y = 纬度),跨 180° 经线的笔画 x 可以超出 [0, 2048)。
+ */
+import type { Civ, Place, Polity, Settlement } from './civ/types';
+import { polityRootAt } from './civ/growth';
+
+/** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对) */
+export const GENERATOR_VERSION = 5;
+
+/** 干预的种类(见文件头的表) */
+export type InterventionKind = 'protect' | 'ally' | 'declare' | 'unity' | 'cede' | 'found' | 'move' | 'halt';
+
+/** 一条干预(字段、年份语义见文件头的表;a、b 是国家的稳定键 `polity:…`,region 是州键 `region:…`,city 是城键 `settlement:…`) */
+export type Intervention =
+  | { kind: 'protect'; a: string; from: number }
+  | { kind: 'ally'; a: string; b: string; from: number; until?: number }
+  | { kind: 'declare'; a: string; b: string; from: number }
+  | { kind: 'unity'; a: string; from: number }
+  | { kind: 'cede'; a: string; region: string; from: number; permanent?: true }
+  | { kind: 'found'; region: string; from: number; name?: string }
+  | { kind: 'move'; a: string; city: string; from: number }
+  | { kind: 'halt'; a: string; from: number; until?: number };
+
+/** 地形修改的种类(见文件头"地形修改"的表) */
+export type TerrainKind = 'volcano' | 'range' | 'lake' | 'raise' | 'sink';
+
+/** 一处地形修改(字段见文件头"地形修改"的表;坐标、大小都是世界坐标) */
+export interface TerrainOp {
+  kind: TerrainKind;
+  /** 火山、湖 = [x, y];山脉、画笔 = 折线 [x0, y0, x1, y1, …] */
+  pts: number[];
+  /** 大小:火山底半径 / 湖半径 / 山脉半宽 / 画笔半径 */
+  r: number;
+  /** 强度(1 = 普通) */
+  s: number;
+}
+
+export interface WorldEdits {
+  /** 改名:稳定键 → 新名字 */
+  names: Record<string, string>;
+  /** 干预(按下达的先后;见文件头"干预") */
+  interventions: Intervention[];
+  /** 地形修改(按先后;见文件头"地形修改") */
+  terrain: TerrainOp[];
+}
+
+export const EMPTY_EDITS: WorldEdits = Object.freeze({
+  names: Object.freeze({}) as Record<string, string>,
+  interventions: Object.freeze([]) as unknown as Intervention[],
+  terrain: Object.freeze([]) as unknown as TerrainOp[],
+});
+
+export type KeyKind = 'polity' | 'settlement' | 'place' | 'culture' | 'dynasty' | 'region';
+
+export interface ResolvedKey {
+  kind: KeyKind;
+  /** 国家 / 城 / 地理实体 / 民族 / 州的编号(朝代:所属国家的编号) */
+  id: number;
+  /** 朝代:第几朝 */
+  index?: number;
+}
+
+// ---------------------------------------------------------------------------
+// 稳定键 ↔ 编号(每个 Civ 算一次)
+
+/** 国家 / 城 / 民族:按州编"第几个"的三类 */
+type CountedKind = 'polity' | 'settlement' | 'culture';
+
+interface KeyIndex {
+  polity: string[];
+  settlement: string[];
+  place: string[];
+  culture: string[];
+  /** 地理实体的键 → 编号 */
+  places: Map<string, number>;
+  /** 按州定位的内部键(`polity:123#0`,123 = 州号)→ 编号 */
+  byRegion: Map<string, number>;
+}
+
+const indexCache = new WeakMap<Civ, KeyIndex>();
+
+/** 按 group 分组,组里按 order 排好,各自编上"第几个":返回每个元素的序号 */
+function counted<T>(list: readonly T[], group: (x: T, i: number) => number | string, order: (a: T, b: T) => number): number[] {
+  const groups = new Map<number | string, number[]>();
+  list.forEach((x, i) => {
+    const a = group(x, i);
+    const g = groups.get(a);
+    if (g) g.push(i);
+    else groups.set(a, [i]);
+  });
+  const out = new Array<number>(list.length);
+  for (const g of groups.values()) {
+    g.sort((i, j) => order(list[i], list[j]) || i - j);
+    g.forEach((i, n) => (out[i] = n));
+  }
+  return out;
+}
+
+function keyIndex(civ: Civ): KeyIndex {
+  let ix = indexCache.get(civ);
+  if (ix) return ix;
+  const S = civ.settlements;
+  const seat = civ.regions.seat;
+  /** 州 → 键里的位置锚:治所地块(`c4567`);没有这州(不该发生)按州号 */
+  const at = (r: number) => (r >= 0 && r < seat.length ? `c${seat[r]}` : `r${r}`);
+  const byRegion = new Map<string, number>();
+  const build = <T>(kind: CountedKind, list: readonly T[], region: (x: T) => number, order: (a: T, b: T) => number): string[] => {
+    const rs = list.map(region);
+    const ns = counted(list, (_, i) => rs[i], order);
+    return list.map((_, i) => {
+      byRegion.set(`${kind}:${rs[i]}#${ns[i]}`, i);
+      return `${kind}:${at(rs[i])}#${ns[i]}`;
+    });
+  };
+  const polity = build('polity', civ.polities, (p) => S[p.capital]?.region ?? -1, (a, b) => a.founded - b.founded);
+  const settlement = build('settlement', S, (s) => s.region, (a, b) => a.founded - b.founded);
+  const culture = build('culture', civ.cultures, (c) => c.hearth, (a, b) => a.born - b.born);
+  const placeAt = (p: Place, i: number) => `place:${p.kind}@${p.cell !== undefined ? `c${p.cell}` : `i${i}`}`;
+  const pn = counted(civ.places, placeAt, () => 0);
+  const place = civ.places.map((p, i) => `${placeAt(p, i)}#${pn[i]}`);
+  const places = new Map<string, number>();
+  place.forEach((k, id) => places.set(k, id));
+  ix = { polity, settlement, place, culture, places, byRegion };
+  indexCache.set(civ, ix);
+  return ix;
+}
+
+export function polityKey(civ: Civ, id: number): string {
+  return keyIndex(civ).polity[id];
+}
+
+export function settlementKey(civ: Civ, id: number): string {
+  return keyIndex(civ).settlement[id];
+}
+
+/**
+ * 地理实体的键。Place 本身不知道自己在 civ.places 里排第几,所以同种类同锚点有两个以上的(极少见)、
+ * 或者没有锚点地块的,要用 placeKeyOf(civ, 下标) 才能分清;这里按"第 0 个"算
+ */
+export function placeKey(place: Place): string {
+  return `place:${place.kind}@${place.cell !== undefined ? `c${place.cell}` : 'i0'}#0`;
+}
+
+/** 地理实体的键(按 civ.places 的下标;能分清同种类同锚点的几个) */
+export function placeKeyOf(civ: Civ, id: number): string {
+  return keyIndex(civ).place[id];
+}
+
+export function cultureKey(civ: Civ, id: number): string {
+  return keyIndex(civ).culture[id];
+}
+
+export function dynastyKey(civ: Civ, polity: number, index: number): string {
+  return `dynasty:${polityKey(civ, polity).slice('polity:'.length)}/${index}`;
+}
+
+/** 州的键:`region:c{治所地块}`(改地形、州重新划分以后,指"现在包含这块地的那一州") */
+export function regionKey(civ: Civ, region: number): string {
+  const seat = civ.regions.seat;
+  return region >= 0 && region < seat.length ? `region:c${seat[region]}` : `region:r${region}`;
+}
+
+/** 州的位置锚:`r123`(旧格式,州号)/ `c4567`(地块)→ 现在的州号;地块在水上、超出范围 = −1(州号不查州数) */
+function regionOfRef(ref: string, of: ArrayLike<number>): number {
+  const id = Number(ref.slice(1));
+  if (ref[0] === 'r') return id;
+  return id >= 0 && id < of.length ? of[id] : -1;
+}
+
+const REGION_KEY = /^region:([rc]\d{1,7})$/;
+const COUNTED_KEY = /^(polity|settlement|culture):(r-?\d{1,7}|c\d{1,7})#(\d{1,5})$/;
+
+/**
+ * 州键 → 现在的州号:`region:c4567` 找包含地块 4567 的州(水上 = −1);旧格式 `region:r123` 就是 123(不查州数,推演时再核对)。
+ * 格式不对 = −1。of = Regions.of(地块 → 州)
+ */
+export function regionOfKey(key: string, of: ArrayLike<number>): number {
+  const m = REGION_KEY.exec(key);
+  return m ? regionOfRef(m[1], of) : -1;
+}
+
+/**
+ * 国家 / 城 / 民族的键 → 按州定位的内部键 `polity:123#0`(123 = 现在的州号;新格式先找包含那个地块的州,旧格式直接是州号)。
+ * 格式不对、地块在水上 = null。推演里的增量解析(civ/interventions.ts)和 resolveKey 共用它
+ */
+export function keyByRegion(key: string, of: ArrayLike<number>): string | null {
+  const m = COUNTED_KEY.exec(key);
+  if (!m) return null;
+  const r = regionOfRef(m[2], of);
+  if (r < 0 && m[2][0] === 'c') return null;
+  return `${m[1]}:${r}#${Number(m[3])}`;
+}
+
+/** 键 → 这个世界里的实体;格式不对、找不到的 = null(新旧两种格式都认,见文件头"稳定键") */
+export function resolveKey(civ: Civ, key: string): ResolvedKey | null {
+  if (typeof key !== 'string') return null;
+  const ix = keyIndex(civ);
+  if (key.startsWith('region:')) {
+    const id = regionOfKey(key, civ.regions.of);
+    return id >= 0 && id < civ.regions.count ? { kind: 'region', id } : null;
+  }
+  if (key.startsWith('place:')) {
+    const id = ix.places.get(key);
+    return id !== undefined ? { kind: 'place', id } : null;
+  }
+  if (key.startsWith('dynasty:')) {
+    const cut = key.lastIndexOf('/');
+    if (cut < 0) return null;
+    const index = Number(key.slice(cut + 1));
+    const p = resolveKey(civ, `polity:${key.slice('dynasty:'.length, cut)}`);
+    if (!p || p.kind !== 'polity' || !Number.isInteger(index) || index < 0 || !civ.polities[p.id].dynasties?.[index]) return null;
+    return { kind: 'dynasty', id: p.id, index };
+  }
+  const k = keyByRegion(key, civ.regions.of);
+  const id = k === null ? undefined : ix.byRegion.get(k);
+  return id !== undefined ? { kind: key.slice(0, key.indexOf(':')) as CountedKind, id } : null;
+}
+
+/** 旧格式的键:种类 + `r` + 州号 + 后面的部分(`#0`、`#0/2`,州键没有) */
+const LEGACY_KEY = /^(polity|settlement|culture|dynasty|region):r(-?\d{1,7})((?:#\d{1,5}(?:\/\d{1,5})?)?)$/;
+
+/** 一个键:旧格式(州号)→ c 格式(那一州的治所地块);不是旧格式、州号超出范围的 = null */
+function upgradeKey(key: unknown, seat: ArrayLike<number>): string | null {
+  if (typeof key !== 'string') return null;
+  const m = LEGACY_KEY.exec(key);
+  if (!m) return null;
+  const r = Number(m[2]);
+  if (!(r >= 0 && r < seat.length)) return null;
+  return `${m[1]}:c${seat[r]}${m[3]}`;
+}
+
+/**
+ * 把修改里的旧键(`region:r123`、`polity:r123#0`、`settlement:r123#1`、`culture:r45#0`、`dynasty:r123#0/2`)
+ * 就地换成 c 格式(`r123` → `c{第 123 州的治所地块}`):改名的键、干预里的国家 / 州 / 城。
+ * seat = 读档那一刻生成的世界的 Regions.seat(州只由地形定,和历史无关;见文件头"旧键")。
+ * 升级后的键和已有的 c 格式键撞了(同一个东西改过两次名):留 c 格式那个(后写的)。州号超出范围的旧键原样留着(本来就找不到)。
+ * 一个旧键都没有时返回原对象(同一个对象)
+ */
+export function upgradeLegacyKeys(edits: WorldEdits, seat: ArrayLike<number>): WorldEdits {
+  let names = edits.names;
+  let changed = false;
+  const up: [string, string][] = [];
+  for (const k in edits.names) {
+    const c = upgradeKey(k, seat);
+    if (c !== null) up.push([k, c]);
+  }
+  if (up.length) {
+    names = {};
+    const legacy = new Set(up.map(([k]) => k));
+    for (const k in edits.names) if (!legacy.has(k)) names[k] = edits.names[k];
+    for (const [k, c] of up) if (!(c in names)) names[c] = edits.names[k];
+    changed = true;
+  }
+  let interventions = edits.interventions;
+  const list = edits.interventions.map((v) => {
+    const o = v as unknown as Record<string, unknown>;
+    let w: Record<string, unknown> | null = null;
+    for (const f of ['a', 'b', 'region', 'city']) {
+      const c = upgradeKey(o[f], seat);
+      if (c === null) continue;
+      w ??= { ...o };
+      w[f] = c;
+    }
+    return (w ?? v) as Intervention;
+  });
+  if (list.some((v, i) => v !== edits.interventions[i])) {
+    interventions = list;
+    changed = true;
+  }
+  return changed ? { ...edits, names, interventions } : edits;
+}
+
+// ---------------------------------------------------------------------------
+// 改名
+
+/** 复国国名的前缀(和 gen/civ/naming.ts 的 RESTORE_PREFIX_* 一致;这里不引起名器,免得主线程打包地名词库) */
+const RESTORE_PREFIXES = '后北南东西新';
+
+/** "大安" → "安"(中式国号里"安"和"大安"算同一个名字,复国叫"后安") */
+function bare(root: string): string {
+  return [...root].length === 2 && root[0] === '大' ? root.slice(1) : root;
+}
+
+/** 名字最长几个字 */
+export const NAME_MAX = 16;
+
+/** 国名词根末尾常被顺手打上的国号(打"索拉特王国"就当是"索拉特";长的在前) */
+const POLITY_SUFFIXES = ['共和国', '大汗国', '王朝', '皇朝', '帝国', '王国', '汗国', '城邦', '国', '部'];
+
+/**
+ * 用户输入的名字 → 存进 names 的名字:去掉首尾空白和控制字符,超长截断;
+ * 国家 / 东方朝代去掉末尾顺手打上的国号("秦国" → "秦"),西幻朝代去掉"王朝",民族去掉"族"(剩下不到一个字就不去)。
+ * 空串 = 不改名(恢复默认)
+ */
+export function cleanName(kind: KeyKind, raw: string, eastern = false): string {
+  // eslint-disable-next-line no-control-regex
+  let s = raw.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
+  const strip = (suffixes: readonly string[]) => {
+    for (const x of suffixes) {
+      if (s.endsWith(x) && s.length > x.length) {
+        s = s.slice(0, s.length - x.length).trim();
+        return;
+      }
+    }
+  };
+  if (kind === 'polity' || (kind === 'dynasty' && eastern)) strip(POLITY_SUFFIXES);
+  else if (kind === 'dynasty') strip(['王朝']);
+  else if (kind === 'culture') strip(['族']);
+  const cs = [...s];
+  return cs.length > NAME_MAX ? cs.slice(0, NAME_MAX).join('') : s;
+}
+
+/** 国名词根换成 root(东方国家的第一朝国号跟着换) */
+function withRoot(p: Polity, root: string): Polity {
+  const q: Polity = { ...p, name: root };
+  const d = p.dynasties;
+  if (p.eastern && d && d.length && d[0].name === p.name) q.dynasties = d.map((x, i) => (i === 0 ? { ...x, name: root } : x));
+  return q;
+}
+
+/** 改名以后,复国的国家跟着故国变的新国名;不用变 = null */
+function restoredName(p: Polity, fallenOld: Polity, fallenNew: Polity): string | null {
+  const oldRoot = polityRootAt(fallenOld, fallenOld.ended ?? Infinity);
+  const newRoot = polityRootAt(fallenNew, fallenNew.ended ?? Infinity);
+  if (oldRoot === newRoot) return null;
+  const base = p.eastern ? bare(oldRoot) : oldRoot;
+  if (p.name.length !== base.length + 1 || !p.name.endsWith(base) || !RESTORE_PREFIXES.includes(p.name[0])) return null;
+  return p.name[0] + (p.eastern ? bare(newRoot) : newRoot);
+}
+
+/**
+ * 套上改名:返回一个新的 Civ(原 Civ 不改),名字换成用户起的;键找不到的、名字为空的忽略。
+ * 新 Civ 和原 Civ 共用没改过的一切(地块、州、日志、没改名的国家 / 城……),只复制改了名的那几个对象。
+ * 一个名字都没生效时直接返回原 Civ
+ */
+export function applyNames(civ: Civ, names: Record<string, string>): Civ {
+  const polityRoot = new Map<number, string>();
+  const dynasty = new Map<number, Map<number, string>>();
+  const settlement = new Map<number, string>();
+  const place = new Map<number, string>();
+  const culture = new Map<number, string>();
+  const region = new Map<number, string>();
+  for (const key in names) {
+    const name = names[key];
+    if (typeof name !== 'string' || !name) continue;
+    const r = resolveKey(civ, key);
+    if (!r) continue;
+    if (r.kind === 'polity') polityRoot.set(r.id, name);
+    else if (r.kind === 'settlement') settlement.set(r.id, name);
+    else if (r.kind === 'place') place.set(r.id, name);
+    else if (r.kind === 'culture') culture.set(r.id, name);
+    else if (r.kind === 'region') region.set(r.id, name);
+    else {
+      let m = dynasty.get(r.id);
+      if (!m) dynasty.set(r.id, (m = new Map()));
+      m.set(r.index!, name);
+    }
+  }
+  if (!polityRoot.size && !dynasty.size && !settlement.size && !place.size && !culture.size && !region.size) return civ;
+
+  let changed = false;
+  // 州名:另起一份 regionNames(civ.regions 不动,见文件头)
+  let regionNames = civ.regionNames;
+  if (region.size) {
+    const base = civ.regionNames ?? civ.regions.name ?? [];
+    const out = Array.from({ length: civ.regions.count }, (_, r) => base[r] ?? '');
+    for (const [id, name] of region) out[id] = name;
+    if (out.some((n, r) => n !== (base[r] ?? ''))) {
+      regionNames = out;
+      changed = true;
+    }
+  }
+  // 民族
+  let cultures = civ.cultures;
+  if (culture.size) {
+    cultures = cultures.slice();
+    for (const [id, name] of culture) {
+      if (cultures[id].name === name) continue;
+      cultures[id] = { ...cultures[id], name };
+      changed = true;
+    }
+  }
+  // 地理实体:记下原来的名字(画风按它分大洋 / 海 / 海湾)
+  let places = civ.places;
+  if (place.size) {
+    places = places.slice();
+    for (const [id, name] of place) {
+      const p = places[id];
+      if (p.name === name) continue;
+      places[id] = { ...p, name, defaultName: p.defaultName ?? p.name };
+      changed = true;
+    }
+  }
+  // 城:先改用户改过的,再按编号顺序让"同族重建、沿用旧名"的城跟着旧城变(重建的城编号总比旧城大)
+  let settlements = civ.settlements;
+  if (settlement.size) {
+    const S0 = civ.settlements;
+    const S: Settlement[] = S0.slice();
+    for (const [id, name] of settlement) if (S[id].name !== name) S[id] = { ...S[id], name };
+    for (const s of S0) {
+      if (s.rebuilds === undefined || settlement.has(s.id)) continue;
+      const old = S0[s.rebuilds];
+      const now = S[s.rebuilds];
+      if (old && now !== old && s.name === old.name && now.name !== s.name) S[s.id] = { ...s, name: now.name };
+    }
+    if (S.some((s, i) => s !== S0[i])) {
+      settlements = S;
+      changed = true;
+    }
+  }
+  // 国家:国名词根、各朝名字;复国的国家跟着故国的国号变(故国编号总比它小,按编号顺序一趟就连带完)
+  let polities = civ.polities;
+  /** 东方国家 `dynasty:…/0` = 国名词根 */
+  const eastFirst = (id: number): string | undefined => (civ.polities[id].eastern ? dynasty.get(id)?.get(0) : undefined);
+  if (polityRoot.size || dynasty.size) {
+    const P0 = civ.polities;
+    const P: Polity[] = P0.slice();
+    for (const p0 of P0) {
+      const id = p0.id;
+      let p = p0;
+      const root = polityRoot.get(id) ?? eastFirst(id);
+      if (root !== undefined && root !== p.name) p = withRoot(p, root);
+      const ds = dynasty.get(id);
+      if (ds && p.dynasties) {
+        const from = p.dynasties;
+        let list: typeof from | null = null;
+        for (const [i, name] of ds) {
+          if (i === 0 && p.eastern) continue; // 东方第一朝 = 国名词根,上面已经换过
+          if (!from[i] || from[i].name === name) continue;
+          list ??= from.slice();
+          list[i] = { ...from[i], name };
+        }
+        if (list) p = { ...p, dynasties: list };
+      }
+      if (root === undefined && p0.restores !== undefined && P[p0.restores] !== P0[p0.restores]) {
+        const n = restoredName(p, P0[p0.restores], P[p0.restores]);
+        if (n) p = withRoot(p, n);
+      }
+      P[id] = p;
+    }
+    if (P.some((p, i) => p !== P0[i])) {
+      polities = P;
+      changed = true;
+    }
+  }
+  if (!changed) return civ;
+  const out: Civ = { ...civ, cultures, places, settlements, polities };
+  if (regionNames) out.regionNames = regionNames;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// 干预
+
+/** 干预年份的上限(推演引擎能预约的最远时刻) */
+export const INTERVENTION_YEAR_MAX = 65535;
+
+const INTERVENTION_KINDS: readonly InterventionKind[] = ['protect', 'ally', 'declare', 'unity', 'cede', 'found', 'move', 'halt'];
+
+/** 键的格式(新旧两种都认:`polity:c4567#0` / 旧的 `polity:r123#0`,见文件头"稳定键") */
+const isPolityKey = (k: unknown): k is string => typeof k === 'string' && /^polity:(r-?\d{1,7}|c\d{1,7})#\d{1,5}$/.test(k);
+const isRegionKey = (k: unknown): k is string => typeof k === 'string' && REGION_KEY.test(k);
+const isCityKey = (k: unknown): k is string => typeof k === 'string' && /^settlement:[rc]\d{1,7}#\d{1,5}$/.test(k);
+const yearOf = (y: unknown): number | null =>
+  typeof y === 'number' && Number.isFinite(y) ? Math.min(INTERVENTION_YEAR_MAX, Math.max(0, Math.floor(y))) : null;
+
+/**
+ * 清理一份干预列表(推演前、读档时用):种类不认识、键的格式不对、年份不是有限数、两国是同一国的丢掉;
+ * 年份取整、夹到 [0, INTERVENTION_YEAR_MAX];until 不晚于 from 的当作没给;立国的国名按改名的规矩清理(空 = 不给);
+ * 划州的 permanent 只认 true;多余的字段去掉。全都合格时返回原数组(同一个对象)
+ */
+export function cleanInterventions(list: readonly unknown[] | null | undefined): Intervention[] {
+  if (!Array.isArray(list)) return [];
+  const out: Intervention[] = [];
+  let same = true;
+  for (const x of list as unknown[]) {
+    const v = cleanIntervention(x);
+    if (v) out.push(v);
+    if (v !== x) same = false;
+  }
+  return same ? (list as Intervention[]) : out;
+}
+
+/** 清理一条干预(规则同 cleanInterventions);不合格 = null;本来就合格的原样返回(同一个对象) */
+export function cleanIntervention(x: unknown): Intervention | null {
+  if (!x || typeof x !== 'object') return null;
+  const o = x as Record<string, unknown>;
+  const kind = o.kind as InterventionKind;
+  const from = yearOf(o.from);
+  if (!INTERVENTION_KINDS.includes(kind) || from === null) return null;
+  const untilOf = () => {
+    const until = o.until === undefined ? null : yearOf(o.until);
+    return until !== null && until > from ? until : null;
+  };
+  let v: Intervention;
+  if (kind === 'found') {
+    if (!isRegionKey(o.region)) return null;
+    const name = typeof o.name === 'string' ? cleanName('polity', o.name) : '';
+    v = name ? { kind, region: o.region, from, name } : { kind, region: o.region, from };
+  } else {
+    if (!isPolityKey(o.a)) return null;
+    const a = o.a;
+    if (kind === 'protect' || kind === 'unity') v = { kind, a, from };
+    else if (kind === 'halt') {
+      const until = untilOf();
+      v = until !== null ? { kind, a, from, until } : { kind, a, from };
+    } else if (kind === 'cede') {
+      if (!isRegionKey(o.region)) return null;
+      v = o.permanent === true ? { kind, a, region: o.region, from, permanent: true } : { kind, a, region: o.region, from };
+    } else if (kind === 'move') {
+      if (!isCityKey(o.city)) return null;
+      v = { kind, a, city: o.city, from };
+    } else {
+      if (!isPolityKey(o.b) || o.b === a) return null;
+      if (kind === 'declare') v = { kind, a, b: o.b, from };
+      else {
+        const until = untilOf();
+        v = until !== null ? { kind, a, b: o.b, from, until } : { kind, a, b: o.b, from };
+      }
+    }
+  }
+  const keys = Object.keys(o);
+  const w = v as Record<string, unknown>;
+  const clean = keys.length === Object.keys(v).length && keys.every((k) => o[k] === w[k]);
+  return clean ? (x as Intervention) : v;
+}
+
+/** 两份干预列表是不是一样(逐条逐字段比) */
+export function sameInterventions(a: readonly Intervention[], b: readonly Intervention[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => JSON.stringify(x) === JSON.stringify(b[i]));
+}
+
+/** 这条干预牵涉的国家键(a;结盟 / 宣战还有 b;立国没有 —— 新国家的键要推演出来才知道) */
+export function interventionKeys(v: Intervention): string[] {
+  if (v.kind === 'found') return [];
+  return v.kind === 'ally' || v.kind === 'declare' ? [v.a, v.b] : [v.a];
+}

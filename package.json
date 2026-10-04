@@ -1,0 +1,44 @@
+{
+  "name": "civ-atlas",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "repository": "https://github.com/guaner-334/civ-atlas",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "snap": "tsx scripts/snap.ts",
+    "stress": "tsx scripts/stress.ts",
+    "smoke": "tsx scripts/replay-check.ts",
+    "test:visual": "tsx scripts/visual-check.ts"
+  },
+  "dependencies": {
+    "d3-delaunay": "^6.0.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "simplex-noise": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/d3-delaunay": "^6.0.4",
+    "@types/node": "^26.6.2",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "playwright": "^1.63.0",
+    "pngjs": "^7.0.0",
+    "subset-font": "^2.9.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
+  },
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

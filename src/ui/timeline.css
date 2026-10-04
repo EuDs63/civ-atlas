@@ -1,0 +1,521 @@
+/*
+ * 时间轴与事件:底部时间轴(CivTimeline / TimelineMarks)、左下最近事件(RecentEvents)、地图上的事件标签(EventPins)。
+ *
+ * 颜色一律用界面主题变量(浅 / 深两套,theme.css 定义):
+ *   --ink --ink-2 --panel --panel-solid --line --line-strong --btn --link --accent --accent-hover --void
+ *   --ev-war --ev-dynasty --ev-found --ev-empire --ev-assim --halo
+ * 没定义时用浅色主题的值(下面 var() 的第二个参数)。
+ * .tb-compat:主题还没加载、页面 :root 里的 --panel / --line / --accent 可能是别的样式表定的深色值时(组件自己查,见 CivTimeline.tsx 的
+ * useThemeCompat),在组件里把这三个换成浅色主题的值。
+ */
+
+.timebar,
+.recent-ev,
+.ev-pins {
+  /* 宋体不写 "Noto Serif SC":那个名字是地图文字的子集字体(只有地名用字),纪事里缺的字会一个个换成别的字体 */
+  --tb-serif: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  --tb-sans: 'Noto Sans SC', 'Source Han Sans SC', 'Noto Sans CJK SC', -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --tb-halo: var(--halo, 0 0 2px rgba(247, 242, 231, 1), 0 0 8px rgba(247, 242, 231, 0.9));
+  font-family: var(--tb-sans);
+  color: var(--ink, #231c13);
+}
+.tb-compat {
+  --panel: rgba(247, 242, 231, 0.95);
+  --line: rgba(35, 28, 19, 0.15);
+  --accent: #b8432f;
+}
+
+/* 事件类型的颜色:[data-ev] 上设 --c,里面的 .tb-ev(类型名)、菱形、圆环都用它 */
+[data-ev='war'] {
+  --c: var(--ev-war, #b8432f);
+}
+[data-ev='dynasty'] {
+  --c: var(--ev-dynasty, #2f5d7c);
+}
+[data-ev='found'] {
+  --c: var(--ev-found, #3f7a57);
+}
+[data-ev='empire'] {
+  --c: var(--ev-empire, #8a6a25);
+}
+[data-ev='assim'] {
+  --c: var(--ev-assim, #7a6390);
+}
+[data-ev='order'] {
+  --c: var(--accent, #b8432f);
+}
+.tb-ev {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c);
+  white-space: nowrap;
+}
+
+/* ---- 底部时间轴 ---- */
+/* 同时带着旧的 .civ-timeline(别处的布局规则认它),这里把旧样式的底色、边框、胶囊形、居中都去掉 */
+.civ-timeline.timebar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 52px;
+  width: auto;
+  max-width: none;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  transform: none;
+  text-shadow: var(--tb-halo);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  z-index: 1;
+}
+.civ-timeline.timebar.dock-bottom {
+  position: absolute;
+  left: 28px;
+  right: 24px;
+  top: auto;
+  bottom: 18px;
+}
+.civ-timeline.timebar.dock-top {
+  position: absolute;
+  left: 28px;
+  right: 24px;
+  top: 10px;
+  bottom: auto;
+}
+.civ-timeline.timebar.dock-inline {
+  position: relative;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  flex: 1;
+  min-width: 0;
+}
+/* 放进界面底部那一行(.bottom-tl,和图层按钮并排)时:不再自己定位,填满那一格;渐变遮罩由外面的布局画 */
+.bottom-tl .civ-timeline.timebar.dock-bottom {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  text-shadow: var(--tb-halo);
+}
+.bottom-tl .timebar.dock-bottom::before {
+  content: none;
+}
+/* 浮在地图底部时:底下一条和地图同色的渐变,字在花花绿绿的地图上也读得清 */
+.timebar.dock-bottom::before {
+  content: '';
+  position: absolute;
+  left: -28px;
+  right: -24px;
+  bottom: -18px;
+  height: 170px;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--panel-solid, #f6f1e6) 78%, transparent));
+  pointer-events: none;
+  z-index: -1;
+}
+
+.timebar button {
+  font: inherit;
+  color: inherit;
+  text-shadow: inherit;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.timebar button:focus-visible,
+.tb-track:focus-visible,
+.recent-row:focus-visible {
+  outline: 1px solid var(--line-strong, rgba(35, 28, 19, 0.4));
+  outline-offset: 2px;
+}
+button.tb-play {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1.5px solid var(--ink, #231c13);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 播放:三角形;暂停(.on):两道竖条 */
+.tb-play i {
+  width: 0;
+  height: 0;
+  margin-left: 3px;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 11px solid currentColor;
+}
+.tb-play.on i {
+  width: 9px;
+  height: 12px;
+  margin: 0;
+  border: 0;
+  border-left: 3px solid currentColor;
+  border-right: 3px solid currentColor;
+}
+.timebar button:hover,
+.recent-row:hover {
+  background: rgba(128, 128, 128, 0.16);
+}
+.tb-year {
+  flex: none;
+  min-width: 108px;
+  font: 700 22px/1 var(--tb-serif);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tb-speed {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.tb-speed button {
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+.tb-speed button.on {
+  background: var(--btn, rgba(35, 28, 19, 0.07));
+}
+
+/* 轨道:高 44;基线在 24;菱形在 13;"令"从 4 到 26;播放头 18–31;年份字在 32 */
+.tb-track {
+  position: relative;
+  flex: 1;
+  min-width: 80px;
+  height: 44px;
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+}
+.tb-track > i {
+  position: absolute;
+  display: block;
+}
+.tb-base {
+  left: 0;
+  right: 0;
+  top: 24px;
+  height: 1px;
+  background: var(--line-strong, rgba(35, 28, 19, 0.4));
+}
+.tb-prog {
+  left: 0;
+  top: 23px;
+  height: 3px;
+  width: calc(var(--p, 0) * 100%);
+  background: var(--ink, #231c13);
+}
+.tb-tick {
+  width: 1px;
+  top: 21px;
+  height: 4px;
+  background: var(--line-strong, rgba(35, 28, 19, 0.4));
+}
+.tb-tick.h {
+  top: 19px;
+  height: 6px;
+}
+.tb-tick.k {
+  top: 17px;
+  height: 8px;
+}
+.tb-label {
+  position: absolute;
+  top: 32px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--ink-2, #65594a);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.tb-label.first {
+  transform: none;
+}
+.tb-label.last {
+  transform: translateX(-100%);
+}
+.tb-mark {
+  top: 13px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  background: var(--c);
+  transform: rotate(45deg);
+  transition: transform 0.12s;
+}
+/* 几件合并成的:大一圈 */
+.tb-mark.many {
+  top: 12.5px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+}
+.tb-mark.on {
+  transform: rotate(45deg) scale(1.6);
+}
+.tb-order {
+  top: 4px;
+  width: 2px;
+  height: 22px;
+  margin-left: -1px;
+  background: var(--accent, #b8432f);
+}
+.tb-order b {
+  position: absolute;
+  left: 3px;
+  top: -2px;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  color: #fff;
+  background: var(--accent, #b8432f);
+  text-shadow: none;
+}
+.tb-order.on b {
+  background: var(--accent-hover, #a03a28);
+}
+.tb-head {
+  top: 18px;
+  left: calc(var(--p, 0) * 100%);
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--ink, #231c13);
+  background: var(--panel-solid, #f6f1e6);
+  pointer-events: none;
+}
+
+/* 悬停刻度的提示 */
+.tb-tip {
+  position: absolute;
+  z-index: 5;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(380px, 90vw);
+  padding: 6px 0;
+  background: var(--panel, rgba(247, 242, 231, 0.95));
+  border: 1px solid var(--line, rgba(35, 28, 19, 0.15));
+  border-radius: 4px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
+  text-shadow: none;
+  cursor: default;
+}
+.tb-tip-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.tb-tip-row:hover,
+.tb-tip-row.lead {
+  background: rgba(128, 128, 128, 0.12);
+}
+.tb-tip-year {
+  font: 600 12px var(--tb-serif);
+  color: var(--ink-2, #65594a);
+  white-space: nowrap;
+}
+.tb-tip-more {
+  padding: 4px 12px 2px;
+  font-size: 12px;
+  color: var(--ink-2, #65594a);
+}
+
+
+/* ---- 左下最近事件:最新的在最下面,越旧越淡 ---- */
+.recent-ev {
+  position: absolute;
+  left: 28px;
+  bottom: 86px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  max-width: 34vw;
+  text-shadow: var(--tb-halo);
+}
+.stage:has(.timebar.dock-top) .recent-ev {
+  bottom: 18px;
+}
+.recent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  max-width: 100%;
+  margin: 0 -6px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-shadow: inherit;
+  text-align: left;
+  white-space: nowrap;
+  opacity: var(--o, 1);
+  cursor: pointer;
+}
+.recent-row:hover {
+  opacity: 1;
+}
+.recent-year {
+  flex: none;
+  font: 600 13px var(--tb-serif);
+  color: var(--ink-2, #65594a);
+  font-variant-numeric: tabular-nums;
+}
+.recent-row .tb-ev {
+  flex: none;
+}
+.recent-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+}
+
+/* ---- 地图上的事件标签 ---- */
+.ev-pins {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ev-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  will-change: transform, opacity;
+}
+.ev-ring {
+  position: absolute;
+  left: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 22%, transparent);
+}
+.ev-card {
+  position: absolute;
+  left: 16px;
+  top: -24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  max-width: 420px;
+  padding: 7px 12px 8px;
+  background: var(--panel, rgba(247, 242, 231, 0.95));
+  border: 1px solid var(--line, rgba(35, 28, 19, 0.15));
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.ev-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2, #65594a);
+  white-space: nowrap;
+}
+.ev-text {
+  font: 600 15px/1.4 var(--tb-serif);
+}
+
+/* ---- 窄屏(手机):时间轴轨道单独一行 ---- */
+@container stage (max-width: 600px) {
+  .civ-timeline.timebar {
+    flex-wrap: wrap;
+    height: auto;
+    row-gap: 0;
+    gap: 10px;
+  }
+  .civ-timeline.timebar.dock-bottom,
+  .civ-timeline.timebar.dock-top {
+    left: 12px;
+    right: 12px;
+  }
+  .tb-year {
+    min-width: 0;
+    font-size: 18px;
+  }
+  .tb-track {
+    order: 9;
+    flex-basis: 100%;
+  }
+  .recent-ev {
+    left: 12px;
+    bottom: 100px;
+    max-width: calc(100% - 24px);
+  }
+}
+
+/* ---- 手机布局(窄屏 ≤ 760px):时间轴固定在最底部、两行 —— 上:播放 · 第 N 年 · 1× / 4×(右端是图层按钮,见 app.css);
+   下:整条轨道(高 44,手指好拖;菱形和"令"照样显示) ---- */
+@media (max-width: 760px) {
+  .civ-timeline.timebar {
+    flex-wrap: wrap;
+    align-content: flex-start;
+    height: auto;
+    gap: 0 12px;
+  }
+  button.tb-play {
+    width: 36px;
+    height: 36px;
+  }
+  .tb-year {
+    min-width: 0;
+    font-size: 19px;
+  }
+  .tb-speed button {
+    padding: 7px 10px;
+  }
+  .tb-track {
+    order: 9;
+    flex-basis: 100%;
+    height: 44px;
+    margin-top: 2px;
+  }
+  /* 贴着轨道右端的"令":字挂到红线左边(轨道一直铺到屏幕边,挂右边会出屏幕) */
+  .tb-order.end b {
+    left: auto;
+    right: 3px;
+  }
+  /* 最近事件只有一行:放得下就整条显示 */
+  .recent-row {
+    max-width: 100%;
+  }
+  /* 地图上的事件标签:卡片不比屏幕宽(正文折行) */
+  .ev-card {
+    max-width: calc(100vw - 64px);
+  }
+  .ev-text {
+    font-size: 14px;
+  }
+}

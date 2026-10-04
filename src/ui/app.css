@@ -1,0 +1,1593 @@
+:root {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--void);
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+/* 手机:页面整个不滚、不回弹、不下拉刷新,浏览器不做页面缩放(双指捏合、点两下放大都交给地图自己;地图上 touch-action: none) */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* ==== 界面骨架:地图铺满全屏,四角小字,顶部提示条,底部一行(时间轴 + 图层与投影) ==== */
+.app {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  /* 时间轴按界面宽度排版(窄了滑条单独占一行,见"文明时间轴"的 @container stage) */
+  container: stage / inline-size;
+  background: var(--void);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+/* 地图上的文字(四角、时间轴、提示)都带一圈和图层同色的描边 */
+.corner-tl,
+.top-actions,
+.first-hint,
+.bottom-row {
+  text-shadow: var(--halo);
+}
+
+/* 上下两条和图层同色的渐变遮罩 */
+.vignette {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.vignette.top {
+  top: 0;
+  height: 130px;
+  background: linear-gradient(var(--vignette), transparent);
+}
+.vignette.bottom {
+  bottom: 0;
+  height: 170px;
+  background: linear-gradient(transparent, var(--vignette));
+}
+
+/* 地图上的文字按钮:不加底、只带描边,悬停出现浅灰底 */
+.map-btn {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  border-radius: var(--r-btn);
+  padding: 8px 12px;
+  font-size: 15px;
+  line-height: 1.2;
+  text-shadow: var(--halo);
+}
+.map-btn:hover:not(:disabled),
+.map-btn.on {
+  background: var(--hover-bg);
+}
+.map-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 左上:世界名 + 副标 */
+.corner-tl {
+  position: absolute;
+  left: 28px;
+  top: 20px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: calc(100% - 200px);
+  pointer-events: none;
+}
+.corner-tl > * {
+  pointer-events: auto;
+}
+.world-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+  text-align: left;
+  text-shadow: var(--halo);
+  max-width: 100%;
+}
+.wt-name {
+  font: 700 24px/1.25 var(--font-serif);
+  letter-spacing: 0.06em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-sub {
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.world-title:hover .wt-more {
+  color: var(--link);
+}
+
+/* 右上:搜索、成书 */
+.top-actions {
+  position: absolute;
+  right: 24px;
+  top: 20px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 顶部居中的提示条(Toast.tsx) */
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 20px;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(640px, calc(100% - 32px));
+  padding: 9px 10px 9px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-toast);
+  backdrop-filter: blur(8px);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+  animation: toast-in 0.18s ease-out;
+}
+.toast.k-info,
+.toast.k-progress {
+  border-color: var(--line-strong);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+.toast-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  transform: rotate(45deg);
+}
+.toast-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.toast-main {
+  font-size: 15px;
+}
+.toast.k-ok .toast-main,
+.toast.k-warn .toast-main,
+.toast.k-error .toast-main {
+  font-size: 14px;
+}
+.toast.k-error .toast-main {
+  color: var(--err);
+}
+.toast-more {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.toast-bar {
+  flex: none;
+  width: 120px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.toast-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s;
+}
+.toast-spin {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+.toast-acts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toast-act {
+  flex: none;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: var(--btn);
+  color: var(--ink);
+  padding: 5px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.toast-act:hover {
+  background: var(--hover-bg);
+}
+.toast-act.link {
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--link);
+}
+.toast-act.link:hover {
+  background: transparent;
+  color: var(--accent);
+}
+.toast-act.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+.toast-act.primary:hover {
+  background: var(--accent-hover);
+}
+.toast-x {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: var(--r-btn);
+  padding: 2px 6px;
+  font-size: 13px;
+}
+.toast-x:hover {
+  background: var(--hover-bg);
+}
+
+/* 右下(时间轴上方):地球仪 / 平面地图、放大、缩小;右侧面板打开时整体左移 */
+.map-controls {
+  position: absolute;
+  right: 24px;
+  bottom: 92px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  transition: right 0.2s ease-out;
+}
+.map-controls.shifted {
+  right: 376px;
+}
+.mc-btn {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-panel);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+  backdrop-filter: blur(6px);
+}
+.mc-btn:hover {
+  border-color: var(--line-strong);
+}
+.mc-globe {
+  padding: 0 10px;
+  margin-bottom: 4px;
+}
+.mc-zoom {
+  width: 34px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* 第一次打开的操作提示 */
+.first-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 92px;
+  z-index: 2;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+/* 底部一行:时间轴(左,占满)+ 图层与投影按钮(右) */
+.bottom-row {
+  position: absolute;
+  left: 28px;
+  right: 24px;
+  bottom: 18px;
+  z-index: 3;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  pointer-events: none;
+}
+.bottom-row > * {
+  pointer-events: auto;
+}
+.bottom-tl {
+  flex: 1;
+  min-width: 0;
+
+  display: flex;
+  align-items: center;
+}
+/* 时间轴放进底部这一行:CivTimeline 用 dock="inline",填满这一格(样式见 timeline.css) */
+/* 时间轴自带的回放字幕挂在顶部提示条下面 */
+.bottom-tl .civ-top {
+  position: fixed;
+  top: 76px;
+}
+
+/* ---- 图层与投影(LayerPopover.tsx、ProjectionPanel.tsx) ---- */
+/* 顶上的拖动条和关闭:只在窄屏(弹层是底部抽屉)时有 */
+.lp-head {
+  display: none;
+}
+.lp {
+  position: relative;
+  flex: none;
+}
+.lp-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 4px;
+  font-size: 14px;
+  border-radius: var(--r-panel);
+}
+.lp-label {
+  white-space: nowrap;
+}
+.lp-thumb {
+  display: block;
+  height: 48px;
+  border-radius: var(--r-btn);
+  background-size: cover;
+  background-position: 35% 50%;
+  background-color: var(--btn);
+}
+.lp-thumb.small {
+  flex: none;
+  width: 44px;
+  height: 30px;
+  border: 1px solid var(--line-strong);
+}
+.lp-thumb.empty {
+  background-image: repeating-linear-gradient(135deg, var(--btn) 0 6px, transparent 6px 12px);
+}
+.lp-pop {
+  position: absolute;
+  right: 0;
+  bottom: 48px;
+  z-index: 20;
+  width: 300px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+  text-shadow: none;
+  color: var(--ink);
+}
+.lp-sec {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.lp-sec + .lp-projs,
+.lp-sec + .lp-layers {
+  margin-top: -2px;
+}
+.lp-layers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.lp-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+  font-size: 12px;
+}
+.lp-layer .lp-thumb {
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+.lp-layer:hover .lp-thumb {
+  outline-color: var(--line-strong);
+}
+.lp-layer.on .lp-thumb {
+  outline-color: var(--accent);
+}
+.lp-mini {
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-btn);
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.lp-mini:hover {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+.lp-mini.on {
+  background: var(--btn);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.lp-projs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.lp-proj {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 0 7px;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+.lp-proj:hover {
+  background: var(--hover-bg);
+}
+.lp-proj.on {
+  background: var(--btn);
+  outline: 1.5px solid var(--accent);
+}
+.lp-proj-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+}
+.lp-proj-icon i {
+  display: block;
+  box-sizing: border-box;
+  border: 1.5px solid var(--ink);
+  opacity: 0.8;
+}
+.lp-hint {
+  min-height: 18px;
+  margin-top: -4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.lp-center {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lp-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.lp-row b {
+  font: 600 13px var(--font-serif);
+  color: var(--ink);
+}
+.lp-center input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.lp-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+}
+.lp-box {
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border-radius: var(--r-btn);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--on-accent);
+  border: 1.5px solid var(--line-strong);
+}
+.lp-check.on .lp-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.lp-sub {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* 悬停小卡片(跟着鼠标) */
+.hover-card {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  padding: 6px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.hc-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hc-sw {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-tag);
+}
+.hc-name {
+  font: 600 14px var(--font-serif);
+}
+.hc-sub,
+.hc-extra {
+  color: var(--ink-2);
+}
+.hc-extra {
+  font-size: 12.5px;
+}
+
+.seg {
+  display: flex;
+  background: var(--btn);
+  border-radius: var(--r-btn);
+  padding: 2px;
+}
+.seg button {
+  border: 0;
+  background: transparent;
+  padding: 4px 12px;
+  border-radius: var(--r-btn);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.seg button.on {
+  background: var(--panel-solid);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+button.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 0;
+  border-radius: var(--r-btn);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+button.primary:hover {
+  background: var(--accent-hover);
+}
+
+/* 地球仪:左下的最近事件收窄,球在默认大小时不压到它左下边上的地名(球心在宽 50%、高 48%,半径 0.43 × 短边;
+   最近事件最上一行那个高度,球的左边大约在 50vw − 0.3 × 短边)。放大后照样叠在球上,靠底部渐变遮罩和文字描边读清 */
+@media (min-width: 761px) {
+  .app.globe-on > .recent-ev {
+    max-width: min(34vw, calc(50vw - 0.3 * min(100vw, 100vh) - 44px));
+  }
+  /* 第一次打开的操作提示在底部正中:不太宽的屏幕(平板竖屏)上最近事件让开它 */
+  .app:not(.globe-on):has(> .first-hint) > .recent-ev {
+    max-width: min(34vw, calc(50vw - 160px));
+  }
+}
+
+/* ==== 手机布局(窄屏 ≤ 760px,见 ui/device.ts):面板改成底部抽屉、时间轴两行固定在最底部、弹层改成底部抽屉 ====
+   几个尺寸(和 flyTo.ts 的 NARROW_ROW_H / NARROW_TOP_ROOM、gestures.ts 的 sheetGeometry 同一个算法):
+     --row-h       底部一行(两行的时间轴)的高度,含底部安全区(iPhone 的横条)
+     --top-room    顶上世界名那一截,含顶部安全区(刘海)
+     --sheet-half  底部抽屉半高时上边的位置:抽屉约占屏高 45%,至少露出头部;上面至少留一截地图
+     --sheet-full  展开时上边的位置:屏高 12% */
+@media (max-width: 760px) {
+  .app {
+    height: 100dvh;
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+    --row-h: calc(92px + var(--safe-b));
+    --top-room: calc(72px + var(--safe-t));
+    --sheet-half: max(calc(var(--top-room) + 80px), min(calc(100% - var(--row-h) - 200px), calc(55% - var(--row-h))));
+    --sheet-full: min(var(--sheet-half), max(12%, 8px));
+  }
+  /* 上下渐变遮罩:顶栏矮一些,底部一行高一些 */
+  .vignette.top {
+    height: calc(96px + var(--safe-t));
+  }
+  .vignette.bottom {
+    height: calc(var(--row-h) + 64px);
+  }
+
+  /* ---- 顶部:世界名 20px + 缩短的副标;右上"搜索""成书" ---- */
+  .corner-tl {
+    left: calc(16px + var(--safe-l));
+    top: calc(12px + var(--safe-t));
+    gap: 8px;
+    max-width: calc(100% - 150px - var(--safe-l) - var(--safe-r));
+  }
+  .wt-name {
+    font-size: 20px;
+  }
+  .wt-sub {
+    font-size: 12.5px;
+  }
+  .top-actions {
+    right: calc(6px + var(--safe-r));
+    top: calc(8px + var(--safe-t));
+    gap: 0;
+  }
+  .top-actions .map-btn {
+    padding: 10px 10px;
+  }
+
+  /* ---- 顶部提示条:顶栏下面,左右留 12px,最多两行(一行主文字 + 一行小字,或主文字两行) ---- */
+  .toast {
+    left: calc(12px + var(--safe-l));
+    right: calc(12px + var(--safe-r));
+    top: calc(var(--top-room) - 6px);
+    transform: none;
+    width: auto;
+    max-width: none;
+    gap: 10px;
+    padding: 8px 8px 8px 14px;
+    white-space: normal;
+    animation-name: toast-in-narrow;
+  }
+  @keyframes toast-in-narrow {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+  }
+  .toast-text {
+    flex: 1;
+  }
+  .toast-main {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .toast-text:has(.toast-more) .toast-main {
+    -webkit-line-clamp: 1;
+  }
+  .toast-more {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .toast-bar {
+    width: 64px;
+  }
+  .toast-acts {
+    flex-wrap: nowrap;
+  }
+  .toast-act {
+    padding: 7px 12px;
+  }
+  .toast-x {
+    padding: 6px 8px;
+  }
+
+  /* ---- 底部一行:时间轴固定在最底部、全宽,两行(上:播放 · 第 N 年 · 1× / 4× · 图层缩略图;下:轨道) ---- */
+  .bottom-row {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--row-h);
+    min-height: 0;
+    display: block;
+    padding: 4px calc(12px + var(--safe-r)) var(--safe-b) calc(12px + var(--safe-l));
+  }
+  .bottom-tl {
+    display: block;
+  }
+  /* 底部抽屉开着:这一行和抽屉接成一块(实色底) */
+  .app.panel-open .bottom-row {
+    background: var(--panel-solid);
+    border-top: 1px solid var(--line);
+  }
+  /* 图层按钮只放缩略图,在第一行的右端 */
+  .lp {
+    position: absolute;
+    right: calc(8px + var(--safe-r));
+    top: 4px;
+    z-index: 2;
+    margin: 0;
+  }
+  .lp-btn {
+    padding: 3px;
+  }
+  .lp-label {
+    display: none;
+  }
+  .lp-thumb.small {
+    width: 50px;
+    height: 32px;
+  }
+
+  /* 最近事件:只留最新 1 条,在时间轴上方一行 */
+  .app > .recent-ev {
+    left: calc(12px + var(--safe-l));
+    right: calc(12px + var(--safe-r));
+    bottom: calc(var(--row-h) + 4px);
+    max-width: none;
+  }
+  /* 第一次打开的操作提示:最近事件上面 */
+  .first-hint {
+    bottom: calc(var(--row-h) + 36px);
+    font-size: 13px;
+  }
+  /* 右下的地球仪切换、缩放不放(地球仪在图层弹层的投影里,缩放用双指捏合;App 已经不渲染,这里兜底) */
+  .map-controls {
+    display: none;
+  }
+
+  /* ---- 图层与投影 → 底部抽屉(6 张缩略图两行三列) ---- */
+  .lp-pop {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    max-height: min(82%, 680px);
+    gap: 10px;
+    padding: 0 calc(16px + var(--safe-r)) calc(16px + var(--safe-b)) calc(16px + var(--safe-l));
+    border-bottom: 0;
+    border-radius: var(--r-panel) var(--r-panel) 0 0;
+    background: var(--panel-solid);
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.22);
+    overscroll-behavior: contain;
+    animation: sheet-up 0.22s ease-out;
+  }
+  .lp-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    margin: 0 -4px -6px;
+    background: var(--panel-solid);
+  }
+  .lp-grip {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line-strong);
+  }
+  .lp-close {
+    position: absolute;
+    right: 0;
+    top: 2px;
+    border: 0;
+    background: transparent;
+    color: var(--ink-2);
+    border-radius: var(--r-btn);
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .lp-layers {
+    gap: 10px;
+  }
+  .lp-layer .lp-thumb {
+    height: 58px;
+  }
+  .lp-proj {
+    padding: 10px 0 8px;
+  }
+  .lp-center input {
+    height: 28px;
+  }
+
+  /* ---- 地球仪:底部抽屉开着时球心上移到抽屉上方看得见的地方正中(和转到选中的国家同时进行);
+     露出来的下面那截用球的底色补上(box-shadow 不被自己的 overflow 裁掉) ---- */
+  .globe {
+    transition: transform 0.6s cubic-bezier(0.33, 1, 0.68, 1);
+    box-shadow: 0 60vh 0 0 var(--globe-bg, transparent);
+  }
+  .app.panel-open .globe {
+    transform: translateY(calc((var(--top-room) + var(--sheet-half)) / 2 - 48%));
+  }
+}
+/* 底部抽屉(面板、图层弹层)从下面升起来 */
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+}
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .globe {
+    transition: none;
+  }
+  .lp-pop {
+    animation: none;
+  }
+}
+/* 手指操作:按钮不闪灰底;地图上长按不弹出系统菜单、不选中文字 */
+@media (pointer: coarse) {
+  .app button {
+    -webkit-tap-highlight-color: transparent;
+  }
+  .stage {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+/* ---- 世界概览头部的"导出"菜单(ExportMenu.tsx) ---- */
+.export {
+  position: relative;
+  flex: none;
+}
+.export-btn,
+.save-btn {
+  background: var(--btn);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.export-btn:hover:not(:disabled),
+.export-btn.on,
+.save-btn:hover:not(:disabled),
+.save-btn.on {
+  border-color: var(--line-strong);
+  background: var(--hover-bg);
+}
+.export-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.export-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  padding: 8px;
+}
+.export-scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+.export-scale .seg button {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.export-item,
+.save-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  padding: 7px 10px;
+}
+.export-item:hover:not(:disabled),
+.save-item:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.export-item:disabled,
+.save-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.export-item b,
+.save-item b {
+  display: block;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--text);
+}
+.export-item span,
+.save-item span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.export-foot,
+.save-foot {
+  margin-top: 4px;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+/* ---- 世界概览头部的"存档"菜单(SaveMenu.tsx):按钮、提示条沿用导出菜单的样式 ---- */
+.save {
+  position: relative;
+  flex: none;
+}
+.save-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  padding: 8px;
+}
+.save-sec {
+  flex: none;
+  padding: 6px 8px 6px;
+  font-size: 11.5px;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+.save-cur {
+  flex: none;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 2px 8px 10px;
+}
+.save-thumb {
+  flex: none;
+  width: 96px;
+  height: 48px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  background: var(--btn);
+  display: block;
+}
+.save-thumb.empty {
+  background: repeating-linear-gradient(135deg, var(--btn) 0 6px, var(--hover-bg) 6px 12px);
+}
+.save-info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.save-info b {
+  font-weight: 500;
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.save-name {
+  align-self: flex-start;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0 4px 0 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--accent);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.save-name .ph {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.save-name .ins-pen {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+.save-name:hover .ins-pen {
+  opacity: 1;
+  color: var(--accent);
+}
+.save-title-input {
+  width: 100%;
+  background: var(--btn);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 4px 7px;
+  font: inherit;
+  font-size: 13px;
+}
+.save-btns {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+.save-btns .save-item {
+  border: 1px solid var(--line);
+  background: var(--btn);
+}
+.save-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 2px;
+}
+.save-row {
+  position: relative;
+  border-radius: 3px;
+}
+.save-row:hover {
+  background: var(--hover-bg);
+}
+.save-row.current {
+  background: var(--btn);
+}
+.save-open {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  padding: 6px 8px;
+  padding-right: 92px;
+}
+.save-open:disabled {
+  cursor: default;
+}
+.save-badge {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 400;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  vertical-align: 1px;
+}
+.save-old {
+  font-style: normal;
+  color: var(--warn);
+}
+.save-row-edit {
+  position: absolute;
+  left: 114px;
+  right: 92px;
+  top: 5px;
+}
+.save-acts {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+}
+.save-row:hover .save-acts,
+.save-row:focus-within .save-acts,
+.save-act.arm {
+  opacity: 1;
+}
+.save-act {
+  border: 1px solid var(--line);
+  background: var(--btn);
+  border-radius: 3px;
+  padding: 2px 7px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.save-act:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.save-act.del.arm {
+  border-color: color-mix(in srgb, var(--err) 50%, transparent);
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+}
+.save-empty {
+  padding: 8px 10px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.save-menu .save-foot {
+  flex: none;
+  line-height: 1.5;
+}
+.save-btns .save-item.wide {
+  grid-column: 1 / -1;
+}
+/* 剪贴板用不了:存档菜单里一行"没能自动复制",下面是选中了链接的输入框 */
+.save-manual {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  font-size: 12px;
+  color: var(--warn);
+}
+.save-manual input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-btn);
+  background: var(--field);
+  color: var(--ink);
+  font: 12px/1.4 ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+.save-manual input:focus {
+  outline: 1px solid var(--accent);
+}
+/* 当前世界那一行:存储满了没能自动存 */
+.save-info .save-full {
+  color: var(--warn);
+}
+/* 把 .json 拖进页面时的提示 */
+.drop-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 8, 6, 0.45);
+  pointer-events: none;
+}
+.drop-hint div {
+  padding: 22px 36px;
+  border: 2px dashed var(--accent);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 17px;
+  letter-spacing: 1px;
+}
+.spin {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  /* clip 而不是 hidden:右边接的那一份画布伸到舞台外面,hidden 的容器还能被"聚焦 / 滚到可见"悄悄横着滚动,地图就整个挪走了 */
+  overflow: hidden;
+  overflow: clip;
+  background: var(--void);
+  cursor: grab;
+  touch-action: none;
+}
+.stage:active {
+  cursor: grabbing;
+}
+.canvas-wrap {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.map-box {
+  position: relative;
+  /* 地图框按舞台"盖满"时比舞台宽:不许被 flex 压窄 */
+  flex: none;
+}
+.map-box canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* 球面世界:和世界一样大的画布在右边再接一份(左右无限拖动,见 ui/mapWrap.ts) */
+.map-box canvas.wrap-copy {
+  left: 100%;
+  right: auto;
+}
+.map-box canvas.overlay {
+  opacity: 0;
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+.map-box canvas.overlay.show {
+  opacity: 1;
+}
+.caption {
+  position: absolute;
+  left: 50%;
+  top: 76px;
+  z-index: 2;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 18px;
+  text-align: center;
+  pointer-events: none;
+  min-width: 280px;
+}
+.caption .big {
+  font: 700 22px var(--font-serif);
+  color: var(--ink);
+  letter-spacing: 1px;
+}
+.caption .small {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 8px;
+}
+.caption .track {
+  height: 3px;
+  background: var(--line-strong);
+  border-radius: 2px;
+}
+.caption .track div {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.25s;
+}
+/* 数据图层的图例:左上角世界名下面 */
+.legend {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  max-width: 420px;
+  pointer-events: none;
+  text-shadow: none;
+}
+.legend .keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.legend .keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend i {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.gradient {
+  width: 300px;
+}
+.gradient .bar {
+  height: 10px;
+  border-radius: 3px;
+}
+.gradient .ticks {
+  position: relative;
+  height: 16px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.gradient .ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  top: 2px;
+}
+.gradient .unit {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ---- 回放世界形成时顶部的"人类登场 / 列国并起"说明(CivTimeline.tsx) ---- */
+.civ-top {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.civ-top.dock-top {
+  top: 64px;
+}
+.civ-top .caption {
+  position: static;
+  transform: none;
+}
+
+/* 地图窄(手机):字幕往下挪,让开左上角(时间轴 dock="bottom" / "top" 时;App 里时间轴放在底部一行,字幕位置见 .bottom-tl .civ-top) */
+@container stage (max-width: 600px) {
+  .civ-top {
+    top: 50px;
+  }
+  .civ-top.dock-top {
+    top: 104px;
+  }
+}
+
+.ins-pen {
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  opacity: 0.55;
+}
+.ins-name:hover .ins-pen {
+  opacity: 1;
+  color: var(--accent);
+}
+.ins-years {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.iv-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(var(--iv, 184, 67, 47), 0.7);
+  color: var(--text);
+  line-height: 1.7;
+}
+.iv-item .ins-years {
+  min-width: 34px;
+}
+.iv-item-text {
+  flex: 1;
+  min-width: 0;
+}
+.iv-item-text em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+.iv-del {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 4px;
+}
+.iv-del:hover {
+  color: var(--err);
+}
+/* 转圈动画 */
+@keyframes resim-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 在地图上点国家时,地图的光标是十字 */
+.app.picking .stage {
+  cursor: crosshair;
+}
+
+/* ---- 改地形(阶段 4):地图上的覆盖层(工具条在 overview.css) ---- */
+/* 改地形时地图上是十字光标;按住空格 = 平移(抓手) */
+.stage.terrain-on,
+.stage.terrain-on:active {
+  cursor: crosshair;
+}
+body.terrain-pan .stage.terrain-on {
+  cursor: grab;
+}
+body.terrain-pan .stage.terrain-on:active {
+  cursor: grabbing;
+}
+.terrain-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.terrain-overlay * {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 暗边 + 彩色虚线:羊皮纸、写实的深色海面上都看得清 */
+.terrain-overlay .tt-halo {
+  stroke: rgba(20, 16, 12, 0.55);
+  stroke-width: 4;
+}
+.terrain-overlay .tt-line {
+  stroke: #ffd08a;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+.tt-mark.k-volcano .tt-line,
+.tt-cursor.k-volcano .tt-line {
+  stroke: #ff9a5c;
+}
+.tt-mark.k-lake .tt-line,
+.tt-cursor.k-lake .tt-line {
+  stroke: #8fd3ff;
+}
+.tt-mark.k-raise .tt-line {
+  stroke: #b8f08c;
+}
+.tt-mark.k-sink .tt-line {
+  stroke: #8cc4ff;
+}
+.tt-mark .tt-band {
+  opacity: 0.32;
+}
+.tt-mark.k-range .tt-band {
+  stroke: #e0a050;
+}
+.tt-mark.k-raise .tt-band {
+  stroke: #7cc860;
+}
+.tt-mark.k-sink .tt-band {
+  stroke: #3f8fe0;
+}
+/* 光标圈:实线,淡一点 */
+.tt-cursor .tt-line {
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-dasharray: none;
+  stroke-width: 1.5;
+}
+.tt-cursor .tt-halo {
+  stroke-width: 3.5;
+  stroke: rgba(20, 16, 12, 0.4);
+}
+/* 还在重新生成的那几处(含正在画的线):一闪一闪 */
+.tt-mark.pending {
+  animation: tt-pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes tt-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+
+/* ---- 3D 地球仪(ui/Globe.tsx):铺满舞台,两张画布(着色器画的球 + 符号文字层) ---- */
+.globe {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+.globe canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.globe canvas.globe-overlay {
+  pointer-events: none;
+}
+
+

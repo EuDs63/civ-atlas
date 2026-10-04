@@ -1,0 +1,43 @@
+/*
+ * 各种状态里提示条之外的那一点样式(提示条本身在 app.css 的"顶部居中的提示条")。
+ */
+
+/* 首次打开:世界生成出来之前只有和图层同色的底(--void)+ 顶部提示条的进度;
+   四角的字、右下按钮、底部一行先藏着(占着位置,不跳动),世界好了一起淡入 */
+.app.booting > :is(.corner-tl, .top-actions, .bottom-row, .map-controls, .first-hint, .recent-ev) {
+  visibility: hidden;
+  opacity: 0;
+}
+.app:not(.booting) > :is(.corner-tl, .top-actions, .bottom-row, .map-controls, .recent-ev) {
+  animation: wf-reveal 0.35s ease-out;
+}
+@keyframes wf-reveal {
+  from {
+    opacity: 0;
+  }
+}
+
+/* 右上"正在撰写《某某》"的细进度条:AI 还没回第一个字时(进度 0)是来回滑动的一小段,不停在最左 */
+.book-chip-bar[aria-valuenow='0'] > span {
+  width: 36% !important;
+  transition: none;
+  animation: wf-indeterminate 1.3s ease-in-out infinite;
+}
+@keyframes wf-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(280%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app:not(.booting) > :is(.corner-tl, .top-actions, .bottom-row, .map-controls, .recent-ev) {
+    animation: none;
+  }
+  .book-chip-bar[aria-valuenow='0'] > span {
+    animation: none;
+    width: 100% !important;
+    opacity: 0.35;
+  }
+}

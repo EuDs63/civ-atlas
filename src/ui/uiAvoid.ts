@@ -1,0 +1,66 @@
+/**
+ * 地图上的字要让开的界面:平面主图(CivLayer.tsx)和地球仪(Globe.tsx)共用。
+ *
+ * 左上世界名、右上搜索 / 成书(含写作进度、打开的搜索框)、顶部提示条、右下地球仪切换和缩放、底部时间轴和图层按钮那一行
+ * (含打开的图层弹层 / 抽屉)、左下最近事件、打开的面板 / 底部抽屉、第一次打开的操作提示、回放时的顶部说明、改地形工具条。
+ * 这些东西下面不放地名和城镇符号(压在按钮、面板底下的字读不清,还会被误点)。
+ *
+ * 量出来的是屏幕坐标(clientX / clientY)的矩形;界面很少动,不必每帧读布局 —— 调用方按 AVOID_MS 节流。
+ */
+
+import { useEffect, useState, type RefObject } from 'react';
+
+/** 要让开的界面元素 */
+export const AVOID_UI =
+  '.corner-tl, .top-actions, .search-box, .book-chip, .toast, .map-controls, .bottom-row, .lp-pop, .recent-ev, .inspector:not(.hidden), .first-hint, .civ-top, .terrain-bar';
+
+/** 让开的范围多久重新量一次(毫秒) */
+export const AVOID_MS = 200;
+
+/** [左, 上, 右, 下] */
+export type Box = [number, number, number, number];
+
+/**
+ * 量一遍要让开的界面(屏幕坐标,四周各放宽 pad 像素);看不见的(宽或高为 0、display: none)不算。
+ * scope = 在哪里找(界面根元素 .app;找不到就整页)
+ */
+export function measureAvoid(scope: ParentNode | null, pad = 4): Box[] {
+  const root: ParentNode | null = scope ?? (typeof document !== 'undefined' ? document : null);
+  if (!root) return [];
+  const out: Box[] = [];
+  for (const el of root.querySelectorAll(AVOID_UI)) {
+    const b = el.getBoundingClientRect();
+    if (b.width && b.height) out.push([b.left - pad, b.top - pad, b.right + pad, b.bottom + pad]);
+  }
+  return out;
+}
+
+/** 两组矩形差不多一样(每条边相差不到 tol 像素):界面没动,不用重排地名 */
+export function sameBoxes(a: readonly Box[], b: readonly Box[], tol = 2): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < 4; j++) if (Math.abs(a[i][j] - b[i][j]) > tol) return false;
+  return true;
+}
+
+/**
+ * 要让开的界面(屏幕坐标),每 AVOID_MS 量一次,变了才换新的一份(用它的地方据此重排地名)。
+ * ref = 界面里的任一元素(按它找 .app)
+ */
+export function useAvoidBoxes(ref: RefObject<Element>): Box[] {
+  const [boxes, setBoxes] = useState<Box[]>([]);
+  useEffect(() => {
+    let last: Box[] = [];
+    const tick = () => {
+      const el = ref.current;
+      if (!el) return;
+      const b = measureAvoid(el.closest('.app'));
+      if (sameBoxes(b, last)) return;
+      last = b;
+      setBoxes(b);
+    };
+    tick();
+    const t = window.setInterval(tick, AVOID_MS);
+    return () => window.clearInterval(t);
+  }, [ref]);
+  return boxes;
+}

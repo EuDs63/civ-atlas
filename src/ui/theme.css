@@ -1,0 +1,90 @@
+/*
+ * 界面的深浅两套主题。
+ *
+ * app 根元素(.app)上的 data-theme="light|dark" 随图层切换:高程、实景、降水用深色,其余浅色(见 ui/mapLayers.ts)。
+ * <html> 上同步一份,挂在 body 下的弹窗(AI 设置)也跟着换。
+ *
+ * 约定的变量名(后面的界面直接用,不要改名):
+ *   --ink 主文字 / --ink-2 次要文字 / --panel 面板底(半透明)/ --panel-solid 面板实色
+ *   --line 分隔线 / --line-strong 强线 / --btn 次按钮底 / --link 可点的名字
+ *   --accent 主色(干预、战争、当前选中)/ --accent-hover 主色悬停 / --void 投影外空白
+ *   --ev-war 战争 / --ev-dynasty 改朝 / --ev-found 立国 / --ev-empire 称帝 / --ev-assim 同化
+ *   --halo 地图上文字的描边(text-shadow 的值)
+ * 另有几项辅助值(--vignette 上下渐变遮罩、--hover-bg 文字按钮悬停底、阴影、字体)。
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --ink: #231c13;
+  --ink-2: #65594a;
+  --panel: rgba(247, 242, 231, 0.95);
+  --panel-solid: #f6f1e6;
+  --line: rgba(35, 28, 19, 0.15);
+  --line-strong: rgba(35, 28, 19, 0.4);
+  --btn: rgba(35, 28, 19, 0.07);
+  --link: #2f5d7c;
+  --accent: #b8432f;
+  --accent-hover: #a03a28;
+  --void: #e7e0cc;
+  --ev-war: #b8432f;
+  --ev-dynasty: #2f5d7c;
+  --ev-found: #3f7a57;
+  --ev-empire: #8a6a25;
+  --ev-assim: #7a6390;
+  --halo: 0 0 2px rgba(247, 242, 231, 1), 0 0 8px rgba(247, 242, 231, 0.9);
+
+  --vignette: rgba(240, 234, 220, 0.78);
+  --hover-bg: rgba(128, 128, 128, 0.16);
+  --field: rgba(255, 255, 255, 0.6);
+  --ok: #3f7a57;
+  --warn: #8a6a25;
+  --err: #b8432f;
+}
+[data-theme='dark'] {
+  color-scheme: dark;
+  --ink: #f4efe5;
+  --ink-2: #c2b8a7;
+  --panel: rgba(24, 21, 18, 0.9);
+  --panel-solid: #1d1a16;
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.38);
+  --btn: rgba(255, 255, 255, 0.1);
+  --link: #9cc3dc;
+  --accent: #b8432f;
+  --accent-hover: #a03a28;
+  --void: #141518;
+  --ev-war: #f0917c;
+  --ev-dynasty: #9cc3dc;
+  --ev-found: #8fcca5;
+  --ev-empire: #e0c07a;
+  --ev-assim: #c4a8dc;
+  --halo: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.6);
+
+  --vignette: rgba(8, 8, 8, 0.55);
+  --hover-bg: rgba(128, 128, 128, 0.16);
+  --field: rgba(0, 0, 0, 0.25);
+  --ok: #8fcca5;
+  --warn: #e0c07a;
+  --err: #f0917c;
+}
+:root {
+  /* 国名、年份、数字:思源宋体(地图字体的子集,缺字回落系统宋体);其余界面文字:系统黑体 */
+  --font-serif: 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  --font-sans: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --shadow-panel: 0 14px 36px rgba(0, 0, 0, 0.22);
+  --shadow-float: 0 20px 50px rgba(0, 0, 0, 0.3);
+  --shadow-label: 0 6px 18px rgba(0, 0, 0, 0.18);
+  --shadow-toast: 0 10px 28px rgba(0, 0, 0, 0.22);
+  --r-panel: 4px;
+  --r-btn: 3px;
+  --r-tag: 2px;
+  --on-accent: #fff;
+}
+/* 旧组件用的变量名换算到新主题上(存档、导出、AI 设置、详情面板、编年史、改地形面板) */
+:root,
+[data-theme] {
+  --bg: var(--panel-solid);
+  --text: var(--ink);
+  --muted: var(--ink-2);
+  --accent-ink: var(--on-accent);
+}
