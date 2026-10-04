@@ -129,7 +129,7 @@ button {
   color: var(--link);
 }
 
-/* 右上:搜索、成书 */
+/* 右上:搜索、改写、成书 */
 .top-actions {
   position: absolute;
   right: 24px;
@@ -664,12 +664,12 @@ button.primary:hover {
     height: calc(var(--row-h) + 64px);
   }
 
-  /* ---- 顶部:世界名 20px + 缩短的副标;右上"搜索""成书" ---- */
+  /* ---- 顶部:世界名 20px + 缩短的副标;右上"搜索""改写""成书" ---- */
   .corner-tl {
     left: calc(16px + var(--safe-l));
     top: calc(12px + var(--safe-t));
     gap: 8px;
-    max-width: calc(100% - 150px - var(--safe-l) - var(--safe-r));
+    max-width: calc(100% - 200px - var(--safe-l) - var(--safe-r));
   }
   .wt-name {
     font-size: 20px;

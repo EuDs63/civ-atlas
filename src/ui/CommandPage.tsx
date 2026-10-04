@@ -54,7 +54,9 @@ export function CommandPage({ civ, id, year }: { civ: Civ; id: number; year: num
     return civ.settlements.filter((s) => s.id !== cap && own[s.region] === id && cityStands(civ, s.id, y) && populationAt(s, y) > 0).map((s) => s.id);
   }, [civ, id, p, y, alive]);
   const orders = polityOrders(civ, id, edits.interventions);
-  const has = (kind: InterventionKind) => orders.some(({ v }) => v.kind === kind && v.kind !== 'found' && v.a === key);
+  // 下过同一种命令(有截止年份的,到期以后可以再下)
+  const has = (kind: InterventionKind) =>
+    orders.some(({ v }) => v.kind === kind && v.kind !== 'found' && v.a === key && !('until' in v && v.until !== undefined && y >= v.until));
   const name = nameAt(p, y);
 
   /** 这一条命令为什么用不了(能用 = null) */

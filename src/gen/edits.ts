@@ -47,7 +47,7 @@
  *
  * | kind      | 意思     | 字段                              | from(整数年份)                          | 可选                          |
  * |-----------|----------|-----------------------------------|-------------------------------------------|-------------------------------|
- * | `protect` | 不许灭   | a = 国家                          | 从这一年起:国都攻不下、不会被并掉(国土照样会丢、会分裂、会改朝换代) | —                  |
+ * | `protect` | 不许灭   | a = 国家                          | 从这一年起:国都攻不下、不会被并掉(国土照样会丢、会分裂、会改朝换代) | until:到这一年止(不含;不给 = 一直) |
  * | `ally`    | 结盟     | a = 国家,b = 另一国               | 从这一年起两国不互相宣战(那一刻正在交战的当即议和);一方被第三国攻打,另一方多半参战 | until:到这一年止(不含;不给 = 一直) |
  * | `declare` | 宣战     | a = 攻方,b = 守方                 | 这一年年初强制开战(两国不接壤 / 已在交战 / 有一方已亡 = 打不成,编年史照记一条) | —   |
  * | `unity`   | 禁止分裂 | a = 国家                          | 从这一年起不会有州叛离(分裂、遗民复国都不会从它的国土里起事) | —                     |
@@ -105,7 +105,7 @@ export type InterventionKind = 'protect' | 'ally' | 'declare' | 'unity' | 'cede'
 
 /** 一条干预(字段、年份语义见文件头的表;a、b 是国家的稳定键 `polity:…`,region 是州键 `region:…`,city 是城键 `settlement:…`) */
 export type Intervention =
-  | { kind: 'protect'; a: string; from: number }
+  | { kind: 'protect'; a: string; from: number; until?: number }
   | { kind: 'ally'; a: string; b: string; from: number; until?: number }
   | { kind: 'declare'; a: string; b: string; from: number }
   | { kind: 'unity'; a: string; from: number }
@@ -593,8 +593,8 @@ export function cleanIntervention(x: unknown): Intervention | null {
   } else {
     if (!isPolityKey(o.a)) return null;
     const a = o.a;
-    if (kind === 'protect' || kind === 'unity') v = { kind, a, from };
-    else if (kind === 'halt') {
+    if (kind === 'unity') v = { kind, a, from };
+    else if (kind === 'protect' || kind === 'halt') {
       const until = untilOf();
       v = until !== null ? { kind, a, from, until } : { kind, a, from };
     } else if (kind === 'cede') {

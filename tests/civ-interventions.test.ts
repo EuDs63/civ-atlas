@@ -151,6 +151,10 @@ describe('干预 · 数据格式', () => {
       { kind: 'protect', a: 'polity:r1#0', from: 0 },
       { kind: 'ally', a: 'polity:r1#0', b: 'polity:r2#0', from: 99 },
     ]);
+    // 保护可以有截止年份(要在 from 之后)
+    const timed: Intervention = { kind: 'protect', a: 'polity:r12#0', from: 1800, until: 2100 };
+    expect(cleanInterventions([timed])).toEqual([timed]);
+    expect(cleanInterventions([{ ...timed, until: 1800 }])).toEqual([{ kind: 'protect', a: 'polity:r12#0', from: 1800 }]);
     expect(cleanInterventions(undefined)).toEqual([]);
     expect(sameInterventions(good, good.map((v) => ({ ...v })))).toBe(true);
     expect(sameInterventions(good, good.slice(1))).toBe(false);
@@ -228,6 +232,30 @@ describe('干预 · 推演', () => {
       expect(iv[0].text).toMatch(/^【干预】.+自此不亡$/);
       expect(Math.floor(iv[0].year)).toBe(from);
       expect(iv[0].importance).toBe(3);
+    }
+  }, 120_000);
+
+  it('保护到某一年:那之前不亡;之后照常(亡也亡在截止年份以后);编年史写"自此不亡,至第 N 年"', () => {
+    for (const seed of [7, 2024]) {
+      const civ = base(seed);
+      const { p, from } = fallenPolity(civ);
+      const key = polityKey(civ, p.id);
+      const until = Math.floor(p.ended!) + 100;
+      const v: Intervention = { kind: 'protect', a: key, from, until };
+      // 做决定时现查:from 起护着,until 那一刻起不再护着
+      const im = new InterventionModel([v], seed);
+      im.pm = { polities: civ.polities, settlements: civ.settlements, terrain: { regions: civ.regions } } as never;
+      expect([from - 0.5, from, until - 0.01, until, until + 50].map((t) => im.protects(p.id, t))).toEqual([false, true, true, false, false]);
+      const c = generateCiv(world(seed), { interventions: [v] });
+      const id = idOf(c, key);
+      expect(id).toBeGreaterThanOrEqual(0);
+      const q = c.polities[id];
+      expect(q.ended === undefined || q.ended >= until, `seed ${seed}:到第 ${until} 年之前不亡(新历史亡于 ${q.ended})`).toBe(true);
+      expect(c.annals.some((e) => e.year < until && ((e.kind === 'fall' && e.a === id) || (e.kind === 'merge' && e.b === id)))).toBe(false);
+      const iv = buildChronicle(c).filter((e) => e.kind === 'intervene');
+      expect(iv[0].text).toMatch(new RegExp(`^【干预】.+自此不亡,至第 ${until} 年$`));
+      // 年份之前和不干预时逐字节一致
+      expect(annalsBefore(c, from)).toBe(annalsBefore(civ, from));
     }
   }, 120_000);
 

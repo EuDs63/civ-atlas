@@ -2,7 +2,7 @@
  * 改地形(阶段 4)的界面:顶部的工具条(TerrainBar,从世界概览的"创世"页进入)、地图上的覆盖层(画的线、光标圈、改过的地方)。
  *
  * - 进入改地形后:火山 / 湖 = 点一下放一处(拖动照样平移);山脉 / 抬起陆地 / 沉成海 = 按住拖出一条线(按住空格拖动 = 平移)。
- *   单击不再看详情;点工具条上的"完成"恢复。每种工具三档大小(火山、湖、画笔 = 大小,山脉 = 高低),对应的 r / s 见 PRESETS。
+ *   单击不再看详情;点工具条上的"完成"恢复。每种工具三档大小(火山、湖、画笔 = 大小,山脉 = 高低),对应的 r / s 见 gen/terrainEdits.ts 的 TERRAIN_PRESETS(AI 改写也按这三档)。
  * - 加一处修改 = editsStore.addTerrainOp;撤销 = undoTerrainOp(Ctrl / ⌘ + Z);全部清除 = clearTerrain(点两下确认)。
  *   App 看到地形修改变了就在后台带着新地形重新生成世界、重推文明(见 App.tsx)。
  * - 地图事件由 App 转给这里:terrainDown / terrainMove / terrainUp(画线)、terrainClick(放点);返回 true = 这一下归改地形管。
@@ -10,7 +10,7 @@
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { TerrainKind, TerrainOp } from '../gen/edits';
-import { isPointKind, sameTerrain } from '../gen/terrainEdits';
+import { TERRAIN_PRESETS as PRESETS, isPointKind, sameTerrain } from '../gen/terrainEdits';
 import { addTerrainOp, clearTerrain, undoTerrainOp, useEdits } from './editsStore';
 import './overview.css';
 
@@ -45,35 +45,6 @@ export function useTerrainTool(): TerrainToolState {
     () => tool,
   );
 }
-
-/** 每种工具三档的大小 r(世界坐标)和强度 s */
-export const PRESETS: Record<TerrainKind, [r: number, s: number][]> = {
-  volcano: [
-    [18, 0.85],
-    [28, 1.05],
-    [40, 1.3],
-  ],
-  range: [
-    [18, 0.55],
-    [23, 1],
-    [28, 1.45],
-  ],
-  lake: [
-    [10, 0.7],
-    [16, 1],
-    [26, 1.2],
-  ],
-  raise: [
-    [14, 1],
-    [24, 1],
-    [40, 1],
-  ],
-  sink: [
-    [14, 1],
-    [24, 1],
-    [40, 1],
-  ],
-};
 
 const TOOLS: { id: TerrainKind; name: string; sizeName: string; sizes: [string, string, string]; hint: string }[] = [
   { id: 'volcano', name: '火山', sizeName: '大小', sizes: ['小', '中', '大'], hint: '点一下放一座火山;点在海里 = 火山岛' },

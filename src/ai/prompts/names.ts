@@ -228,7 +228,8 @@ const PLACE_KIND: Record<Place['kind'], string> = {
   desert: '荒漠',
 };
 
-function placeKindLabel(p: Place): string {
+/** 地理实体的种类名:"山脉""河流""大洋""海湾"…… */
+export function placeKindLabel(p: Place): string {
   if (p.kind !== 'sea') return PLACE_KIND[p.kind];
   const n = p.defaultName ?? p.name;
   return n.endsWith('洋') ? '大洋' : n.endsWith('湾') ? '海湾' : '海';
@@ -1172,8 +1173,8 @@ export interface Suggestion {
 
 export type SuggestParse = { ok: true; list: Suggestion[]; dropped: number } | { ok: false; message: string };
 
-/** 去掉 ```json 围栏,取第一个完整的 JSON 值 */
-function looseJson(text: string): unknown {
+/** 去掉 ```json 围栏,取第一个完整的 JSON 值(AI 改写也用) */
+export function looseJson(text: string): unknown {
   const s = text.replace(/```(?:json)?/gi, '').trim();
   try {
     return JSON.parse(s);

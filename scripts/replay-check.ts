@@ -1968,6 +1968,94 @@ for (const style of ['realistic', 'fantasy']) {
   await sp.close();
 }
 
+// AI 改写(阶段 5「对话式编辑」,不联网):右上"改写" → 框里一行说明 + 三句按这个世界写的例子;没设置 AI 时"发送"点不了,
+// 底部一行提示 +"设置 AI"(打开设置;Esc 只关设置)。测试用假 AI(时间轴在 2000 年):说一句(不提地形)→ 列出一条"保护"提议(2000 年起、至 2300 年)→
+// "执行 1 条":框收起、后台重推,提示条"已按你说的改写"(带撤销)、左上"已干预 1 处" → 提示条上点撤销 → 重推回"未干预";
+// 再打开框,那一轮写"已撤销";点框外面关上
+{
+  const rp = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  rp.on('pageerror', (e) => errs.push(`[改写] ${e.message}`));
+  rp.on('console', (m) => m.type() === 'error' && errs.push(`[改写] ${m.text()}`));
+  await rp.goto(`${dev.url}/?seed=7&style=fantasy`);
+  await rp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await rp.locator('[data-act=rewrite]:not([disabled])').waitFor({ timeout: 60000 });
+  await rp.click('[data-act=rewrite]');
+  const shown = await rp.waitForSelector('.rw-box', { timeout: 5000 }).then(() => true, () => false);
+  const hint = await rp.locator('.rw-hint').innerText().catch(() => '');
+  const examples = (await rp.locator('.rw-example').allInnerTexts().catch(() => [] as string[])) as string[];
+  const unset = await rp.locator('.rw-unset').innerText().catch(() => '');
+  await rp.fill('.rw-input textarea', '让最大的国家多撑三百年');
+  const sendOff = await rp.locator('[data-act=rw-send]').isDisabled().catch(() => false);
+  await rp.click('.rw-unset .rw-link').catch(() => null);
+  const aiOpened = await rp.waitForSelector('.ai-dialog', { timeout: 5000 }).then(() => true, () => false);
+  await rp.keyboard.press('Escape');
+  await rp.waitForTimeout(150);
+  const boxKept = (await rp.locator('.rw-box').count()) === 1 && !(await rp.locator('.ai-dialog').count());
+  await rp.keyboard.press('Escape');
+  const escClosed = !(await rp.locator('.rw-box').count());
+  console.log(
+    `改写(没设置 AI):框 ${shown ? '出来' : '没出来'}「${hint.slice(0, 24)}…」,例子 ${examples.join(' / ')};「${unset.replace(/\n/g, ' ')}」,发送点不了 ${sendOff};` +
+      `"设置 AI"打开设置 ${aiOpened}、Esc 只关设置 ${boxKept};再 Esc 关上 ${escClosed}`,
+  );
+  if (!shown) errs.push('改写:点右上"改写"没有出来框');
+  else {
+    if (!hint.includes('点了执行才改')) errs.push(`改写:框里没有说明(${hint})`);
+    if (examples.length !== 3) errs.push(`改写:空的时候应该有三句例子(${examples.join(' / ')})`);
+    if (!unset.includes('设置 AI') || !sendOff) errs.push(`改写:没设置 AI 时应该提示、"发送"点不了(${unset};点不了 ${sendOff})`);
+    if (!aiOpened || !boxKept || !escClosed) errs.push(`改写:"设置 AI"没打开设置 / Esc 把改写框也关了 / 再按 Esc 没关上(${aiOpened}、${boxKept}、${escClosed})`);
+  }
+
+  await rp.goto(`${dev.url}/?seed=7&style=fantasy&ai=mock&civYear=2000`);
+  await rp.locator('[data-act=rewrite]:not([disabled])').waitFor({ timeout: 60000 });
+  await rp.waitForTimeout(300);
+  const sub0 = await rp.locator('.wt-sub').innerText().catch(() => '');
+  await rp.click('[data-act=rewrite]');
+  await rp.fill('.rw-input textarea', '让最大的国家多撑三百年');
+  await rp.click('[data-act=rw-send]');
+  await rp.waitForSelector('.rw-turn .rw-ans', { timeout: 10000 }).catch(() => null);
+  const items = (await rp.locator('.rw-item .rw-text').allInnerTexts().catch(() => [] as string[])) as string[];
+  const years = (await rp.locator('.rw-item .rw-year').allInnerTexts().catch(() => [] as string[])) as string[];
+  const checked = await rp.locator('.rw-check[aria-checked=true]').count();
+  const go = await rp.locator('[data-act=rw-apply]').innerText().catch(() => '');
+  const cannot = await rp.locator('.rw-cannot').count();
+  const prev = await rp.evaluate(() => (window as any).__wfResim?.seq ?? 0);
+  await rp.click('[data-act=rw-apply]').catch(() => null);
+  await rp.waitForTimeout(100);
+  const boxGone = !(await rp.locator('.rw-box').count());
+  const resimmed = await rp
+    .waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev, { timeout: 20000 })
+    .then(() => true, () => false);
+  const done = await toastText(rp, 'resim-done', 5000);
+  const sub1 = await rp.locator('.wt-sub').innerText().catch(() => '');
+  const prevU = await rp.evaluate(() => (window as any).__wfResim?.seq ?? 0);
+  await rp.click('.toast[data-toast=resim-done] [data-act=rw-undo]').catch(() => null);
+  const undone = await rp
+    .waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prevU, { timeout: 20000 })
+    .then(() => true, () => false);
+  const undoToast = await toastText(rp, 'resim-done', 5000);
+  const sub2 = await rp.locator('.wt-sub').innerText().catch(() => '');
+  await rp.click('[data-act=rewrite]');
+  const turnState = await rp.locator('.rw-turn .rw-done').innerText({ timeout: 3000 }).catch(() => '');
+  await rp.mouse.click(700, 450);
+  await rp.waitForTimeout(150);
+  const outsideClosed = !(await rp.locator('.rw-box').count());
+  console.log(
+    `改写(假 AI):提议 ${items.map((t, i) => `${years[i]} ${t}`).join(';')}(勾着 ${checked} 条,按钮「${go}」,做不到 ${cannot} 句);` +
+      `执行:框收起 ${boxGone}、重推 ${resimmed}、提示「${done}」、左上「${sub0}」→「${sub1}」;撤销:重推 ${undone}、提示「${undoToast}」、左上「${sub2}」;` +
+      `再打开那一轮「${turnState}」;点外面关上 ${outsideClosed}`,
+  );
+  if (items.length !== 1 || !/:保护\(至第 2300 年\)$/.test(items[0] ?? '') || years[0] !== '2000') errs.push(`改写:假 AI 的提议不对(${items.join(';')})`);
+  if (checked !== 1 || go !== '执行 1 条' || cannot !== 1) errs.push(`改写:提议默认全勾、按钮写条数、做不到的一句(勾 ${checked},「${go}」,做不到 ${cannot})`);
+  if (!boxGone || !resimmed) errs.push(`改写:点"执行"后框没收起 / 没有重推(${boxGone}、${resimmed})`);
+  if (!/已按你说的改写 · 从 \d+ 年重新推演.*撤销/.test(done)) errs.push(`改写:执行后提示条不对(${done})`);
+  if (!sub0.includes('未干预') || !sub1.includes('已干预 1 处')) errs.push(`改写:执行后左上应从"未干预"变成"已干预 1 处"(${sub0} → ${sub1})`);
+  if (!undone || !undoToast.includes('已撤销改写') || !sub2.includes('未干预')) errs.push(`改写:提示条上的撤销不对(重推 ${undone},「${undoToast}」,左上「${sub2}」)`);
+  if (turnState !== '已撤销') errs.push(`改写:撤销后再打开,那一轮应写"已撤销"(${turnState})`);
+  if (!outsideClosed) errs.push('改写:点框外面没关上');
+  await rp.evaluate(() => localStorage.clear());
+  await rp.close();
+}
+
 // AI 设置(阶段 5):打开"AI" → 我们的 AI 显示"内测" → 假 AI(ai=mock,不联网)"测试一下"成功 → 调用记录里有一条、刷新后还在 → 清空
 {
   const outside: string[] = [];

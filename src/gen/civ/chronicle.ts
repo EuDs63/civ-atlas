@@ -47,7 +47,7 @@
  *   部落地带的孤地(没有国家)写"瑞州的居兰人渐为渭人"。民族消亡单列一条"乌耐族亡"(大事)。
  *   迁入 ≥ MIGRATE_MAJOR 州的迁徙、同化 ≥ ASSIM_MAJOR 州的一段、民族消亡是大事。
  * - **干预**(阶段 4,史事 intervene;哪一条干预见 Civ.interventions[e.war]):"【干预】大昌与索拉特结盟"
- *   "【干预】大昌自此不亡""【干预】大昌向索拉特宣战"(没打成的写原因:"…,然两国不接壤,未能成行");
+ *   "【干预】大昌自此不亡"(有截止年份的加",至第 2750 年")"【干预】大昌向索拉特宣战"(没打成的写原因:"…,然两国不接壤,未能成行");
  *   划州"【干预】瑞州自大渭划归大昌,永为大昌之土";立国"【干预】瑞州脱大渭自立,号瑞国,都于瑞城"(紧跟着的 found 并进这一条);
  *   迁都"【干预】大昌自汾城迁都瑞城"(紧跟着的 capital 并进这一条);不许扩张"【干预】大昌自此止戈息兵,不再开疆拓土"。
  *   没生效的写原因("…,然其地无人居住""…,然瑞城属大渭");界面上的干预列表也用它(interventionOutcome)。标签"干",一律是大事。
@@ -595,8 +595,10 @@ function interveneStory(civ: Civ, e: Annal, id: number): IvStory {
   if (!v) return done(A);
   const R = regionName(civ, e.region) || '其州';
   switch (v.kind) {
-    case 'protect':
-      return dead(e.a) ? fail(`欲保${A}不亡,然${A}已亡`, `那一年${A}已亡`) : done(`${A}自此不亡`);
+    case 'protect': {
+      const until = v.until !== undefined ? `,至第 ${v.until} 年` : '';
+      return dead(e.a) ? fail(`欲保${A}不亡,然${A}已亡`, `那一年${A}已亡`) : done(`${A}自此不亡${until}`);
+    }
     case 'unity':
       return dead(e.a) ? fail(`欲令${A}四境无叛,然${A}已亡`, `那一年${A}已亡`) : done(`${A}自此四境无叛,再无州郡自立`);
     case 'halt': {

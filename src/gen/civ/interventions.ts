@@ -17,7 +17,8 @@
  *
  * 各机制在做决定的地方查一下(WarModel.iv、PolityModel.iv;没有干预时为空,只多一次判空,推演不变慢):
  *   不许灭 protect   wars.ts 挑要打的州时跳过它的国都所在州,只剩几州时一州都不打(国都攻不下 → 不会亡国,也不会因丢了国都残部被并);
- *                   politics.ts 的合并不会把它并掉。国土照样会丢(可以缩小),照样会分裂、改朝换代
+ *                   politics.ts 的合并不会把它并掉。国土照样会丢(可以缩小),照样会分裂、改朝换代。
+ *                   有 until 的:until 那一刻起不再护着(都是做决定时现查,不用另外预约事件),之后照常会被攻灭、被并
  *   结盟   ally      wars.ts 看邻国时不对盟国宣战;结盟那一刻两国若在交战,当即议和;
  *                   一方被第三国宣战时,另一方(和攻方接壤)多半援盟参战(见 wars.ts 的 ALLY_JOIN;史事 war 的 settlement 列记盟国)
  *   宣战   declare   from 那一刻强制开战(不管停战冷却、歇战、同时在打几场);两国不接壤 / 已在交战 / 有一方已亡 = 打不成
@@ -66,8 +67,8 @@ export class InterventionModel {
   pm: PolityModel | null = null;
   /** 国家层的归属(installInterventions 时挂上;永久划州要看州此刻在谁手里) */
   owner: Int16Array | null = null;
-  private readonly protectRules: Extract<Intervention, { kind: 'protect' | 'unity' }>[];
-  private readonly unityRules: Extract<Intervention, { kind: 'protect' | 'unity' }>[];
+  private readonly protectRules: Extract<Intervention, { kind: 'protect' }>[];
+  private readonly unityRules: Extract<Intervention, { kind: 'unity' }>[];
   private readonly allyRules: Ally[];
   private readonly haltRules: Halt[];
   /** 永久划州:州号、得到它的国家(键)、年份(州键要按地块找州:挂上国家模型时才解析,见 bindRegions) */
@@ -159,7 +160,7 @@ export class InterventionModel {
 
   /** 国家 p 此刻"不许灭" */
   protects(p: number, t: number): boolean {
-    for (const v of this.protectRules) if (t >= v.from && this.resolve(v.a) === p) return true;
+    for (const v of this.protectRules) if (t >= v.from && (v.until === undefined || t < v.until) && this.resolve(v.a) === p) return true;
     return false;
   }
 

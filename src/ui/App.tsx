@@ -127,6 +127,7 @@ import { isDoubleTap, pinchStep, sheetGeometry, type Pt, type Tap } from './gest
 import { pickLabelAt } from './mapPick';
 import { ownersAt } from '../gen/civ/timeline';
 import { interventionOutcome } from '../gen/civ/chronicle';
+import { takeRewriteNote, undoTurn, type RewriteNote } from './rewriteStore';
 import { Globe, getGlobeOn, setGlobeOn, useGlobeOn, type GlobeApi } from './Globe';
 import { setupAi } from '../ai/setup';
 import { ToastBar, clearToast, showToast } from './Toast';
@@ -304,6 +305,8 @@ export function App() {
     left?: number;
     /** 读档 / 自动恢复套上的干预:推完不提示、不打断自动播放 */
     quiet?: boolean;
+    /** 这次重推是一次 AI 改写 / 撤销改写(推完说"已按你说的改写",带撤销) */
+    note?: RewriteNote;
   } | null>(null);
   const [resim, setResim] = useState<{ year: number } | null>(null);
   const rawRef = useRef<Civ | null>(null);
@@ -317,6 +320,8 @@ export function App() {
   const fresh = useRef(false);
   /** 正在进行的"按新地形重新生成"(编号 = 那次生成的请求编号);t0 = 发出去的时刻 */
   const regenRef = useRef<{ id: number; t0: number; terrain: readonly TerrainOp[]; workerMs?: number; arrived?: number } | null>(null);
+  /** 正在进行的"按新地形重新生成"是一次 AI 改写 / 撤销改写(生成完说"已按你说的改写",带撤销) */
+  const regenNote = useRef<RewriteNote | null>(null);
   /** 地图上现在这个世界带着的地形修改(覆盖层据此标出还在生成的那几处) */
   const [shownTerrain, setShownTerrain] = useState<readonly TerrainOp[]>(EMPTY_EDITS.terrain);
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus>({ busy: false });
@@ -438,7 +443,36 @@ export function App() {
       if (!info.quiet) playFrom(Math.min(civ.endYear, Math.max(0, info.year)));
       // 已生效(停 7 秒,带撤销)/ 已撤销(停 4 秒)
       const y = Math.max(0, Math.floor(info.year));
-      if (info.added) {
+      if (info.note) {
+        const n = info.note;
+        if (n.kind === 'apply') {
+          // 这一批新加的命令里有几条没生效(两国不接壤、州里没人住……;原因在概览"我的干预"页)
+          const ks = (l: readonly Intervention[]) => l.map((v) => JSON.stringify(v));
+          const had = ks(n.before.interventions);
+          const done = ks(civ.interventions ?? []);
+          const failed = ks(n.after.interventions)
+            .filter((k) => !had.includes(k))
+            .map((k) => done.indexOf(k))
+            .filter((i) => i >= 0 && !interventionOutcome(civ, i).ok).length;
+          showToast({
+            id: 'resim-done',
+            kind: failed ? 'warn' : 'ok',
+            text: `已按你说的改写 · 从 ${y} 年重新推演`,
+            more: failed ? [`${failed} 条命令没生效,原因见概览的"我的干预"`] : undefined,
+            action: {
+              label: '撤销',
+              act: 'rw-undo',
+              onClick: () => {
+                undoTurn(n.turn);
+                clearToast('resim-done');
+              },
+            },
+            ttl: 7000,
+          });
+        } else {
+          showToast({ id: 'resim-done', kind: 'ok', text: info.left ? `已撤销改写,从 ${y} 年起重新推演` : `已撤销改写,${y} 年之后恢复原历史`, ttl: 4000 });
+        }
+      } else if (info.added) {
         const v = info.added;
         const named = applyNames(civ, getEdits().names);
         const idx = (civ.interventions ?? []).findIndex((x) => JSON.stringify(x) === JSON.stringify(v));
@@ -556,6 +590,7 @@ export function App() {
     resimInfo.current = null;
     setResim(null);
     regenRef.current = { id, t0: performance.now(), terrain: t };
+    regenNote.current = takeRewriteNote(getEdits());
     setTerrainStatus((s) => ({ ...s, busy: true }));
     setProgress({ stage: '准备', pct: 0, regen: true });
     // 回放、选中、编年史的国家筛选都属于旧地形上的历史
@@ -586,7 +621,8 @@ export function App() {
     const quiet = list === restoredIv.current;
     const added = !quiet && list.length === before.length + 1 && changed.length === 1 ? changed[0] : undefined;
     const removed = !quiet && list.length === before.length - 1 && changed.length === 1 ? changed[0] : undefined;
-    resimInfo.current = { seq, year, t0: performance.now(), added, removed, left: list.length, quiet };
+    const note = takeRewriteNote(getEdits()) ?? undefined;
+    resimInfo.current = { seq, year, t0: performance.now(), added, removed, left: list.length, quiet, note };
     setResim({ year });
     send({ type: 'resim', id: reqId.current, seq, params: genParams.current, terrain: [...genTerrain.current], interventions: list });
   }, [edits.interventions, data, send]);
@@ -1889,7 +1925,30 @@ export function App() {
       terrainLast.lostNames ? `${terrainLast.lostNames} 处改名` : '',
       terrainLast.lostInterventions ? `${terrainLast.lostInterventions} 条干预` : '',
     ].filter(Boolean);
-    showToast({ id: 'terrain', kind: lost.length ? 'warn' : 'ok', text: '已按新地形重新生成', more: lost.length ? [`${lost.join('、')}暂未生效`] : undefined });
+    const more = lost.length ? [`${lost.join('、')}暂未生效`] : undefined;
+    const n = regenNote.current;
+    regenNote.current = null;
+    if (n) {
+      showToast({
+        id: 'terrain',
+        kind: lost.length ? 'warn' : 'ok',
+        text: n.kind === 'apply' ? '已按你说的改写 · 按新地形重新生成' : '已撤销改写 · 按原来的地形重新生成',
+        more,
+        action:
+          n.kind === 'apply'
+            ? {
+                label: '撤销',
+                act: 'rw-undo',
+                onClick: () => {
+                  undoTurn(n.turn);
+                  clearToast('terrain');
+                },
+              }
+            : undefined,
+      });
+      return;
+    }
+    showToast({ id: 'terrain', kind: lost.length ? 'warn' : 'ok', text: '已按新地形重新生成', more });
   }, [terrainLast]);
 
   const randomSeed = () => {
@@ -2021,8 +2080,8 @@ export function App() {
         <WorldTitle seed={data ? data.world.params.seed : null} civ={civ} onOpen={() => openOverview('countries')} />
         {style === 'data' && !terrainTool.on && <Legend layer={layer} />}
       </div>
-      {/* 右上:搜索、成书(写史书时前面是进度) */}
-      <TopActions canWrite={civReady} civ={civ} />
+      {/* 右上:搜索、改写(用一句话让 AI 改世界)、成书(写史书时前面是进度) */}
+      <TopActions canWrite={civReady} civ={civ} world={data?.world ?? null} busy={!!resim || terrainStatus.busy || !!progress} />
       {/* 顶部居中:提示条(同一时间只有一条);改地形时上面是工具条,提示条挪到它下面 */}
       <ToastBar />
       {data && <TerrainBar disabled={!!progress && !terrainStatus.busy} />}

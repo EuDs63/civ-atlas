@@ -57,7 +57,7 @@ function base(seed: number) {
   return b;
 }
 
-/** 界面上的档位(ui/TerrainTools.tsx 的 PRESETS):海里最开阔处放一座小火山("小"档)/ 陆上离海最远处挖一个湖("中"档:州数会变、州号错开) */
+/** 界面上的档位(gen/terrainEdits.ts 的 TERRAIN_PRESETS):海里最开阔处放一座小火山("小"档)/ 陆上离海最远处挖一个湖("中"档:州数会变、州号错开) */
 const cases = new Map<string, Case>();
 function edited(seed: number, kind: 'volcano' | 'lake'): Case {
   const id = `${seed}-${kind}`;

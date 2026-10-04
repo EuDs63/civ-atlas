@@ -36,6 +36,35 @@ export const TERRAIN_MAX_PTS = 256;
 export const TERRAIN_R: readonly [number, number] = [3, 160];
 export const TERRAIN_S: readonly [number, number] = [0.2, 2];
 
+/** 每种工具三档(小 / 中 / 大;山脉是低 / 中 / 高)的大小 r(世界坐标)和强度 s:改地形的工具条、AI 改写共用 */
+export const TERRAIN_PRESETS: Record<TerrainKind, [r: number, s: number][]> = {
+  volcano: [
+    [18, 0.85],
+    [28, 1.05],
+    [40, 1.3],
+  ],
+  range: [
+    [18, 0.55],
+    [23, 1],
+    [28, 1.45],
+  ],
+  lake: [
+    [10, 0.7],
+    [16, 1],
+    [26, 1.2],
+  ],
+  raise: [
+    [14, 1],
+    [24, 1],
+    [40, 1],
+  ],
+  sink: [
+    [14, 1],
+    [24, 1],
+    [40, 1],
+  ],
+};
+
 const KINDS: readonly TerrainKind[] = ['volcano', 'range', 'lake', 'raise', 'sink'];
 /** 只有一个点的种类 */
 export const isPointKind = (k: TerrainKind) => k === 'volcano' || k === 'lake';
