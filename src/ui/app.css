@@ -25,65 +25,25 @@ button {
   cursor: pointer;
 }
 
-/* ==== 界面骨架:地图铺满全屏,四角小字,顶部提示条,底部一行(时间轴 + 图层与投影) ==== */
+/* ==== 界面骨架:地图铺满全屏,顶部提示条,底部一行(时间轴);宽屏、手机各自的布局在 desktop.css、phone.css ==== */
 .app {
   position: relative;
   height: 100%;
   overflow: hidden;
-  /* 时间轴按界面宽度排版(窄了滑条单独占一行,见"文明时间轴"的 @container stage) */
+  /* 回放字幕按界面宽度排版(见 .civ-top 的 @container stage) */
   container: stage / inline-size;
   background: var(--void);
   color: var(--ink);
   font-family: var(--font-sans);
 }
-/* 地图上的文字(四角、时间轴、提示)都带一圈和图层同色的描边 */
+/* 地图上的文字(图例、时间轴、提示)都带一圈和图层同色的描边 */
 .corner-tl,
-.top-actions,
 .first-hint,
 .bottom-row {
   text-shadow: var(--halo);
 }
 
-/* 上下两条和图层同色的渐变遮罩 */
-.vignette {
-  position: absolute;
-  left: 0;
-  right: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-.vignette.top {
-  top: 0;
-  height: 130px;
-  background: linear-gradient(var(--vignette), transparent);
-}
-.vignette.bottom {
-  bottom: 0;
-  height: 170px;
-  background: linear-gradient(transparent, var(--vignette));
-}
-
-/* 地图上的文字按钮:不加底、只带描边,悬停出现浅灰底 */
-.map-btn {
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  border-radius: var(--r-btn);
-  padding: 8px 12px;
-  font-size: 15px;
-  line-height: 1.2;
-  text-shadow: var(--halo);
-}
-.map-btn:hover:not(:disabled),
-.map-btn.on {
-  background: var(--hover-bg);
-}
-.map-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* 左上:世界名 + 副标 */
+/* 左上:数据图层的图例 */
 .corner-tl {
   position: absolute;
   left: 28px;
@@ -99,47 +59,6 @@ button {
 .corner-tl > * {
   pointer-events: auto;
 }
-.world-title {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--ink);
-  text-align: left;
-  text-shadow: var(--halo);
-  max-width: 100%;
-}
-.wt-name {
-  font: 700 24px/1.25 var(--font-serif);
-  letter-spacing: 0.06em;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wt-sub {
-  font-size: 13px;
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-.world-title:hover .wt-more {
-  color: var(--link);
-}
-
-/* 右上:搜索、改写、成书 */
-.top-actions {
-  position: absolute;
-  right: 24px;
-  top: 20px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 /* 顶部居中的提示条(Toast.tsx) */
 .toast {
   position: absolute;
@@ -324,7 +243,7 @@ button {
   pointer-events: none;
 }
 
-/* 底部一行:时间轴(左,占满)+ 图层与投影按钮(右) */
+/* 底部一行:时间轴(宽屏是卡片右边那一块底下的胶囊,手机是浮在底部卡片上面的胶囊) */
 .bottom-row {
   position: absolute;
   left: 28px;
@@ -371,9 +290,6 @@ button {
   font-size: 14px;
   border-radius: var(--r-panel);
 }
-.lp-label {
-  white-space: nowrap;
-}
 .lp-thumb {
   display: block;
   height: 48px;
@@ -381,12 +297,6 @@ button {
   background-size: cover;
   background-position: 35% 50%;
   background-color: var(--btn);
-}
-.lp-thumb.small {
-  flex: none;
-  width: 44px;
-  height: 30px;
-  border: 1px solid var(--line-strong);
 }
 .lp-thumb.empty {
   background-image: repeating-linear-gradient(135deg, var(--btn) 0 6px, transparent 6px 12px);
@@ -623,252 +533,11 @@ button.primary:hover {
   background: var(--accent-hover);
 }
 
-/* 地球仪:左下的最近事件收窄,球在默认大小时不压到它左下边上的地名(球心在宽 50%、高 48%,半径 0.43 × 短边;
-   最近事件最上一行那个高度,球的左边大约在 50vw − 0.3 × 短边)。放大后照样叠在球上,靠底部渐变遮罩和文字描边读清 */
-@media (min-width: 761px) {
-  .app.globe-on > .recent-ev {
-    max-width: min(34vw, calc(50vw - 0.3 * min(100vw, 100vh) - 44px));
-  }
-  /* 第一次打开的操作提示在底部正中:不太宽的屏幕(平板竖屏)上最近事件让开它 */
-  .app:not(.globe-on):has(> .first-hint) > .recent-ev {
-    max-width: min(34vw, calc(50vw - 160px));
-  }
-}
-
-/* ==== 手机布局(窄屏 ≤ 760px,见 ui/device.ts):面板改成底部抽屉、时间轴两行固定在最底部、弹层改成底部抽屉 ====
-   几个尺寸(和 flyTo.ts 的 NARROW_ROW_H / NARROW_TOP_ROOM、gestures.ts 的 sheetGeometry 同一个算法):
-     --row-h       底部一行(两行的时间轴)的高度,含底部安全区(iPhone 的横条)
-     --top-room    顶上世界名那一截,含顶部安全区(刘海)
-     --sheet-half  底部抽屉半高时上边的位置:抽屉约占屏高 45%,至少露出头部;上面至少留一截地图
-     --sheet-full  展开时上边的位置:屏高 12% */
-@media (max-width: 760px) {
-  .app {
-    height: 100dvh;
-    --safe-t: env(safe-area-inset-top, 0px);
-    --safe-b: env(safe-area-inset-bottom, 0px);
-    --safe-l: env(safe-area-inset-left, 0px);
-    --safe-r: env(safe-area-inset-right, 0px);
-    --row-h: calc(92px + var(--safe-b));
-    --top-room: calc(72px + var(--safe-t));
-    --sheet-half: max(calc(var(--top-room) + 80px), min(calc(100% - var(--row-h) - 200px), calc(55% - var(--row-h))));
-    --sheet-full: min(var(--sheet-half), max(12%, 8px));
-  }
-  /* 上下渐变遮罩:顶栏矮一些,底部一行高一些 */
-  .vignette.top {
-    height: calc(96px + var(--safe-t));
-  }
-  .vignette.bottom {
-    height: calc(var(--row-h) + 64px);
-  }
-
-  /* ---- 顶部:世界名 20px + 缩短的副标;右上"搜索""改写""成书" ---- */
-  .corner-tl {
-    left: calc(16px + var(--safe-l));
-    top: calc(12px + var(--safe-t));
-    gap: 8px;
-    max-width: calc(100% - 200px - var(--safe-l) - var(--safe-r));
-  }
-  .wt-name {
-    font-size: 20px;
-  }
-  .wt-sub {
-    font-size: 12.5px;
-  }
-  .top-actions {
-    right: calc(6px + var(--safe-r));
-    top: calc(8px + var(--safe-t));
-    gap: 0;
-  }
-  .top-actions .map-btn {
-    padding: 10px 10px;
-  }
-
-  /* ---- 顶部提示条:顶栏下面,左右留 12px,最多两行(一行主文字 + 一行小字,或主文字两行) ---- */
-  .toast {
-    left: calc(12px + var(--safe-l));
-    right: calc(12px + var(--safe-r));
-    top: calc(var(--top-room) - 6px);
-    transform: none;
-    width: auto;
-    max-width: none;
-    gap: 10px;
-    padding: 8px 8px 8px 14px;
-    white-space: normal;
-    animation-name: toast-in-narrow;
-  }
-  @keyframes toast-in-narrow {
-    from {
-      opacity: 0;
-      transform: translateY(-6px);
-    }
-  }
-  .toast-text {
-    flex: 1;
-  }
-  .toast-main {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-  }
-  .toast-text:has(.toast-more) .toast-main {
-    -webkit-line-clamp: 1;
-  }
-  .toast-more {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .toast-bar {
-    width: 64px;
-  }
-  .toast-acts {
-    flex-wrap: nowrap;
-  }
-  .toast-act {
-    padding: 7px 12px;
-  }
-  .toast-x {
-    padding: 6px 8px;
-  }
-
-  /* ---- 底部一行:时间轴固定在最底部、全宽,两行(上:播放 · 第 N 年 · 1× / 4× · 图层缩略图;下:轨道) ---- */
-  .bottom-row {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: var(--row-h);
-    min-height: 0;
-    display: block;
-    padding: 4px calc(12px + var(--safe-r)) var(--safe-b) calc(12px + var(--safe-l));
-  }
-  .bottom-tl {
-    display: block;
-  }
-  /* 底部抽屉开着:这一行和抽屉接成一块(实色底) */
-  .app.panel-open .bottom-row {
-    background: var(--panel-solid);
-    border-top: 1px solid var(--line);
-  }
-  /* 图层按钮只放缩略图,在第一行的右端 */
-  .lp {
-    position: absolute;
-    right: calc(8px + var(--safe-r));
-    top: 4px;
-    z-index: 2;
-    margin: 0;
-  }
-  .lp-btn {
-    padding: 3px;
-  }
-  .lp-label {
-    display: none;
-  }
-  .lp-thumb.small {
-    width: 50px;
-    height: 32px;
-  }
-
-  /* 最近事件:只留最新 1 条,在时间轴上方一行 */
-  .app > .recent-ev {
-    left: calc(12px + var(--safe-l));
-    right: calc(12px + var(--safe-r));
-    bottom: calc(var(--row-h) + 4px);
-    max-width: none;
-  }
-  /* 第一次打开的操作提示:最近事件上面 */
-  .first-hint {
-    bottom: calc(var(--row-h) + 36px);
-    font-size: 13px;
-  }
-  /* 右下的地球仪切换、缩放不放(地球仪在图层弹层的投影里,缩放用双指捏合;App 已经不渲染,这里兜底) */
-  .map-controls {
-    display: none;
-  }
-
-  /* ---- 图层与投影 → 底部抽屉(6 张缩略图两行三列) ---- */
-  .lp-pop {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    top: auto;
-    width: auto;
-    max-height: min(82%, 680px);
-    gap: 10px;
-    padding: 0 calc(16px + var(--safe-r)) calc(16px + var(--safe-b)) calc(16px + var(--safe-l));
-    border-bottom: 0;
-    border-radius: var(--r-panel) var(--r-panel) 0 0;
-    background: var(--panel-solid);
-    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.22);
-    overscroll-behavior: contain;
-    animation: sheet-up 0.22s ease-out;
-  }
-  .lp-head {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 30px;
-    margin: 0 -4px -6px;
-    background: var(--panel-solid);
-  }
-  .lp-grip {
-    width: 36px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--line-strong);
-  }
-  .lp-close {
-    position: absolute;
-    right: 0;
-    top: 2px;
-    border: 0;
-    background: transparent;
-    color: var(--ink-2);
-    border-radius: var(--r-btn);
-    padding: 6px 10px;
-    font-size: 14px;
-    line-height: 1;
-  }
-  .lp-layers {
-    gap: 10px;
-  }
-  .lp-layer .lp-thumb {
-    height: 58px;
-  }
-  .lp-proj {
-    padding: 10px 0 8px;
-  }
-  .lp-center input {
-    height: 28px;
-  }
-
-  /* ---- 地球仪:底部抽屉开着时球心上移到抽屉上方看得见的地方正中(和转到选中的国家同时进行);
-     露出来的下面那截用球的底色补上(box-shadow 不被自己的 overflow 裁掉) ---- */
-  .globe {
-    transition: transform 0.6s cubic-bezier(0.33, 1, 0.68, 1);
-    box-shadow: 0 60vh 0 0 var(--globe-bg, transparent);
-  }
-  .app.panel-open .globe {
-    transform: translateY(calc((var(--top-room) + var(--sheet-half)) / 2 - 48%));
-  }
-}
 /* 底部抽屉(面板、图层弹层)从下面升起来 */
 @keyframes sheet-up {
   from {
     opacity: 0;
     transform: translateY(40px);
-  }
-}
-@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
-  .globe {
-    transition: none;
-  }
-  .lp-pop {
-    animation: none;
   }
 }
 /* 手指操作:按钮不闪灰底;地图上长按不弹出系统菜单、不选中文字 */

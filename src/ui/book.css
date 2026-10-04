@@ -487,32 +487,29 @@
   }
 }
 
-/* ---- 窄屏(手机):成书窗口、阅读页全屏;写作进度缩成"搜索""成书"下面的一条小进度条 ---- */
+/* ---- 窄屏(手机):成书窗口、阅读页全屏;写作进度缩成右上按钮左边一个只有细进度条的毛玻璃小块 ---- */
 @media (max-width: 760px) {
   .book-chip {
-    position: absolute;
-    top: calc(100% - 4px);
-    right: 10px;
+    height: 44px;
     margin: 0;
-    width: 92px;
-    max-width: none;
-    padding: 8px 0;
+    max-width: calc(100vw - 92px);
+    padding: 0 14px;
     border: 0;
-    background: transparent;
+    border-radius: 12px;
+    background: var(--panel);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: var(--shadow-panel);
   }
   .book-chip-text {
     display: none;
   }
   .book-chip-bar {
-    width: 100%;
+    width: 56px;
   }
   /* 写完了:一行小字"《某某》已完成 · 打开"(点它打开阅读) */
   .book-chip.done {
     width: auto;
-    max-width: calc(100vw - 24px);
-    padding: 6px 10px;
-    border: 1px solid var(--line);
-    background: var(--panel);
   }
   .book-chip.done .book-chip-text {
     display: block;

@@ -13,7 +13,7 @@
  *   --map-mark 地图上的标记(选中国家国都的圆环)
  *   --ev-war 战争 / --ev-dynasty 改朝 / --ev-found 立国 / --ev-empire 称帝 / --ev-assim 同化
  *   --halo 地图上文字的描边(text-shadow 的值)
- * 另有几项辅助值(--vignette 上下渐变遮罩、--hover-bg 文字按钮悬停底、阴影、字体)。
+ * 另有几项辅助值(--hover-bg 文字按钮悬停底、--field 输入框底、阴影、字体)。
  */
 :root,
 [data-theme='light'] {
@@ -40,7 +40,6 @@
   --map-mark: #d4392b;
   --halo: 0 0 2px rgba(247, 242, 231, 1), 0 0 8px rgba(247, 242, 231, 0.9);
 
-  --vignette: rgba(240, 234, 220, 0.78);
   --hover-bg: rgba(118, 118, 128, 0.12);
   --field: rgba(118, 118, 128, 0.12);
   --ok: #2e9a58;
@@ -71,7 +70,6 @@
   --map-mark: #ff5a4c;
   --halo: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.6);
 
-  --vignette: rgba(8, 8, 8, 0.55);
   --hover-bg: rgba(118, 118, 128, 0.24);
   --field: rgba(118, 118, 128, 0.24);
   --ok: #4fcf83;

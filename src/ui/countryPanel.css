@@ -1285,7 +1285,7 @@
   text-shadow: var(--halo);
 }
 
-/* ---- 窄屏(手机):面板是底部抽屉(Inspector.tsx),从时间轴上面升起;半高 / 展开的位置见 app.css 的 --sheet-half / --sheet-full ---- */
+/* ---- 窄屏(手机):面板是从屏幕底升起的卡片(Inspector.tsx),时间轴胶囊浮在它上面;半屏 / 拉到顶的位置见 phone.css 的 --sheet-half / --sheet-full ---- */
 .sheet-grip {
   display: none;
 }
@@ -1297,19 +1297,21 @@
     width: auto;
     max-width: none;
     top: var(--sheet-half, 50%);
-    bottom: var(--row-h, 92px);
+    bottom: 0;
+    /* 卡片铺到屏幕底:内容和底部按钮让开 iPhone 的横条 */
+    padding-bottom: var(--safe-b, 0px);
     height: auto;
     max-height: none;
     border-bottom: 0;
     border-left: 0;
     border-right: 0;
-    border-radius: var(--r-panel, 4px) var(--r-panel, 4px) 0 0;
-    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.18);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 -6px 24px rgba(0, 0, 0, 0.14);
     transition: top 0.26s cubic-bezier(0.33, 1, 0.68, 1);
     animation: sheet-up 0.26s ease-out;
   }
   .inspector.cpanel.sheet-full {
-    top: var(--sheet-full, 12%);
+    top: var(--sheet-full, 8%);
   }
   /* 手指拖着:跟手,不过渡 */
   .inspector.cpanel.dragging {

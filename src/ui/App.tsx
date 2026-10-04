@@ -51,7 +51,6 @@ import type { Civ } from '../gen/civ/types';
 import { CivLayer } from './CivLayer';
 import { CivTimeline } from './CivTimeline';
 import { EventPins, type WorldToClient } from './EventPins';
-import { RecentEvents } from './RecentEvents';
 import { HistoryBook } from './HistoryBook';
 import { AiSettingsHost } from './AiSettings';
 import { highlightBox, highlightMarks } from '../render/civ/highlight';
@@ -71,6 +70,7 @@ import {
   startCivReplay,
   useChronicle,
   useCivHighlight,
+  useChroniclePick,
   useCivShow,
   useSelection,
   type MapSelection,
@@ -121,10 +121,10 @@ import {
 import { getPolityPick, interventionText, setPickHover, setPolityPick, usePolityPick } from './Interventions';
 import { Inspector } from './Inspector';
 import { TargetLayer } from './TargetPlates';
-import { FLY_MS, NARROW_ROW_H, NARROW_TOP_ROOM, curvedFly, easeOutCubic, flatFly, selectionFocus, selectionKey, sideRoom, type FlyGoal } from './flyTo';
-import { usePanel } from './panelStore';
+import { FLY_MS, curvedFly, easeOutCubic, flatFly, selectionFocus, selectionKey, sideRoom, phoneFree, type FlyGoal } from './flyTo';
+import { setWorldSheet, usePanel } from './panelStore';
 import { useCoarse, useNarrow } from './device';
-import { isDoubleTap, pinchStep, sheetGeometry, type Pt, type Tap } from './gestures';
+import { isDoubleTap, pinchStep, type Pt, type Tap } from './gestures';
 import { pickLabelAt } from './mapPick';
 import { ownersAt } from '../gen/civ/timeline';
 import { interventionOutcome } from '../gen/civ/chronicle';
@@ -132,11 +132,11 @@ import { takeRewriteNote, undoTurn, type RewriteNote } from './rewriteStore';
 import { Globe, getGlobeOn, setGlobeOn, useGlobeOn, type GlobeApi } from './Globe';
 import { setupAi } from '../ai/setup';
 import { ToastBar, clearToast, showToast } from './Toast';
-import { FirstHint, HoverCard, MapBar, MapControls, TopActions, WorldTitle, hintSeen, markHintSeen } from './Corners';
+import { FirstHint, HoverCard, MapBar, MapControls, PhoneButtons, hintSeen, markHintSeen } from './Corners';
 import { Sidebar } from './Sidebar';
-import { LayerPopover, useLayerThumbs } from './LayerPopover';
+import { PhoneSheet } from './PhoneSheet';
+import { useLayerThumbs } from './LayerPopover';
 import { WorldOverview } from './WorldOverview';
-import { openOverview } from './overviewStore';
 import { hoverInfo, probeLines, type HoverInfo } from './hoverInfo';
 import { layerDark, layerDef, layerFromUrl, layerOf, type MapLayer, type Style } from './mapLayers';
 import {
@@ -236,7 +236,7 @@ export function App() {
   const panelUi = usePanel();
   const pickNow = usePolityPick();
   const panelOpen = !!selState.sel && !!civ && !pickNow && !panelUi.run;
-  /** 窄屏(手机):面板是底部抽屉、时间轴两行、弹层是底部抽屉;触屏:没有悬停卡片、右下不放 + −(用双指捏合) */
+  /** 窄屏(手机):底部的世界 / 详情卡片、时间轴胶囊、右上竖排按钮(phone.css);触屏:没有悬停卡片、右下不放 + −(用双指捏合) */
   const narrow = useNarrow();
   const coarse = useCoarse();
   const narrowRef = useRef(narrow);
@@ -328,6 +328,15 @@ export function App() {
   const [shownTerrain, setShownTerrain] = useState<readonly TerrainOp[]>(EMPTY_EDITS.terrain);
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus>({ busy: false });
   const terrainTool = useTerrainTool();
+  // 手机:改地形、回放世界形成都要看地图 —— 拉到顶的世界卡片先收起来(两样都是从卡片里的"地形"那一组点开的)
+  useEffect(() => {
+    if (terrainTool.on || replayOn) setWorldSheet('peek');
+  }, [terrainTool.on, replayOn]);
+  // 点了一条大事(卡片里的"最近大事"、编年史):时间轴跳过去、地图上标出来 —— 世界卡片也先收起
+  const chronPick = useChroniclePick();
+  useEffect(() => {
+    if (chronPick.entry) setWorldSheet('peek');
+  }, [chronPick]);
   // 3D 地球仪(网址 proj=globe,旧链接的 view=globe 也认 / 地图右下角的按钮):主图藏起来,同一套时间轴、详情面板、选中逻辑
   const globeOn = useGlobeOn();
   const globeApi = useRef<GlobeApi | null>(null);
@@ -519,6 +528,8 @@ export function App() {
       const id = ++reqId.current;
       genParams.current = p;
       setProgress({ stage: '准备', pct: 0, seed: p.seed });
+      // 手机:新世界、打开存档都要看地图 —— 拉到顶的世界卡片先收起来
+      setWorldSheet('peek');
       // 改过地形的世界(浏览器里存过 / 正要打开的存档)直接带着地形修改生成,不用先生成原样再重新生成一遍
       const terrain = terrainHint(p);
       genTerrain.current = terrain;
@@ -806,6 +817,8 @@ export function App() {
    * 正在看的就是这个世界:直接套上;正在生成的就是这个世界:等它生成完(readyRef)
    */
   const openSave = (save: SaveFile, warnings: string[], from: 'file' | 'link') => {
+    // 手机:读档 / 打开链接后要看地图(同一个世界不重新生成,generate 里那次收起管不到)
+    setWorldSheet('peek');
     const id = worldKey(save.params);
     pendingRef.current = { id, save, warnings, from };
     const last = lastReady.current;
@@ -1047,10 +1060,10 @@ export function App() {
   const wrapW = data ? wrapOf(data.world) : 0;
   setTerrainWrap(wrapW);
   /**
-   * 窄屏底部抽屉开着:抽屉(半高)和时间轴盖住的那一截。地图可以往上推进这一截(见 mapWrap.ts 的 StageBox.padB),
-   * 下半截的国家也能飞到抽屉上方看得见的地方;抽屉关上后慢慢回到原来的范围
+   * 窄屏底部被卡片和时间轴胶囊盖住的那一截:没选东西时是收起的世界卡片 + 胶囊,详情卡片开着时是半高的卡片 + 胶囊。
+   * 地图可以往上推进这一截(见 mapWrap.ts 的 StageBox.padB),下半截的国家也能飞到上方看得见的地方;卡片收回去后慢慢回到原来的范围
    */
-  const padB = narrow && panelOpen && stageSize.h ? Math.max(0, stageSize.h - sheetGeometry(stageSize.h, NARROW_ROW_H, NARROW_TOP_ROOM).halfTop) : 0;
+  const padB = !narrow || !stageSize.h ? 0 : Math.max(0, stageSize.h - phoneFree(stageSize.h, panelOpen)[1]);
   const geo = useRef<{ wrap: number; bw: number; bh: number; W: number; H: number; padB: number }>({ wrap: 0, bw: 0, bh: 0, W: 1, H: 1, padB: 0 });
   geo.current = { wrap: wrapW, bw: box.w, bh: box.h, W: data?.world.width ?? 1, H: data?.world.height ?? 1, padB };
   const curvedRef = useRef(curved);
@@ -1110,7 +1123,7 @@ export function App() {
     setView((v) => (c === null ? clampSphere(v, sb) : viewCentredAt(v, sb, wrapW, c)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wrapW, sb.sw, sb.sh, sb.bw, sb.bh]);
-  // 窄屏底部抽屉关上(地图不能再往上推进抽屉那一截了):推上去的地图约 0.3 秒回到范围里
+  // 窄屏详情卡片关上(地图不能再往上推进卡片那一截了):推上去的地图约 0.3 秒回到范围里
   const lastPadB = useRef(padB);
   useEffect(() => {
     const was = lastPadB.current;
@@ -1316,11 +1329,11 @@ export function App() {
   const hlStamp = hl?.stamp;
   /**
    * 编年史跳转时"看得见的地方"的上、下和目标放在哪个高度(舞台坐标):上面留出世界名、提示条,下面留出时间轴;
-   * 窄屏:两行的时间轴更高,底部抽屉开着时是抽屉上方那一截
+   * 窄屏:让出底部的卡片和时间轴胶囊(详情卡片开着时是它上方那一截)
    */
   const jumpBand = (H: number): [number, number, number] => {
     if (!narrow) return [80, H - 110, (H - 16) / 2];
-    const [t, b] = panelOpen ? sheetGeometry(H, NARROW_ROW_H, NARROW_TOP_ROOM).free : [NARROW_TOP_ROOM, H - NARROW_ROW_H - 36];
+    const [t, b] = phoneFree(H, panelOpen);
     return [t + 8, b - 16, (t + b) / 2];
   };
   /**
@@ -1404,7 +1417,7 @@ export function App() {
     const x1 = sx(b[2]);
     const y0 = sy(b[1]);
     const y1 = sy(b[3]);
-    // 上面留出世界名、提示条,下面留出时间轴(窄屏:底部抽屉开着时是抽屉上方)
+    // 上面留出提示条,下面留出时间轴(窄屏:底部卡片和时间轴胶囊上方)
     const [bandT, bandB, midY] = jumpBand(H);
     // 宽屏左边被侧栏卡片挡住的那一截不算看得见,平移到卡片右边那一块的正中
     const L = sideRoom(W);
@@ -1986,7 +1999,7 @@ export function App() {
   const civReady = !!civ && civ.viable;
   /** 正在重推 / 按新地形重新生成 / 生成新世界:改写框里这时发不了话、提议也不能执行 */
   const rewriteBusy = !!resim || terrainStatus.busy || !!progress;
-  // 详情面板只挂一份:挂进一个自己建的容器,窄屏把容器放在底部抽屉的位置,宽屏放进侧栏(放哪儿由那边的空位 ref 决定)。
+  // 详情面板只挂一份:挂进一个自己建的容器,窄屏把容器放在底部卡片的位置,宽屏放进侧栏(放哪儿由那边的空位 ref 决定)。
   // 窗口跨过窄屏断点(比如手机横过来)时面板不重新挂,正在干预的那几步、填了一半的年份和名字都留着
   const inspectorHost = useMemo(() => {
     const el = document.createElement('div');
@@ -2004,7 +2017,7 @@ export function App() {
   const screenStyle: CSSProperties = { clipPath: screenClip(view, sb, wrapW), display: globeOn ? 'none' : undefined };
   return (
     <div
-      className={`app${narrow ? '' : ' has-side'}${chron.open ? ' chron-open' : ''}${panelOpen ? ' panel-open' : ''}${narrow && panelOpen && panelUi.sheet === 'full' ? ' sheet-full' : ''}${picking ? ' picking' : ''}${globeOn ? ' globe-on' : ''}${data ? '' : ' booting'}`}
+      className={`app${narrow ? ' phone' : ' has-side'}${chron.open ? ' chron-open' : ''}${panelOpen ? ' panel-open' : ''}${narrow && panelOpen && panelUi.sheet === 'full' ? ' sheet-full' : ''}${narrow && !selState.sel && panelUi.world === 'full' ? ' world-full' : ''}${narrow && panelUi.drag ? ' sheet-drag' : ''}${narrow && selState.sel && !panelOpen ? ' sheet-away' : ''}${picking ? ' picking' : ''}${globeOn ? ' globe-on' : ''}${data ? '' : ' booting'}`}
       data-theme={theme}
       data-layer={mapLayer}
       onDragOver={onDragOver}
@@ -2080,12 +2093,6 @@ export function App() {
       {/* 选干预目标 / 推演中:压暗地图、浮出名牌;选中国家:国都的圆环(TargetPlates.tsx) */}
       {data && <TargetLayer civ={civ} world={data.world} toClient={globeOn ? globeToClient : worldToClient} resim={resim} generating={!!progress} labelAt={labelAt} />}
 
-      {/* 窄屏:上下两条和图层同色的渐变遮罩(文字压在地图上也读得清);左下最近 1 条事件,在时间轴上方一行(底部抽屉打开时藏起来)。
-          宽屏的界面都在侧栏和毛玻璃按钮上,不用遮罩;最近大事在侧栏里 */}
-      {narrow && <div className="vignette top" aria-hidden="true" />}
-      {narrow && <div className="vignette bottom" aria-hidden="true" />}
-      {narrow && data && <RecentEvents civ={civ} hidden={replayOn || panelOpen} rows={1} />}
-
       {replayOn && replay && (
         <div className="caption">
           <div className="big">{replay.idx === replay.frames.length - 1 ? '今天' : `约 ${replay.mya[replay.idx]} 百万年前`}</div>
@@ -2098,12 +2105,31 @@ export function App() {
 
       {narrow ? (
         <>
-          {/* 窄屏左上:世界名 + 副标(点一下打开世界概览);右上:搜索、改写(用一句话让 AI 改世界)、成书 */}
-          <div className="corner-tl">
-            <WorldTitle seed={data ? data.world.params.seed : null} civ={civ} onOpen={() => openOverview('countries')} />
-            {style === 'data' && !terrainTool.on && <Legend layer={layer} />}
-          </div>
-          <TopActions canWrite={civReady} civ={civ} world={data?.world ?? null} busy={rewriteBusy} />
+          {/* 手机:底部的世界卡片(没选东西时;选中了东西换成详情卡片)、右上竖排的毛玻璃按钮(图层、地球);数据图层的图例在左上。
+              界面都在卡片和毛玻璃按钮上,地图上不再压字、不用渐变遮罩;最近大事在世界卡片拉到顶时的列表里 */}
+          {!selState.sel && (
+            <PhoneSheet
+              data={data}
+              civ={civ}
+              raw={rawCiv}
+              params={params}
+              onRandomSeed={randomSeed}
+              generating={!!progress}
+              replay={{ on: replayOn, ready: !!replay }}
+              onReplay={startReplay}
+              terrainDisabled={replayOn || (!!progress && !terrainStatus.busy)}
+              onOpenText={openText}
+              onOpenStored={openStored}
+              rewriteBusy={rewriteBusy}
+              exp={{ data, civ, style, layer }}
+            />
+          )}
+          <PhoneButtons layers={{ layer: mapLayer, civ, onLayer: applyLayer, thumbs, requestThumbs, disabled: !data }} globeOn={globeOn} onToggleGlobe={toggleGlobe} />
+          {style === 'data' && !terrainTool.on && (
+            <div className="corner-tl">
+              <Legend layer={layer} />
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -2138,15 +2164,14 @@ export function App() {
       {/* 顶部居中:提示条(同一时间只有一条);改地形时上面是工具条,提示条挪到它下面 */}
       <ToastBar />
       {data && <TerrainBar disabled={!!progress && !terrainStatus.busy} />}
-      {/* 右下(时间轴上方):地球 / 平面、放大、缩小。触屏不放 + −(用双指捏合);窄屏整个不放(地球仪在图层弹层的投影里) */}
+      {/* 右下(时间轴上方):地球 / 平面、放大、缩小。触屏不放 + −(用双指捏合);窄屏整个不放(地球在右上竖排的按钮里) */}
       <MapControls globeOn={globeOn} onToggleGlobe={toggleGlobe} onZoom={zoomButton} shifted={false} hidden={!data || narrow} zoom={!coarse} />
       <FirstHint show={hintOn && !!data && !terrainTool.on} touch={coarse} />
-      {/* 底部:时间轴(窄屏右边还有图层与投影按钮) */}
+      {/* 底部:时间轴(宽屏是卡片右边那一块底下的胶囊;手机是浮在底部卡片上面的胶囊) */}
       <div className="bottom-row">
         <div className="bottom-tl">{data && <CivTimeline civ={civ} hidden={replayOn} dock="inline" />}</div>
-        {narrow && <LayerPopover layer={mapLayer} civ={civ} onLayer={applyLayer} thumbs={thumbs} requestThumbs={requestThumbs} disabled={!data} />}
       </div>
-      {/* 详情面板:窄屏是底部抽屉(在这儿的空位里),宽屏在侧栏里(见上面的 inspectorHost) */}
+      {/* 详情面板:窄屏是从屏幕底升起的卡片(在这儿的空位里),宽屏在侧栏里(见上面的 inspectorHost) */}
       {data && createPortal(<Inspector civ={civ} raw={rawCiv} raster={data.raster} world={data.world} />, inspectorHost)}
       {narrow && <div className="inspector-slot" ref={inspectorSlot} />}
       {hover && <HoverCard info={hover.info} x={hover.x} y={hover.y} />}

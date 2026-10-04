@@ -209,18 +209,25 @@ export function briefError(e: string): string {
 // ---------------------------------------------------------------------------
 // 存不下时的提示(顶部提示条,来源 'storage':不和读档结果的 'save' 互相顶掉)
 
-/** "存成文件"(SaveMenu 挂上;提示条上的按钮调它) */
-let fileSaver: (() => void) | null = null;
-export function setFileSaver(f: (() => void) | null) {
-  fileSaver = f;
+/**
+ * "存成文件"(提示条上的按钮调它):每个挂着的 SaveMenu 登记一次、卸下时撤掉自己那一次,
+ * 用最后登记的那个 —— 同时挂着几个存档菜单(手机的世界卡片和概览)时,卸下其中一个不影响别的
+ */
+const fileSavers: (() => void)[] = [];
+export function addFileSaver(f: () => void): () => void {
+  fileSavers.push(f);
+  return () => {
+    const i = fileSavers.lastIndexOf(f);
+    if (i >= 0) fileSavers.splice(i, 1);
+  };
 }
 function saveFileAction(): ToastAction | undefined {
-  if (!fileSaver) return undefined;
+  if (!fileSavers.length) return undefined;
   return {
     label: '存成文件',
     onClick: () => {
       clearToast('storage');
-      fileSaver?.();
+      fileSavers[fileSavers.length - 1]?.();
     },
   };
 }

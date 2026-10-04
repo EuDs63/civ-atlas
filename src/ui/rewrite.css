@@ -1,7 +1,4 @@
-/* 右上"改写"弹出的框(Rewrite.tsx):宽 400,在右上按钮下面、右对齐;样子同搜索框。开着时压在右侧国家面板上面 */
-.top-actions.rewrite-on {
-  z-index: 8;
-}
+/* 用一句话改写世界的框(Rewrite.tsx):宽 400;宽屏浮在侧栏卡片右边(sidebar.css),手机在屏幕上方(phone.css) */
 .rw-box {
   position: absolute;
   top: calc(100% + 8px);
@@ -263,17 +260,8 @@
   opacity: 0.8;
 }
 
-/* 窄屏(手机):全宽展开在顶栏下方(同搜索框);输入框 16px(iOS 点进去不自动放大页面) */
+/* 窄屏(手机):框在屏幕上方(位置见 phone.css);输入框 16px(iOS 点进去不自动放大页面) */
 @media (max-width: 760px) {
-  .rw-box {
-    position: fixed;
-    left: calc(12px + var(--safe-l, 0px));
-    right: calc(12px + var(--safe-r, 0px));
-    top: calc(var(--top-room, 72px) - 6px);
-    width: auto;
-    max-width: none;
-    max-height: calc(100% - var(--top-room, 72px) - var(--row-h, 92px));
-  }
   .rw-input textarea {
     font-size: 16px;
   }

@@ -3,102 +3,24 @@
  *
  *   右上 MapBar       图层分段按钮(政区 / 民族 / 地形 / 实景 / 更多图层)、导出、编年史;写史书时最前面是写作进度
  *   右下 MapControls  "地球 / 平面"切换、放大、缩小(触屏不放 + −,窄屏整个不放)
- *   窄屏(手机)还用这两样:
- *   左上 WorldTitle   世界名 + 一行副标"种子 7，12 国",点一下打开概览
- *   右上 TopActions   "搜索""改写""成书";写史书时进度缩成按钮下面的一条小进度条;搜索框、改写框全宽展开在顶栏下方。
- *                     改写 = 用一句话让 AI 改世界(Rewrite.tsx;没长出文明的世界也能用,只能改地形),和搜索框同一时间只开一个
- *                     (宽屏的改写在侧栏"更多"里,见 Sidebar.tsx)
+ *   窄屏(手机):
+ *   右上 PhoneButtons 竖排的毛玻璃按钮:图层与投影(弹层从底部升起)、地球 / 平面;写史书时进度条在它们左边。
+ *                     世界名、搜索、存档、改写、成书都在底部的世界卡片里(PhoneSheet.tsx)
  *   底部 FirstHint    第一次打开时的一行操作提示,第一次拖动 / 缩放 / 点击之后不再出现(触屏换成"双指缩放"的说法)
  *   跟随鼠标 HoverCard 悬停小卡片(内容见 hoverInfo.ts)
  * 地图上的文字按钮不加底、只带描边(--halo),悬停出现浅灰底。
  */
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
-import type { World } from '../gen/world';
-import { polityAlive } from '../gen/civ/growth';
-import { useCivTime } from './civView';
-import { useEdits } from './editsStore';
 import { currentWorld, useSavesVersion } from './saveStore';
-import { openHistoryBook } from './HistoryBook';
 import { bookProgress, bookTitleText, openBookReader, useBook } from './bookStore';
-import { SearchBox } from './Search';
-import { RewriteBox } from './Rewrite';
 import type { HoverInfo } from './hoverInfo';
-import { useNarrow } from './device';
 import { Icon } from './icons';
 import { LayerPopover, type LayerPopoverProps } from './LayerPopover';
 import { ExportMenu, type ExportMenuProps } from './ExportMenu';
 import { openOverview } from './overviewStore';
 import { layerDef, type MapLayer } from './mapLayers';
 import './book.css';
-
-export function WorldTitle({ seed, civ, onOpen }: { seed: number | null; civ: Civ | null; onOpen: () => void }) {
-  useSavesVersion();
-  const edits = useEdits();
-  const t = useCivTime();
-  const title = currentWorld()?.title;
-  const year = civ ? Math.floor(Math.min(civ.endYear, Math.max(0, t.year ?? civ.endYear))) : 0;
-  const alive = civ && civ.viable ? civ.polities.filter((p) => polityAlive(p, year)).length : 0;
-  const n = edits.interventions.length;
-  const narrow = useNarrow();
-  // 窄屏放不下一整行:只留种子、国家数(干预数在概览里)
-  const parts = narrow
-    ? [seed !== null ? `种子 ${seed}` : '正在生成', civ ? (civ.viable ? `${alive} 国` : '没有文明') : null].filter(Boolean)
-    : [seed !== null ? `种子 ${seed}` : '正在生成', civ ? (civ.viable ? `现存 ${alive} 国` : '没有文明') : null, n ? `干预了 ${n} 处` : null].filter(Boolean);
-  return (
-    <button className="world-title" data-act="overview" onClick={onOpen} onPointerDown={(e) => e.stopPropagation()}>
-      <span className="wt-name">{title || '未命名世界'}</span>
-      <span className="wt-sub">
-        {parts.join('，')} <span className="wt-more">{narrow ? '概览 ›' : '查看概览 ›'}</span>
-      </span>
-    </button>
-  );
-}
-
-export function TopActions({ canWrite, civ, world, busy = false }: { canWrite: boolean; civ?: Civ | null; world?: World | null; busy?: boolean }) {
-  const [open, setOpen] = useState<'search' | 'rewrite' | null>(null);
-  const searchBtn = useRef<HTMLButtonElement>(null);
-  const rewriteBtn = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => setOpen(null), []);
-  const canSearch = !!civ && civ.viable;
-  // 改写不要求有文明:没长出文明的世界也能改地形
-  const canRewrite = !!civ && !!world;
-  const toggle = (k: 'search' | 'rewrite') => setOpen((o) => (o === k ? null : k));
-  return (
-    <div
-      className={`top-actions${open === 'search' ? ' search-on' : open === 'rewrite' ? ' rewrite-on' : ''}`}
-      onPointerDown={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-    >
-      <BookChip />
-      <button
-        ref={searchBtn}
-        className={`map-btn${open === 'search' ? ' on' : ''}`}
-        data-act="search"
-        disabled={!canSearch}
-        onClick={() => toggle('search')}
-        title="按名字找国家、城市、民族、山河"
-      >
-        搜索
-      </button>
-      <button
-        ref={rewriteBtn}
-        className={`map-btn${open === 'rewrite' ? ' on' : ''}`}
-        data-act="rewrite"
-        disabled={!canRewrite}
-        onClick={() => toggle('rewrite')}
-        title="用一句话告诉 AI 想怎么改这个世界"
-      >
-        改写
-      </button>
-      <button className="map-btn" data-act="book" disabled={!canWrite} onClick={() => openHistoryBook()} title="用 AI 把推演出来的历史写成史书">
-        成书
-      </button>
-      {open === 'search' && canSearch && <SearchBox civ={civ!} onClose={close} anchor={searchBtn} />}
-      {open === 'rewrite' && canRewrite && <RewriteBox civ={civ!} world={world!} busy={busy} onClose={close} anchor={rewriteBtn} />}
-    </div>
-  );
-}
 
 /** 右上图层分段按钮里直接列出的几个图层(其余的在"更多图层"里) */
 const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'realistic'];
@@ -155,6 +77,29 @@ function BookChip() {
         <span style={{ width: `${pct}%` }} />
       </span>
     </button>
+  );
+}
+
+/** 手机右上:竖排的毛玻璃按钮(图层与投影、地球 / 平面);写史书时进度条在它们左边 */
+export function PhoneButtons({ layers, globeOn, onToggleGlobe }: { layers: LayerPopoverProps; globeOn: boolean; onToggleGlobe: () => void }) {
+  const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
+  return (
+    <div className="phone-btns" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
+      <BookChip />
+      <div className="pb-group">
+        <LayerPopover {...layers} trigger="icon" />
+        <button
+          className={`pb-btn globe-toggle${globeOn ? ' on' : ''}`}
+          data-act="globe"
+          disabled={layers.disabled}
+          onClick={onToggleGlobe}
+          aria-label={globeOn ? '回到平面地图' : '显示成可以转动的地球仪'}
+          title={globeOn ? '回到平面地图' : '显示成可以转动的地球仪'}
+        >
+          <Icon name={globeOn ? 'map' : 'globe'} size={19} />
+        </button>
+      </div>
+    </div>
   );
 }
 

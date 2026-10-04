@@ -1,11 +1,11 @@
 /**
- * 底部一行右端的"图层与投影"按钮(一张小缩略图 + "政区 · 等距圆柱"),点开弹层:
+ * "图层与投影"按钮(宽屏是右上分段按钮的最后一段"更多图层",手机是右上竖排的图层图标),点开弹层:
  *   图层:六张缩略图(政区、民族、地形、生态、高程、实景)+ 一行小字按钮(板块、气温、降水)
  *         + 一行叠加开关(地名、宜居度、州、城址、道路;CivPanel.tsx 的 CivToggles);
  *         选中"民族"时下面是紧凑的民族色块列表(CultureLegend)
  *   投影:ProjectionSection(六种投影、中央经线滑条、经纬网)
  * 点图层就换(弹层收起);点叠加开关不收起;点外面(包括旁边的按钮)、Esc 收起。
- * 窄屏(手机):按钮只放缩略图,弹层是从底部升起的抽屉(右上 ✕ 收起);"地球仪 / 平面地图"就在投影里。
+ * 窄屏(手机):弹层是从底部升起的抽屉(右上 ✕ 收起)。
  *
  * 缩略图是当前世界真实画出来的小图:App 给 baseCanvas(画风键)取整张底图(画过的直接从缓存拿,没画过的画一张放进缓存),
  * 政区 / 民族再叠上文明底图,缩成小图存成 dataURL。当前图层的一张在世界出来后就做;其余的等弹层第一次打开时
@@ -17,6 +17,7 @@ import type { Raster } from '../gen/raster';
 import type { Civ } from '../gen/civ/types';
 import { CIV_SHOW_OFF, drawCivOverlay } from '../render/civ/overlay';
 import { MAP_LAYERS, layerDef, type MapLayer } from './mapLayers';
+import { Icon } from './icons';
 import { ProjectionSection, projectionName } from './ProjectionPanel';
 import { useProjection } from './projection';
 import { getCivTime } from './civView';
@@ -149,15 +150,15 @@ export interface LayerPopoverProps {
   requestThumbs: (ids: MapLayer[]) => void;
   disabled?: boolean;
   /**
-   * 按钮的样子:thumb = 小缩略图 + "政区 · 等距圆柱"(窄屏底部那一行);
-   * seg = 一段文字"更多图层"(宽屏右上的分段按钮最后一段;当前图层不在前几段里时写当前图层名)
+   * 按钮的样子:seg = 一段文字"更多图层"(宽屏右上的分段按钮最后一段;当前图层不在前几段里时写当前图层名);
+   * icon = 只有一个图层图标(手机右上竖排的毛玻璃按钮)
    */
-  trigger?: 'thumb' | 'seg';
+  trigger?: 'seg' | 'icon';
   /** trigger = seg 时:当前图层在不在前几段里(在 = 这一段不亮) */
   inSeg?: boolean;
 }
 
-export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs, disabled, trigger = 'thumb', inSeg = true }: LayerPopoverProps) {
+export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs, disabled, trigger = 'icon', inSeg = true }: LayerPopoverProps) {
   const [open, setOpen] = useState(false);
   const proj = useProjection();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -184,7 +185,7 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
   };
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   return (
-    <div className={`lp${trigger === 'seg' ? ' lp-seg' : ''}`} ref={rootRef} onPointerDown={stop} onDoubleClick={stop}>
+    <div className={`lp ${trigger === 'seg' ? 'lp-seg' : 'lp-icon'}`} ref={rootRef} onPointerDown={stop} onDoubleClick={stop}>
       {trigger === 'seg' ? (
         <button
           className={`seg-btn lp-btn${open ? ' open' : ''}${inSeg ? '' : ' on'}`}
@@ -200,11 +201,16 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
           </svg>
         </button>
       ) : (
-        <button className={`lp-btn map-btn${open ? ' on' : ''}`} data-act="layers" disabled={disabled} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <Thumb src={thumbs[layer]} small />
-          <span className="lp-label">
-            {cur.name}，{projectionName(proj)}
-          </span>
+        <button
+          className={`pb-btn lp-btn${open ? ' on' : ''}`}
+          data-act="layers"
+          disabled={disabled}
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={`图层与投影(现在是${cur.name}，${projectionName(proj)})`}
+          title="图层与投影"
+        >
+          <Icon name="layers" size={19} />
         </button>
       )}
       {open && (
@@ -243,6 +249,6 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
   );
 }
 
-function Thumb({ src, small }: { src?: string; small?: boolean }) {
-  return <span className={`lp-thumb${small ? ' small' : ''}${src ? '' : ' empty'}`} style={src ? { backgroundImage: `url(${src})` } : undefined} aria-hidden="true" />;
+function Thumb({ src }: { src?: string }) {
+  return <span className={`lp-thumb${src ? '' : ' empty'}`} style={src ? { backgroundImage: `url(${src})` } : undefined} aria-hidden="true" />;
 }

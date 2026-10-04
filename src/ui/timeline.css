@@ -1,5 +1,5 @@
 /*
- * 时间轴与事件:底部时间轴(CivTimeline / TimelineMarks)、左下最近事件(RecentEvents)、地图上的事件标签(EventPins)。
+ * 时间轴与事件:底部时间轴(CivTimeline / TimelineMarks)、地图上的事件标签(EventPins)。
  *
  * 颜色一律用界面主题变量(浅 / 深两套,theme.css 定义):
  *   --ink --ink-2 --panel --panel-solid --line --line-strong --btn --link --accent --accent-hover --void
@@ -10,7 +10,6 @@
  */
 
 .timebar,
-.recent-ev,
 .ev-pins {
   /* 宋体不写 "Noto Serif SC":那个名字是地图文字的子集字体(只有地名用字),纪事里缺的字会一个个换成别的字体 */
   --tb-serif: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', 'SimSun', serif;
@@ -19,9 +18,8 @@
   font-family: var(--tb-sans);
   color: var(--ink, #231c13);
 }
-/* 时间轴、最近事件用系统字体(地图上的事件标签 .ev-pins 照旧用宋体,和地名一个样子) */
-.timebar,
-.recent-ev {
+/* 时间轴用系统字体(地图上的事件标签 .ev-pins 照旧用宋体,和地名一个样子) */
+.timebar {
   --tb-serif: var(--font-sans);
   --tb-sans: var(--font-sans);
 }
@@ -136,8 +134,7 @@
   cursor: pointer;
 }
 .timebar button:focus-visible,
-.tb-track:focus-visible,
-.recent-row:focus-visible {
+.tb-track:focus-visible {
   outline: 1px solid var(--line-strong, rgba(35, 28, 19, 0.4));
   outline-offset: 2px;
 }
@@ -176,8 +173,7 @@
   border-left: 3px solid currentColor;
   border-right: 3px solid currentColor;
 }
-.timebar button:hover,
-.recent-row:hover {
+.timebar button:hover {
   background: rgba(128, 128, 128, 0.16);
 }
 .tb-year {
@@ -363,59 +359,6 @@
 }
 
 
-/* ---- 左下最近事件:最新的在最下面,越旧越淡 ---- */
-.recent-ev {
-  position: absolute;
-  left: 28px;
-  bottom: 86px;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-  max-width: 34vw;
-  text-shadow: var(--tb-halo);
-}
-.stage:has(.timebar.dock-top) .recent-ev {
-  bottom: 18px;
-}
-.recent-row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  max-width: 100%;
-  margin: 0 -6px;
-  padding: 1px 6px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-shadow: inherit;
-  text-align: left;
-  white-space: nowrap;
-  opacity: var(--o, 1);
-  cursor: pointer;
-}
-.recent-row:hover {
-  opacity: 1;
-}
-.recent-year {
-  flex: none;
-  font: 600 13px var(--tb-serif);
-  color: var(--ink-2, #65594a);
-  font-variant-numeric: tabular-nums;
-}
-.recent-row .tb-ev {
-  flex: none;
-}
-.recent-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 14px;
-}
-
 /* ---- 地图上的事件标签 ---- */
 .ev-pins {
   position: absolute;
@@ -469,70 +412,8 @@
   font: 600 15px/1.4 var(--tb-serif);
 }
 
-/* ---- 窄屏(手机):时间轴轨道单独一行 ---- */
-@container stage (max-width: 600px) {
-  .civ-timeline.timebar {
-    flex-wrap: wrap;
-    height: auto;
-    row-gap: 0;
-    gap: 10px;
-  }
-  .civ-timeline.timebar.dock-bottom,
-  .civ-timeline.timebar.dock-top {
-    left: 12px;
-    right: 12px;
-  }
-  .tb-year {
-    min-width: 0;
-    font-size: 18px;
-  }
-  .tb-track {
-    order: 9;
-    flex-basis: 100%;
-  }
-  .recent-ev {
-    left: 12px;
-    bottom: 100px;
-    max-width: calc(100% - 24px);
-  }
-}
-
-/* ---- 手机布局(窄屏 ≤ 760px):时间轴固定在最底部、两行 —— 上:播放 · 第 N 年 · 1× / 4×(右端是图层按钮,见 app.css);
-   下:整条轨道(高 44,手指好拖;菱形和"令"照样显示) ---- */
+/* ---- 手机布局(窄屏 ≤ 760px;时间轴胶囊的样子在 phone.css):地图上的事件标签不比屏幕宽(正文折行) ---- */
 @media (max-width: 760px) {
-  .civ-timeline.timebar {
-    flex-wrap: wrap;
-    align-content: flex-start;
-    height: auto;
-    gap: 0 12px;
-  }
-  button.tb-play {
-    width: 36px;
-    height: 36px;
-  }
-  .tb-year {
-    min-width: 0;
-    font-size: 19px;
-  }
-  .tb-speed button {
-    padding: 7px 10px;
-  }
-  .tb-track {
-    order: 9;
-    flex-basis: 100%;
-    height: 44px;
-    margin-top: 2px;
-  }
-  /* 贴着轨道右端的"令":字挂到红线左边(轨道一直铺到屏幕边,挂右边会出屏幕) */
-  .tb-order.end b {
-    left: auto;
-    right: 3px;
-  }
-  /* 最近事件只有一行:放得下就整条显示 */
-  .recent-row {
-    max-width: 100%;
-  }
-  /* 地图上的事件标签:卡片不比屏幕宽(正文折行) */
   .ev-card {
     max-width: calc(100vw - 64px);
   }

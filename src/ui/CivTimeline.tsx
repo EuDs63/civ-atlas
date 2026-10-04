@@ -1,5 +1,6 @@
 /**
  * 底部时间轴:播放 / 暂停、"第 N 年"、1× / 4×、时间轴(刻度 + 事件菱形 + 干预"令" + 播放头)。
+ * 窄屏(手机)整条排成一行,1× / 4× 并成一个按钮(点一下换另一档)。
  * 编年史在世界概览里(国家面板"相关事件 · 全部 ›"也能到),时间轴上不另放按钮。
  *
  * - 打开网页、第一个世界显示出来时,从第 2600 年(结束年份前 400 年)起按 1× 自动播放;放到结束年份停下,
@@ -30,6 +31,7 @@ import {
   useCivTime,
 } from './civView';
 import { TimelineMarks } from './TimelineMarks';
+import { useNarrow } from './device';
 import { PLAY_RATE, STORY_SECONDS, replayStart } from './timelineLayout';
 import './timeline.css';
 
@@ -43,6 +45,7 @@ export interface CivTimelineProps {
 
 export function CivTimeline({ civ, hidden, dock = 'bottom' }: CivTimelineProps) {
   const t = useCivTime();
+  const narrow = useNarrow();
   const chron = useChronicle();
   const has = !!civ && civ.viable && civ.cultures.length > 0;
   const end = civ?.endYear ?? 0;
@@ -137,13 +140,19 @@ export function CivTimeline({ civ, hidden, dock = 'bottom' }: CivTimelineProps) 
           <i aria-hidden="true" />
         </button>
         <span className="tb-year">第 {n} 年</span>
-        <span className="tb-speed" role="group" aria-label="播放速度">
-          {([1, 4] as const).map((s) => (
-            <button key={s} className={t.speed === s ? 'on' : ''} aria-pressed={t.speed === s} onClick={() => setCivTime({ speed: s })}>
-              {s}×
-            </button>
-          ))}
-        </span>
+        {narrow ? (
+          <button className="tb-speed tb-speed-one" onClick={() => setCivTime({ speed: t.speed === 4 ? 1 : 4 })} aria-label={`播放速度 ${t.speed}×,点一下换成 ${t.speed === 4 ? 1 : 4}×`}>
+            {t.speed}×
+          </button>
+        ) : (
+          <span className="tb-speed" role="group" aria-label="播放速度">
+            {([1, 4] as const).map((s) => (
+              <button key={s} className={t.speed === s ? 'on' : ''} aria-pressed={t.speed === s} onClick={() => setCivTime({ speed: s })}>
+                {s}×
+              </button>
+            ))}
+          </span>
+        )}
         <TimelineMarks entries={marks} end={end} dock={dock} year={n} />
       </div>
     </>

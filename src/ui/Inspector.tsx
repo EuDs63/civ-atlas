@@ -10,9 +10,10 @@
  * 四种面板用同一套零件(panelParts.tsx):顶部、三格数字、色条、小柱图、事件列表、底部按钮。
  * 面板里的名字可以点,点了就选中那个国家 / 城 / 州。在地图上选干预目标、下了令正在推演时,面板先藏起来(状态留着)。
  *
- * 窄屏(手机,≤ 760px):面板是底部抽屉,从时间轴上面升起。默认半高(约屏高 45%:露出头部、三格数字和下一块的开头),
- * 顶上有拖动条:往上拖或点拖动条 → 展开(上边到屏高 12%);往下拖到底或点 ✕ → 关掉;从展开往下拖 → 回到半高。
- * 头部也能拖。内容在抽屉里滚动,底部按钮固定在抽屉底部。换了选中的东西回到半高;进干预页时展开。
+ * 窄屏(手机,≤ 760px):面板是从屏幕底升起的卡片(盖住没选东西时的世界卡片),时间轴胶囊浮在它上面。
+ * 默认半高(约屏高一半:露出头部、一排按钮和概况的开头),顶上有拖动条:往上拖或点拖动条 → 展开(上边到屏高 8%,胶囊藏起来);
+ * 往下拖到底或点 ✕ → 关掉;从展开往下拖 → 回到半高。头部也能拖。内容在卡片里滚动,底部按钮固定在卡片底部。
+ * 换了选中的东西回到半高;进干预页时展开。
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { Civ } from '../gen/civ/types';
@@ -26,11 +27,11 @@ import { CountryPanel } from './CountryPanel';
 import { CityPanel } from './CityPanel';
 import { PlacePanel } from './PlacePanel';
 import { RegionPanel } from './RegionPanel';
-import { setPanelTab, setSheet, usePanel } from './panelStore';
+import { setPanelTab, setSheet, setSheetDrag, usePanel } from './panelStore';
 import { ownersOf } from './panelData';
-import { NARROW_TOP_ROOM, selectionKey } from './flyTo';
+import { phoneSheet, selectionKey } from './flyTo';
 import { useNarrow } from './device';
-import { sheetGeometry, sheetSnap, type SheetSnap } from './gestures';
+import { VELOCITY_MS, releaseVelocity, sheetSnap, type SheetSnap } from './gestures';
 import './countryPanel.css';
 
 /** 最近一次画面板时的历史(冒烟检查、截图挑例子用) */
@@ -118,12 +119,10 @@ export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: C
 // ---------------------------------------------------------------------------
 // 窄屏的底部抽屉:拖动条(和头部)上下拖
 
-/** 抽屉现在的几何(和 app.css 窄屏的 --sheet-half / --sheet-full 同一个算法;底部一行的高度按抽屉自己的 bottom 量) */
+/** 卡片现在的几何(和 phone.css 的 --sheet-half / --sheet-full 同一个算法) */
 function sheetNow(el: HTMLElement) {
   const app = el.offsetParent as HTMLElement | null;
-  const H = app?.clientHeight ?? window.innerHeight;
-  const rowH = parseFloat(getComputedStyle(el).bottom) || 0;
-  return sheetGeometry(H, rowH, NARROW_TOP_ROOM);
+  return phoneSheet(app?.clientHeight ?? window.innerHeight);
 }
 
 function useSheetDrag(narrow: boolean, sheet: SheetSnap) {
@@ -135,6 +134,7 @@ function useSheetDrag(narrow: boolean, sheet: SheetSnap) {
   const press = useRef<{ id: number; y0: number; top0: number; from: SheetSnap; moved: boolean; samples: { y: number; t: number }[] } | null>(null);
   const closeTimer = useRef(0);
   const reset = () => {
+    if (press.current?.moved) setSheetDrag(false);
     press.current = null;
     window.clearTimeout(closeTimer.current);
     setTop(null);
@@ -156,6 +156,7 @@ function useSheetDrag(narrow: boolean, sheet: SheetSnap) {
     if (!p.moved) {
       if (Math.abs(dy) < 6) return;
       p.moved = true;
+      setSheetDrag(true);
       // 拖起来以后抽屉接着收这根手指 / 鼠标(拖出抽屉也认);松手时头部的按钮不再算点到
       try {
         el.setPointerCapture(e.pointerId);
@@ -165,7 +166,7 @@ function useSheetDrag(narrow: boolean, sheet: SheetSnap) {
     }
     const now = performance.now();
     p.samples.push({ y: e.clientY, t: now });
-    while (p.samples.length > 2 && now - p.samples[0].t > 120) p.samples.shift();
+    while (p.samples.length > 2 && now - p.samples[0].t > VELOCITY_MS) p.samples.shift();
     const g = sheetNow(el);
     setTop(Math.max(g.fullTop - 24, Math.min(g.bottom - 48, p.top0 + dy)));
   };
@@ -175,9 +176,8 @@ function useSheetDrag(narrow: boolean, sheet: SheetSnap) {
     if (!p || p.id !== e.pointerId || !el) return;
     press.current = null;
     if (!p.moved) return;
-    const a = p.samples[0];
-    const b = p.samples[p.samples.length - 1];
-    const vy = b.t > a.t ? (b.y - a.y) / (b.t - a.t) : 0;
+    setSheetDrag(false);
+    const vy = releaseVelocity(p.samples, e.clientY, performance.now());
     const g = sheetNow(el);
     const snap = sheetSnap(p.from, Math.max(g.fullTop - 24, Math.min(g.bottom - 48, p.top0 + e.clientY - p.y0)), vy, g);
     if (snap === 'close') {

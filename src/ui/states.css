@@ -3,12 +3,12 @@
  */
 
 /* 首次打开:世界生成出来之前只有和图层同色的底(--void)+ 顶部提示条的进度;
-   四角的字、右上图层按钮、右下按钮、底部一行先藏着(占着位置,不跳动),世界好了一起淡入;宽屏左边的侧栏一直在 */
-.app.booting > :is(.corner-tl, .top-actions, .map-bar, .bottom-row, .map-controls, .first-hint, .recent-ev) {
+   左上图例、右上的按钮、右下按钮、底部一行先藏着(占着位置,不跳动),世界好了一起淡入;宽屏左边的侧栏一直在 */
+.app.booting > :is(.corner-tl, .map-bar, .phone-btns, .bottom-row, .map-controls, .first-hint) {
   visibility: hidden;
   opacity: 0;
 }
-.app:not(.booting) > :is(.corner-tl, .top-actions, .map-bar, .bottom-row, .map-controls, .recent-ev) {
+.app:not(.booting) > :is(.corner-tl, .map-bar, .phone-btns, .bottom-row, .map-controls) {
   animation: wf-reveal 0.35s ease-out;
 }
 @keyframes wf-reveal {
@@ -32,7 +32,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .app:not(.booting) > :is(.corner-tl, .top-actions, .map-bar, .bottom-row, .map-controls, .recent-ev) {
+  .app:not(.booting) > :is(.corner-tl, .map-bar, .phone-btns, .bottom-row, .map-controls) {
     animation: none;
   }
   .book-chip-bar[aria-valuenow='0'] > span {

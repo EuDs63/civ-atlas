@@ -4,12 +4,14 @@
  *   tab     面板在信息页还是干预页(换了选中的东西回到信息页;选目标取消后回到干预页)
  *   run     从面板下的令正在推演:面板收起,地图压暗、只留本国和对象的名牌,不接受点击;推演完 App 收起面板、从生效年份接着放
  *   fly     让 App 把地图飞到选中的东西('sel')或缩回整张图('home');stamp 每次都不同
- *   sheet   窄屏(手机)上面板是底部抽屉:半高('half',默认)还是展开('full');换了选中的东西回到半高
+ *   sheet   窄屏(手机)上面板是底部卡片:半高('half',默认)还是展开('full');换了选中的东西回到半高
+ *   world   窄屏上没选东西时底部的世界卡片:收起('peek',默认,只露搜索框和世界名一行)还是拉到顶('full')
+ *   drag    窄屏上正在用手指拖底部卡片(这时时间轴胶囊先藏起来,停稳了再出现在卡片上面)
  *
  * 纯状态,不碰 DOM。
  */
 import { useSyncExternalStore } from 'react';
-import type { SheetSnap } from './gestures';
+import type { SheetSnap, WorldSnap } from './gestures';
 
 export type PanelTab = 'info' | 'cmd';
 
@@ -34,9 +36,11 @@ interface PanelState {
   run: IvRun | null;
   fly: FlyRequest | null;
   sheet: SheetSnap;
+  world: WorldSnap;
+  drag: boolean;
 }
 
-let state: PanelState = { tab: 'info', run: null, fly: null, sheet: 'half' };
+let state: PanelState = { tab: 'info', run: null, fly: null, sheet: 'half', world: 'peek', drag: false };
 let stamp = 0;
 const subs = new Set<() => void>();
 const set = (patch: Partial<PanelState>) => {
@@ -77,4 +81,14 @@ export function requestFly(to: FlyRequest['to']) {
 /** 窄屏的底部抽屉:半高 / 展开(宽屏上没有用) */
 export function setSheet(sheet: SheetSnap) {
   if (state.sheet !== sheet) set({ sheet });
+}
+
+/** 窄屏没选东西时的世界卡片:收起 / 拉到顶 */
+export function setWorldSheet(world: WorldSnap) {
+  if (state.world !== world) set({ world });
+}
+
+/** 窄屏:手指正在拖底部卡片 */
+export function setSheetDrag(drag: boolean) {
+  if (state.drag !== drag) set({ drag });
 }

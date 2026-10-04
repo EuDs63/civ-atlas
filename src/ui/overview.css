@@ -869,9 +869,8 @@ button.ov-iv-text:hover {
 .tbar-done:hover {
   background: var(--accent-hover);
 }
-/* 改地形时:左上世界名、右上"成书"让开工具条;提示条挪到工具条下面(生成进度、结果照旧显示) */
-.stage.terrain-on ~ .corner-tl,
-.stage.terrain-on ~ .top-actions {
+/* 改地形时:左上的图例让开工具条;提示条挪到工具条下面(生成进度、结果照旧显示) */
+.stage.terrain-on ~ .corner-tl {
   visibility: hidden;
 }
 .stage.terrain-on ~ .toast {
@@ -916,10 +915,6 @@ button.ov-iv-text:hover {
 }
 
 /* ==== 图层弹层:叠加开关、宜居度 / 道路小图例、民族色块列表(CivPanel.tsx) ==== */
-/* 弹层开着时盖在右侧国家面板上面(面板打开时也能换图层) */
-.bottom-row:has(.lp-pop) {
-  z-index: 8;
-}
 .lp-minor {
   display: flex;
   gap: 2px;

@@ -1,0 +1,607 @@
+/*
+ * 手机布局(.app.phone,视口宽 ≤ 760px,见 device.ts):地图铺满屏幕,界面都在几张卡片和毛玻璃按钮上 ——
+ *
+ *   底部   世界卡片(PhoneSheet.tsx):收起时只露搜索框和世界名一行,拉到顶 = 宽屏左边那张卡片的内容
+ *          选中了东西:详情卡片(Inspector.tsx)从屏幕底升到半屏,能拉到顶(样式在 countryPanel.css)
+ *   卡片上 时间轴胶囊(播放、第 N 年、轨道、1× / 4×),卡片拉到顶、拖动中时藏起来
+ *   右上   竖排的毛玻璃按钮:图层与投影、地球 / 平面(Corners.tsx 的 PhoneButtons);写史书时进度在它们左边
+ *   顶上   提示条(让开右上的按钮)、改地形的工具条;数据图层的图例在左上
+ *
+ * 几个尺寸(和 gestures.ts 的 PEEK_H / CAPSULE_H / CAPSULE_GAP / sheetGeometry、flyTo.ts 的 NARROW_TOP_ROOM 同一个算法;
+ * 那边不算刘海、底部横条的安全区):
+ *   --top-room     顶上留给提示条的一截
+ *   --peek-h       世界卡片收起时露出的高度(底部有横条时多出横条那一截)
+ *   --above-sheet  卡片上方被时间轴胶囊占掉的一截(胶囊 + 上下各一道空)
+ *   --sheet-half   详情卡片半屏时上边的位置:约在屏幕一半;太矮的屏幕上至少露出卡片头部和一排按钮,上面至少留胶囊 + 一截地图
+ *   --sheet-full   拉到顶时上边的位置:屏高 8%(上面还露一条地图)
+ */
+.app.phone {
+  height: 100dvh;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --top-room: calc(24px + var(--safe-t));
+  --peek-h: calc(100px + max(var(--safe-b), 8px));
+  --capsule-h: 52px;
+  --capsule-gap: 10px;
+  --above-sheet: calc(var(--capsule-h) + 2 * var(--capsule-gap));
+  --sheet-half: max(calc(var(--top-room) + var(--above-sheet) + 80px), min(calc(100% - 240px), 50%));
+  --sheet-full: min(var(--sheet-half), max(8%, 8px));
+  --sheet-ease: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* ==== 底部的世界卡片 ==== */
+.psheet {
+  position: absolute;
+  left: var(--safe-l);
+  right: var(--safe-r);
+  top: calc(100% - var(--peek-h));
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  /* 实色底、不用毛玻璃:里面的存档、导出菜单按整个界面定位(毛玻璃会把它们关在卡片里) */
+  background: var(--panel-solid);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 -6px 24px rgba(0, 0, 0, 0.14);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  text-shadow: none;
+  cursor: default;
+  transition: top 0.28s var(--sheet-ease);
+}
+.psheet.ps-full {
+  top: var(--sheet-full);
+}
+/* 手指拖着:跟手,不过渡 */
+.psheet.dragging {
+  transition: none;
+}
+/* 菜单开着:整张卡片压在右上按钮、时间轴上面 */
+.psheet:has(.save-menu, .export-menu, .pm-menu) {
+  z-index: 25;
+}
+.psheet button {
+  font: inherit;
+  color: inherit;
+}
+/* 顶上的拖动条(点一下 = 拉到顶 / 收起) */
+.psheet .sheet-grip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+/* 搜索框和世界名那一截:手指在上面上下拖 = 拖卡片 */
+.ps-head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px;
+  touch-action: none;
+}
+.psheet .sb-search {
+  height: 40px;
+}
+/* 16px:iOS 点进去不会自动放大页面 */
+.psheet .sb-search input {
+  font-size: 16px;
+}
+
+/* ---- 收起时:世界名 + 副标一行,右边"存档""新世界"两个蓝字 ---- */
+.ps-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+}
+.ps-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: -4px;
+  padding: 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ps-title .sb-name {
+  flex: none;
+  max-width: 60%;
+  font-size: 15px;
+}
+.ps-title .sb-sub {
+  min-width: 0;
+}
+.ps-row .save {
+  position: static;
+}
+.ps-row .save-btn,
+.ps-row .ps-link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--link) !important;
+  font-size: 14.5px;
+  font-weight: 500;
+}
+.ps-row .save-btn.on {
+  background: var(--accent-soft);
+}
+.ps-row .ps-link:disabled {
+  opacity: 0.45;
+}
+
+/* ---- 拉到顶:大世界名 +"更多"、四个大按钮、整个世界(国家、最近大事、我的干预、地形);
+   拖着卡片往上时就已经在(跟着露出来),收起后不放 ---- */
+.ps-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 16px calc(20px + var(--safe-b));
+}
+.ps-world {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: -4px;
+  touch-action: none;
+}
+.ps-title.big .sb-name {
+  font-size: 22px;
+}
+.ps-world .pm {
+  flex: none;
+}
+.ps-more > .pm-btn {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--btn);
+  color: var(--ink);
+}
+.ps-more > .pm-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ps-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.ps-tiles > .save,
+.ps-tiles > .export {
+  position: static;
+  display: flex;
+}
+.ps-tiles .ps-tile,
+.ps-tiles .save-btn,
+.ps-tiles .export-btn {
+  flex: 1;
+  min-width: 0;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--link) !important;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ps-tiles .save-btn.on,
+.ps-tiles .export-btn.on,
+.ps-tiles .ps-tile:active:not(:disabled) {
+  background: var(--accent-soft);
+}
+.ps-tiles .ps-tile:disabled,
+.ps-tiles .export-btn:disabled {
+  opacity: 0.45;
+}
+/* 整个世界(和宽屏侧栏同一套零件):分组是白底,和卡片的灰底分开 */
+.psheet .sb-home {
+  padding: 0;
+}
+.psheet .sb-group {
+  background: var(--surface);
+}
+.psheet .sb-row {
+  min-height: 46px;
+}
+.psheet .sb-empty {
+  padding: 28px 8px;
+}
+/* 存档、导出菜单:从屏幕底升起的一张卡片(盖住世界卡片) */
+.psheet .save-menu,
+.psheet .export-menu {
+  position: fixed;
+  left: calc(12px + var(--safe-l));
+  right: calc(12px + var(--safe-r));
+  top: auto;
+  bottom: calc(12px + var(--safe-b));
+  width: auto;
+  max-width: none;
+  max-height: 75%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 14px;
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-float);
+  animation: sheet-up 0.22s ease-out;
+}
+/* "更多"菜单:挂在按钮下面、右对齐(PopMenu 自己定位) */
+.psheet .pm-menu {
+  max-width: calc(100vw - 24px);
+}
+/* 用一句话改写世界的框:屏幕上方,收起的世界卡片和时间轴上面 */
+.ps-rewrite .rw-box {
+  position: fixed;
+  z-index: 8;
+  left: calc(12px + var(--safe-l));
+  right: calc(12px + var(--safe-r));
+  top: calc(12px + var(--safe-t));
+  width: auto;
+  max-width: none;
+  max-height: calc(100% - 24px - var(--safe-t) - var(--peek-h) - var(--above-sheet));
+  border: 0;
+  border-radius: 14px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-float);
+}
+
+/* ==== 详情卡片(位置、拖动在 countryPanel.css):实色底,分组和按钮是白底(和世界卡片一个样子) ==== */
+.app.phone .inspector.cpanel {
+  --btn: var(--surface);
+  background: var(--panel-solid);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ==== 时间轴胶囊:浮在底部卡片上面 ==== */
+.app.phone .bottom-row {
+  left: calc(12px + var(--safe-l));
+  right: calc(12px + var(--safe-r));
+  bottom: calc(var(--peek-h) + var(--capsule-gap));
+  min-height: 0;
+  height: var(--capsule-h);
+  text-shadow: none;
+  transition:
+    bottom 0.28s var(--sheet-ease),
+    opacity 0.18s,
+    visibility 0.18s;
+}
+.app.phone.panel-open .bottom-row {
+  bottom: calc(100% - var(--sheet-half) + var(--capsule-gap));
+}
+/* 卡片拉到顶、手指拖着卡片、在地图上选目标时:藏起来 */
+.app.phone:is(.world-full, .sheet-full, .sheet-drag, .sheet-away) .bottom-row {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.app.phone .civ-timeline.timebar {
+  flex-wrap: nowrap;
+  height: var(--capsule-h);
+  gap: 10px;
+  padding: 0 10px 0 8px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-panel);
+  border-radius: 16px;
+  text-shadow: none;
+}
+.app.phone .timebar button {
+  text-shadow: none;
+}
+.app.phone button.tb-play {
+  width: 36px;
+  height: 36px;
+}
+.app.phone .tb-year {
+  min-width: 0;
+  font-size: 17px;
+}
+.app.phone .tb-track {
+  order: 0;
+  flex: 1;
+  flex-basis: auto;
+  min-width: 60px;
+  height: 44px;
+  margin: 0;
+}
+/* 一行放不下年份刻度:只留轨道、事件圆点、"令"和播放头 */
+.app.phone .tb-tick,
+.app.phone .tb-label {
+  display: none;
+}
+/* 贴着轨道右端的"令":字挂到红线左边 */
+.app.phone .tb-order.end b {
+  left: auto;
+  right: 3px;
+}
+.app.phone .tb-speed-one {
+  flex: none;
+  order: 10;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 6px;
+  border-radius: 8px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==== 右上:竖排的毛玻璃按钮(图层、地球);写史书时进度在左边 ==== */
+.phone-btns {
+  position: absolute;
+  right: calc(12px + var(--safe-r));
+  top: calc(12px + var(--safe-t));
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.phone-btns button {
+  font: inherit;
+}
+/* 毛玻璃画在底下一层:按钮组本身不带滤镜,图层抽屉才能按整个界面定位 */
+.pb-group {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+}
+.pb-group::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-panel);
+}
+.pb-group > .lp {
+  position: static;
+}
+.pb-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+}
+.pb-group > * + * {
+  border-top: 0.5px solid var(--line);
+}
+.pb-group > .lp + .pb-btn {
+  border-radius: 0 0 12px 12px;
+}
+.pb-group > .lp .pb-btn {
+  border-radius: 12px 12px 0 0;
+}
+.pb-btn.on {
+  color: var(--accent);
+}
+.pb-btn:disabled {
+  opacity: 0.45;
+}
+/* 卡片拉到顶时:盖住了大半个地图,右上的按钮藏起来(和卡片顶不打架);改地形时顶上是工具条,也让开 */
+.phone-btns {
+  transition:
+    opacity 0.18s,
+    visibility 0.18s;
+}
+.app.phone:is(.world-full, .sheet-full) .phone-btns,
+.stage.terrain-on ~ .phone-btns {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* ==== 图层与投影 → 从底部升起的抽屉(6 张缩略图两行三列) ==== */
+.app.phone .lp-pop {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: auto;
+  max-height: min(82%, 680px);
+  gap: 10px;
+  padding: 0 calc(16px + var(--safe-r)) calc(16px + var(--safe-b)) calc(16px + var(--safe-l));
+  border: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--panel-solid);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.22);
+  overscroll-behavior: contain;
+  animation: sheet-up 0.22s ease-out;
+}
+.app.phone .lp-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  margin: 0 -4px -6px;
+  background: var(--panel-solid);
+}
+.app.phone .lp-grip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.app.phone .lp-close {
+  position: absolute;
+  right: 0;
+  top: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: var(--r-btn);
+  padding: 6px 10px;
+  font-size: 14px;
+  line-height: 1;
+}
+.app.phone .lp-layers {
+  gap: 10px;
+}
+.app.phone .lp-layer .lp-thumb {
+  height: 58px;
+}
+.app.phone .lp-proj {
+  padding: 10px 0 8px;
+}
+.app.phone .lp-center input {
+  height: 28px;
+}
+
+/* ==== 顶上:提示条(让开右上的按钮,最多两行)、数据图层的图例 ==== */
+.app.phone .toast {
+  left: calc(12px + var(--safe-l));
+  right: calc(12px + 44px + 8px + var(--safe-r));
+  top: calc(12px + var(--safe-t));
+  transform: none;
+  width: auto;
+  max-width: none;
+  gap: 10px;
+  padding: 8px 8px 8px 14px;
+  white-space: normal;
+  animation-name: toast-in-phone;
+}
+@keyframes toast-in-phone {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.app.phone .toast-text {
+  flex: 1;
+}
+.app.phone .toast-main {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.app.phone .toast-text:has(.toast-more) .toast-main {
+  -webkit-line-clamp: 1;
+}
+.app.phone .toast-more {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app.phone .toast-bar {
+  width: 64px;
+}
+.app.phone .toast-acts {
+  flex-wrap: nowrap;
+}
+.app.phone .toast-act {
+  padding: 7px 12px;
+}
+.app.phone .toast-x {
+  padding: 6px 8px;
+}
+.app.phone .corner-tl {
+  left: calc(12px + var(--safe-l));
+  top: calc(12px + var(--safe-t));
+  max-width: calc(100% - 88px - var(--safe-l) - var(--safe-r));
+  text-shadow: none;
+}
+
+/* 第一次打开的操作提示:时间轴胶囊上面 */
+.app.phone .first-hint {
+  bottom: calc(var(--peek-h) + var(--above-sheet) + 6px);
+  padding: 6px 12px;
+  border-radius: 16px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-panel);
+  text-shadow: none;
+  font-size: 13px;
+}
+/* 右下的地球仪切换、缩放不放(地球在右上的按钮里,缩放用双指捏合;App 已经不渲染,这里兜底) */
+.app.phone .map-controls {
+  display: none;
+}
+
+/* ==== 地球仪:详情卡片开着时,球心上移到卡片和胶囊上方看得见的地方正中(和转到选中的国家同时进行);
+   露出来的下面那截用球的底色补上(box-shadow 不被自己的 overflow 裁掉) ==== */
+.app.phone .globe {
+  transition: transform 0.6s var(--sheet-ease);
+  box-shadow: 0 60vh 0 0 var(--globe-bg, transparent);
+}
+.app.phone.panel-open .globe {
+  transform: translateY(calc((var(--top-room) + var(--sheet-half) - var(--above-sheet)) / 2 - 48%));
+}
+/* 横着拿手机:收起的世界卡片和胶囊占掉下面将近一半,没开详情卡片时球心也移到上面看得见的那截正中 */
+@media (orientation: landscape) {
+  .app.phone:not(.panel-open) .globe {
+    transform: translateY(calc((var(--top-room) + 100% - var(--peek-h) - var(--above-sheet)) / 2 - 48%));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .psheet,
+  .app.phone .bottom-row,
+  .app.phone .globe {
+    transition: none;
+  }
+  .app.phone .lp-pop,
+  .psheet .save-menu,
+  .psheet .export-menu {
+    animation: none;
+  }
+}

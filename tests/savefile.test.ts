@@ -434,6 +434,23 @@ describe('浏览器存储(saveStore)', () => {
     expect(saveStore.storageIsFull()).toBe(false);
   });
 
+  it('提示条上的"存成文件":同时挂着几个存档菜单时卸下其中一个,按钮还在,调的是还挂着的那个', () => {
+    useStorage(new FakeStorage(120));
+    const calls: string[] = [];
+    const offA = saveStore.addFileSaver(() => calls.push('a'));
+    const offB = saveStore.addFileSaver(() => calls.push('b'));
+    offB();
+    openWorld(7);
+    setName('settlement:r1#0', '饕餮城');
+    const t = peekToast('storage');
+    expect(t?.action?.label).toBe('存成文件');
+    t?.action?.onClick();
+    expect(calls).toEqual(['a']);
+    expect(peekToast('storage')).toBe(null);
+    offA();
+    offA();
+  });
+
   it('浏览器里存的坏条目:读不出来就当没有,不报错', () => {
     const fake = new FakeStorage();
     useStorage(fake);

@@ -8,7 +8,7 @@
  *          地图上选中了东西:它的详情(Inspector:国家 / 城 / 地理实体 / 州的面板)
  *          什么都没选:整个世界(WorldHome:国家按大小排、最近大事、我的干预、地形)
  *
- * 窄屏(手机)不用这个侧栏,见 App 里的窄屏布局。
+ * 窄屏(手机)不用这个侧栏:同样的内容放进底部的世界卡片(PhoneSheet.tsx),这里的零件(搜索、世界名、"更多"菜单、整个世界)两边共用。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Civ } from '../gen/civ/types';
@@ -72,63 +72,16 @@ const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
 
 export function Sidebar(p: SidebarProps) {
   const { sel } = useSelection();
-  const [q, setQ] = useState('');
-  const [active, setActive] = useState(0);
-  const civOk = !!p.civ && p.civ.viable;
-  // 年份取开始搜索那一刻的(播放时不跟着每一年重算)
-  const searchYear = useMemo(() => (p.civ ? (getCivTime().year ?? p.civ.endYear) : 0), [p.civ, q === '']); // eslint-disable-line react-hooks/exhaustive-deps
-  const hits = useMemo(() => (civOk && q.trim() ? searchCiv(p.civ!, q, searchYear) : []), [civOk, p.civ, q, searchYear]);
-  useEffect(() => setActive(0), [q]);
-  // 选中了别的东西(地图上点的):搜索框清空,下面换成它的详情
-  useEffect(() => {
-    if (sel) setQ('');
-  }, [sel]);
-  const pick = (h: SearchHit) => {
-    setQ('');
-    setSelection(h.select);
-  };
-  const searching = q.trim() !== '';
+  const s = useSearch(p.civ);
   return (
     <aside className="sidebar" aria-label="侧栏" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
       <header className="sb-head">
         <WorldHead {...p} />
-        <div className="sb-search">
-          <Icon name="search" size={17} />
-          <input
-            className="search-input"
-            data-act="search"
-            value={q}
-            placeholder="搜索国家、城市、民族、山河"
-            spellCheck={false}
-            autoComplete="off"
-            disabled={!civOk}
-            aria-label="搜索"
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.stopPropagation();
-                setQ('');
-                (e.target as HTMLInputElement).blur();
-              } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                e.preventDefault();
-                const n = hits.length;
-                if (n) setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
-              } else if (e.key === 'Enter' && hits[active]) {
-                e.preventDefault();
-                pick(hits[active]);
-              }
-            }}
-          />
-          {searching && (
-            <button className="sb-clear" onClick={() => setQ('')} aria-label="清空" title="清空">
-              <Icon name="close" size={12} />
-            </button>
-          )}
-        </div>
+        <SearchField s={s} civ={p.civ} />
       </header>
       <div className="sb-body">
-        {searching ? (
-          <SearchResults q={q} hits={hits} active={active} onActive={setActive} onPick={pick} />
+        {s.searching ? (
+          <SearchResults q={s.q} hits={s.hits} active={s.active} onActive={s.setActive} onPick={s.pick} />
         ) : sel && p.civ && p.raw && p.data ? (
           <div className="inspector-slot" ref={p.inspectorSlot} />
         ) : (
@@ -140,27 +93,159 @@ export function Sidebar(p: SidebarProps) {
 }
 
 // ---------------------------------------------------------------------------
+// 搜索框(宽屏侧栏、手机的世界卡片共用)
+
+export interface SearchState {
+  q: string;
+  setQ: (q: string) => void;
+  hits: SearchHit[];
+  active: number;
+  setActive: (i: number) => void;
+  /** 点一条 / 回车:清空搜索框,选中它(地图飞过去) */
+  pick: (h: SearchHit) => void;
+  searching: boolean;
+}
+
+export function useSearch(civ: Civ | null): SearchState {
+  const { sel } = useSelection();
+  const [q, setQ] = useState('');
+  const [active, setActive] = useState(0);
+  const civOk = !!civ && civ.viable;
+  // 年份取开始搜索那一刻的(播放时不跟着每一年重算)
+  const searchYear = useMemo(() => (civ ? (getCivTime().year ?? civ.endYear) : 0), [civ, q === '']); // eslint-disable-line react-hooks/exhaustive-deps
+  const hits = useMemo(() => (civOk && q.trim() ? searchCiv(civ!, q, searchYear) : []), [civOk, civ, q, searchYear]);
+  useEffect(() => setActive(0), [q]);
+  // 选中了别的东西(地图上点的):搜索框清空,下面换成它的详情
+  useEffect(() => {
+    if (sel) setQ('');
+  }, [sel]);
+  const pick = useCallback((h: SearchHit) => {
+    setQ('');
+    setSelection(h.select);
+  }, []);
+  return { q, setQ, hits, active, setActive, pick, searching: q.trim() !== '' };
+}
+
+export function SearchField({ s, civ, onFocus }: { s: SearchState; civ: Civ | null; onFocus?: () => void }) {
+  const { q, setQ, hits, active, setActive, pick } = s;
+  return (
+    <div className="sb-search">
+      <Icon name="search" size={17} />
+      <input
+        className="search-input"
+        data-act="search"
+        value={q}
+        placeholder="搜索国家、城市、民族、山河"
+        spellCheck={false}
+        autoComplete="off"
+        disabled={!civ || !civ.viable}
+        aria-label="搜索"
+        onFocus={onFocus}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            setQ('');
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const n = hits.length;
+            if (n) setActive((active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
+          } else if (e.key === 'Enter' && hits[active]) {
+            e.preventDefault();
+            pick(hits[active]);
+          }
+        }}
+      />
+      {s.searching && (
+        <button className="sb-clear" onClick={() => setQ('')} aria-label="清空" title="清空">
+          <Icon name="close" size={12} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 顶上:世界名、存档、新世界、更多
 
-function WorldHead(p: SidebarProps) {
+/** 世界名、副标("种子 7,现存 14 国,干预了 2 处") */
+export function useWorldInfo(civ: Civ | null, data: SidebarProps['data']): { title: string; sub: string } {
   useSavesVersion();
   const edits = useEdits();
-  const year = useYear(p.civ);
-  const title = currentWorld()?.title;
-  const alive = p.civ && p.civ.viable ? p.civ.polities.filter((x) => polityAlive(x, year)).length : 0;
+  const year = useYear(civ);
+  const alive = civ && civ.viable ? civ.polities.filter((x) => polityAlive(x, year)).length : 0;
   const n = edits.interventions.length;
-  const seed = p.data ? p.data.world.params.seed : null;
-  const sub = seed === null ? '正在生成' : `种子 ${seed}，${p.civ ? (p.civ.viable ? `现存 ${alive} 国` : '没有文明') : '正在推演历史'}${n ? `，干预了 ${n} 处` : ''}`;
+  const seed = data ? data.world.params.seed : null;
+  const sub = seed === null ? '正在生成' : `种子 ${seed}，${civ ? (civ.viable ? `现存 ${alive} 国` : '没有文明') : '正在推演历史'}${n ? `，干预了 ${n} 处` : ''}`;
+  return { title: currentWorld()?.title || '未命名世界', sub };
+}
+
+/** "更多"菜单:用一句话改写世界、写成史书、AI 设置、源代码和两份协议;最底下一行版本号 */
+export function WorldMoreMenu({
+  civ,
+  data,
+  onRewrite,
+  onBook,
+  className = 'sb-pill sb-more',
+}: {
+  civ: Civ | null;
+  data: SidebarProps['data'];
+  onRewrite: () => void;
+  /** 点"写成史书"时先做的事(手机:世界卡片收起,写作进度在右上看得到) */
+  onBook?: () => void;
+  className?: string;
+}) {
+  // 改写不要求有文明:没长出文明的世界也能改地形
+  const canRewrite = !!civ && !!data;
+  return (
+    <PopMenu className={className} icon={<Icon name="more" size={17} />} title="更多" act="world-more" align="right">
+      <AiMenuItem icon={<Icon name="rename" size={16} />} act="rewrite" disabled={!canRewrite} onClick={onRewrite} note="AI">
+        用一句话改写世界
+      </AiMenuItem>
+      <AiMenuItem
+        icon={<Icon name="book" size={16} />}
+        act="book"
+        disabled={!civ || !civ.viable}
+        onClick={() => {
+          onBook?.();
+          openHistoryBook();
+        }}
+        note="AI"
+      >
+        把历史写成史书
+      </AiMenuItem>
+      <MenuItem icon={<Icon name="sparkle" size={16} />} act="ai-settings" onClick={() => openAiSettings()}>
+        AI 设置
+      </MenuItem>
+      <MenuSep />
+      <MenuItem icon={<Icon name="info" size={16} />} href={SOURCE_URL} act="source">
+        源代码
+      </MenuItem>
+      <MenuItem href={PRIVACY_URL} act="privacy">
+        隐私政策
+      </MenuItem>
+      <MenuItem href={TERMS_URL} act="terms">
+        用户协议
+      </MenuItem>
+      <div className="pm-foot" data-version>
+        版本 {APP_VERSION}
+      </div>
+    </PopMenu>
+  );
+}
+
+function WorldHead(p: SidebarProps) {
+  const { title, sub } = useWorldInfo(p.civ, p.data);
   const [rewriting, setRewriting] = useState(false);
   /** "更多"菜单:点它不关改写框 */
   const more = useRef<HTMLDivElement>(null);
   const closeRewrite = useCallback(() => setRewriting(false), []);
-  // 改写不要求有文明:没长出文明的世界也能改地形
   const canRewrite = !!p.civ && !!p.data;
   return (
     <div className="sb-world">
       <button className="sb-title" data-act="overview" onClick={() => openOverview()} title="世界概览:国家、编年史、干预、世界参数">
-        <b className="sb-name">{title || '未命名世界'}</b>
+        <b className="sb-name">{title}</b>
         <span className="sb-sub">{sub}</span>
       </button>
       <div className="sb-acts">
@@ -170,30 +255,7 @@ function WorldHead(p: SidebarProps) {
           新世界
         </button>
         <div className="sb-more-wrap" ref={more}>
-          <PopMenu className="sb-pill sb-more" icon={<Icon name="more" size={17} />} title="更多" act="world-more" align="right">
-            <AiMenuItem icon={<Icon name="rename" size={16} />} act="rewrite" disabled={!canRewrite} onClick={() => setRewriting(true)} note="AI">
-              用一句话改写世界
-            </AiMenuItem>
-            <AiMenuItem icon={<Icon name="book" size={16} />} act="book" disabled={!p.civ || !p.civ.viable} onClick={() => openHistoryBook()} note="AI">
-              把历史写成史书
-            </AiMenuItem>
-            <MenuItem icon={<Icon name="sparkle" size={16} />} act="ai-settings" onClick={() => openAiSettings()}>
-              AI 设置
-            </MenuItem>
-            <MenuSep />
-            <MenuItem icon={<Icon name="info" size={16} />} href={SOURCE_URL} act="source">
-              源代码
-            </MenuItem>
-            <MenuItem href={PRIVACY_URL} act="privacy">
-              隐私政策
-            </MenuItem>
-            <MenuItem href={TERMS_URL} act="terms">
-              用户协议
-            </MenuItem>
-            <div className="pm-foot" data-version>
-              版本 {APP_VERSION}
-            </div>
-          </PopMenu>
+          <WorldMoreMenu civ={p.civ} data={p.data} onRewrite={() => setRewriting(true)} />
         </div>
       </div>
       {rewriting && canRewrite && (
@@ -208,7 +270,7 @@ function WorldHead(p: SidebarProps) {
 // ---------------------------------------------------------------------------
 // 搜索结果
 
-function SearchResults({ q, hits, active, onActive, onPick }: { q: string; hits: SearchHit[]; active: number; onActive: (i: number) => void; onPick: (h: SearchHit) => void }) {
+export function SearchResults({ q, hits, active, onActive, onPick }: { q: string; hits: SearchHit[]; active: number; onActive: (i: number) => void; onPick: (h: SearchHit) => void }) {
   if (!hits.length) return <div className="sb-empty search-empty">没有找到「{q.trim()}」</div>;
   return (
     <div className="sb-sec">
@@ -245,7 +307,8 @@ const RECENT_N = 3;
 
 let owners: Owners | undefined;
 
-function WorldHome(p: SidebarProps) {
+/** 什么都没选时的整个世界:国家按大小排、最近大事、我的干预、地形(宽屏侧栏、手机的世界卡片拉到顶时共用) */
+export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'generating' | 'replay' | 'onReplay' | 'terrainDisabled'>) {
   const { civ } = p;
   const year = useYear(civ);
   const edits = useEdits();

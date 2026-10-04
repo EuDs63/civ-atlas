@@ -9,7 +9,7 @@
  *   useBook()                     React:整个状态(窗口、阅读、正在写的那部、上次选的文体篇幅)
  *
  * 写、存、比对历史指纹都在 ai/history.ts;这里只管"哪一部在写、写到哪、写完了没"。
- * 界面:BookDialog.tsx(选项窗口)、BookReader.tsx(阅读)、Corners.tsx 的 TopActions(右上的进度)。
+ * 界面:BookDialog.tsx(选项窗口)、BookReader.tsx(阅读)、Corners.tsx 的 BookChip(右上的进度)。
  */
 import { useSyncExternalStore } from 'react';
 import type { Civ } from '../gen/civ/types';

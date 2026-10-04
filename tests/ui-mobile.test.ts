@@ -1,10 +1,10 @@
 /**
- * 手机布局的纯逻辑:双指捏合、手指双击、底部抽屉的几何和松手停在哪、地图飞过去时"看得见的地方"、
- * 抽屉开着时地图能往上推进抽屉那一截、地名让开界面的矩形换算。
+ * 手机布局的纯逻辑:双指捏合、手指双击、底部卡片(世界 / 详情)的几何、松手速度和松手停在哪、地图飞过去时"看得见的地方"、
+ * 卡片开着时地图能往上推进卡片那一截、地名让开界面的矩形换算。
  */
 import { describe, expect, it } from 'vitest';
-import { isDoubleTap, pinchStep, sheetGeometry, sheetSnap } from '../src/ui/gestures';
-import { NARROW_ROW_H, NARROW_TOP_ROOM, freeArea, sideRoom } from '../src/ui/flyTo';
+import { ABOVE_SHEET, CAPSULE_GAP, CAPSULE_H, PEEK_H, VELOCITY_MS, isDoubleTap, peekHeight, pinchStep, releaseVelocity, sheetGeometry, sheetSnap, worldSnap } from '../src/ui/gestures';
+import { NARROW_TOP_ROOM, freeArea, sideRoom } from '../src/ui/flyTo';
 import { clampCurved, clampSphere, type StageBox } from '../src/ui/mapWrap';
 import { reserveCanvasBoxes } from '../src/render/civ/labels';
 import { sameBoxes } from '../src/ui/uiAvoid';
@@ -32,23 +32,42 @@ describe('双指捏合', () => {
   });
 });
 
-describe('底部抽屉', () => {
-  it('半高约占屏高 45%(在时间轴上面),展开到屏高 12%;看得见的地图在顶栏和抽屉之间', () => {
+describe('底部卡片', () => {
+  it('详情卡片半屏约占屏高一半、拉到顶在屏高 8%,一直铺到屏幕底;看得见的地图在顶上那截和卡片上的时间轴胶囊之间', () => {
     for (const H of [844, 740, 667]) {
-      const g = sheetGeometry(H, NARROW_ROW_H, NARROW_TOP_ROOM);
-      expect(g.bottom).toBe(H - NARROW_ROW_H);
-      expect((g.bottom - g.halfTop) / H).toBeCloseTo(0.45, 2);
-      expect(g.fullTop).toBeCloseTo(0.12 * H);
-      expect(g.free).toEqual([NARROW_TOP_ROOM, g.halfTop]);
+      const g = sheetGeometry(H, NARROW_TOP_ROOM);
+      expect(g.bottom).toBe(H);
+      expect((g.bottom - g.halfTop) / H).toBeCloseTo(0.5, 2);
+      expect(g.fullTop).toBeCloseTo(0.08 * H);
+      expect(g.free).toEqual([NARROW_TOP_ROOM, g.halfTop - ABOVE_SHEET]);
     }
   });
-  it('很矮的屏幕:半高的抽屉至少露出 200 像素,上面至少留一截地图', () => {
-    const g = sheetGeometry(420, NARROW_ROW_H, NARROW_TOP_ROOM);
-    expect(g.halfTop).toBeGreaterThanOrEqual(NARROW_TOP_ROOM + 80);
-    expect(g.fullTop).toBeLessThanOrEqual(g.halfTop);
+  it('世界卡片收起时只露底下一截,时间轴胶囊在它上面', () => {
+    const g = sheetGeometry(844, NARROW_TOP_ROOM);
+    expect(g.peekTop).toBe(844 - PEEK_H);
+    expect(ABOVE_SHEET).toBe(CAPSULE_H + 2 * CAPSULE_GAP);
   });
-  it('松手:快甩往上 = 展开;快甩往下 = 回半高 / 关掉;慢慢拖停在最近的一档,拖到下面三分之一以下关掉', () => {
-    const g = sheetGeometry(844, NARROW_ROW_H, NARROW_TOP_ROOM);
+  it('刘海、底部横条:收起的世界卡片多出横条那一截(没横条时底下留 8);顶上那截和半屏的下限跟着刘海往下', () => {
+    expect(peekHeight(0)).toBe(PEEK_H);
+    expect(peekHeight(5)).toBe(PEEK_H);
+    expect(peekHeight(34)).toBe(PEEK_H - 8 + 34);
+    const g = sheetGeometry(844, NARROW_TOP_ROOM + 47, 34);
+    expect(g.peekTop).toBe(844 - 134);
+    expect(g.free[0]).toBe(NARROW_TOP_ROOM + 47);
+    const short = sheetGeometry(420, NARROW_TOP_ROOM + 47, 34);
+    expect(short.halfTop).toBeGreaterThanOrEqual(NARROW_TOP_ROOM + 47 + ABOVE_SHEET + 80);
+  });
+  it('很矮的屏幕:半屏的卡片至少露出 240 像素,上面至少留胶囊和一截地图', () => {
+    for (const H of [420, 560]) {
+      const g = sheetGeometry(H, NARROW_TOP_ROOM);
+      expect(g.halfTop).toBeGreaterThanOrEqual(NARROW_TOP_ROOM + ABOVE_SHEET + 80);
+      expect(g.fullTop).toBeLessThanOrEqual(g.halfTop);
+      expect(g.free[1] - g.free[0]).toBeGreaterThanOrEqual(80);
+    }
+    expect(sheetGeometry(420, NARROW_TOP_ROOM).halfTop).toBe(420 - 240);
+  });
+  it('详情卡片松手:快甩往上 = 拉到顶;快甩往下 = 回半屏 / 关掉;慢慢拖停在最近的一档,拖到下面三分之一以下关掉', () => {
+    const g = sheetGeometry(844, NARROW_TOP_ROOM);
     expect(sheetSnap('half', g.halfTop - 20, -1, g)).toBe('full');
     expect(sheetSnap('full', g.fullTop + 30, 1, g)).toBe('half');
     expect(sheetSnap('half', g.halfTop + 30, 1, g)).toBe('close');
@@ -57,9 +76,31 @@ describe('底部抽屉', () => {
     expect(sheetSnap('half', g.bottom - 60, 0, g)).toBe('close');
     expect(sheetSnap('full', g.halfTop - 30, 0.1, g)).toBe('half');
   });
+  it('松手速度:只看最后一小段;甩完按住停一会儿再松手不算甩', () => {
+    const flick = [
+      { y: 700, t: 1000 },
+      { y: 600, t: 1040 },
+      { y: 500, t: 1080 },
+    ];
+    expect(releaseVelocity(flick, 480, 1090)).toBeCloseTo(-220 / 90);
+    // 停了 300 毫秒才松手:速度 0,按位置停
+    expect(releaseVelocity(flick, 500, 1080 + 300)).toBe(0);
+    const g = sheetGeometry(844, NARROW_TOP_ROOM);
+    expect(worldSnap(g.peekTop - 100, releaseVelocity(flick, 500, 1080 + 300), g)).toBe('peek');
+    // 窗口边上的那一点还算;没有记录也不出 NaN
+    expect(releaseVelocity([{ y: 0, t: 0 }], 60, VELOCITY_MS)).toBeCloseTo(60 / VELOCITY_MS);
+    expect(releaseVelocity([], 10, 5)).toBe(0);
+  });
+  it('世界卡片松手:快甩往哪就去哪;慢慢拖停在离得近的那一档', () => {
+    const g = sheetGeometry(844, NARROW_TOP_ROOM);
+    expect(worldSnap(g.peekTop - 30, -0.8, g)).toBe('full');
+    expect(worldSnap(g.fullTop + 30, 0.8, g)).toBe('peek');
+    expect(worldSnap(g.fullTop + 100, 0, g)).toBe('full');
+    expect(worldSnap(g.peekTop - 100, 0.2, g)).toBe('peek');
+  });
 });
 
-describe('地图飞过去、抽屉开着时的平移范围', () => {
+describe('地图飞过去、卡片开着时的平移范围', () => {
   const desk: StageBox = { sw: 1440, sh: 900, bw: 1800, bh: 900 };
   const phone: StageBox = { sw: 390, sh: 844, bw: 1688, bh: 844 };
   it('宽屏:左边让出浮着的侧栏卡片(详情也在里面);上下留出右上的按钮和时间轴', () => {
@@ -69,12 +110,12 @@ describe('地图飞过去、抽屉开着时的平移范围', () => {
     expect(freeArea(desk, true)).toEqual([400, 64, 1440, 796]);
     expect(freeArea(desk, false)).toEqual([400, 64, 1440, 796]);
   });
-  it('窄屏:抽屉开着时是抽屉上方、顶栏下方那一截,左右不让', () => {
-    const g = sheetGeometry(844, NARROW_ROW_H, NARROW_TOP_ROOM);
-    expect(freeArea(phone, true)).toEqual([0, NARROW_TOP_ROOM, 390, g.halfTop]);
-    expect(freeArea(phone, false)[3]).toBeGreaterThan(g.halfTop);
+  it('窄屏:详情卡片开着时是卡片上的胶囊再往上、顶上那截往下;没开时让出收起的世界卡片和胶囊;左右不让', () => {
+    const g = sheetGeometry(844, NARROW_TOP_ROOM);
+    expect(freeArea(phone, true)).toEqual([0, NARROW_TOP_ROOM, 390, g.halfTop - ABOVE_SHEET]);
+    expect(freeArea(phone, false)).toEqual([0, NARROW_TOP_ROOM, 390, 844 - PEEK_H - ABOVE_SHEET]);
   });
-  it('padB:地图能往上推进抽屉那一截(缩放 1 倍时本来不能上下动);没有 padB 时和原来一样', () => {
+  it('padB:地图能往上推进卡片那一截(缩放 1 倍时本来不能上下动);没有 padB 时和原来一样', () => {
     const v = { k: 1, x: 0, y: -300 };
     expect(clampSphere(v, phone).y).toBe(0);
     expect(clampSphere(v, { ...phone, padB: 380 }).y).toBe(-300);

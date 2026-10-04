@@ -1,7 +1,7 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
- * 存档读档分享、导出、干预、改地形、AI、东西相连、多种投影、地球仪;手机布局(390×844 触屏:底部抽屉、两行时间轴、双指捏合)。
+ * 存档读档分享、导出、干预、改地形、AI、东西相连、多种投影、地球仪;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
  * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;种子、参数、回放、改地形在世界概览的"创世"页
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
@@ -3086,9 +3086,11 @@ for (const style of ['realistic', 'fantasy']) {
   await gBrowser.close();
 }
 
-// 手机布局(390×844,触屏):时间轴两行固定在最底部、右下没有 + −、操作提示是"双指缩放"、悬停卡片不出来;
-// 双指捏合 → 地图比例变了;点国家 → 底部抽屉半高(国家落在抽屉上方)→ 往上拖展开 → 干预 → 结盟 → 点名牌 → 已生效 → 撤销;
-// 图层抽屉(从底部升起)切到实景;概览的国家列表点一国;搜索点一条
+// 手机布局(390×844,触屏):底部是收起的世界卡片(搜索框 + 世界名一行),时间轴胶囊浮在它上面、一行;右上竖排图层、地球两个按钮;
+// 右下没有 + −、操作提示是"双指缩放"、悬停卡片不出来;往上拖世界卡片 → 拉到顶(四个大按钮、整个世界,胶囊藏起来)→ 点拖动条收起;
+// 拉到顶后点"改地形" → 卡片收起;
+// 双指捏合 → 地图比例变了;点国家 → 详情卡片升到半屏(胶囊跟上去,国家落在胶囊上方)→ 往上拖拉到顶 → 干预 → 结盟 → 点名牌 → 已生效 → 撤销;
+// 图层抽屉(从底部升起)切到实景;点世界名打开概览,国家列表点一国;搜索框打字(卡片拉到顶)点一条
 {
   type Pick = { kind: string; id: number; text: string; x: number; y: number };
   type Plate = { kind: string; id: number; text: string; note: string; x: number; y: number; on: boolean; self: boolean };
@@ -3113,16 +3115,46 @@ for (const style of ['realistic', 'fantasy']) {
   };
   const mToast = (id: string) => mp.locator(`.toast[data-toast=${id}]`).innerText({ timeout: 3000 }).then((t) => t.replace(/\n/g, ' '), () => '');
   const box = (sel: string) => mp.locator(sel).first().boundingBox().catch(() => null);
+  type Rect = { x: number; y: number; width: number; height: number } | null;
   await mp.goto(`${dev.url}/?seed=7&civYear=2600`);
   await mp.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
   await mp.waitForTimeout(600);
-  // 骨架
+  // 骨架:收起的世界卡片在最底、胶囊在它上面、右上两个按钮
+  const PEEK = 108;
   const row = await box('.bottom-row');
   const track = await box('.tb-track');
-  const sub = await mp.locator('.wt-sub').innerText().catch(() => '');
+  const ws0 = await box('.psheet');
+  const sub = await mp.locator('.ps-row .sb-sub').innerText().catch(() => '');
+  const btns = await box('.phone-btns .pb-group');
+  const btnActs = await mp.locator('.phone-btns [data-act]').evaluateAll((els) => els.map((e) => e.getAttribute('data-act')).join(','));
   const hint0 = await mp.locator('.first-hint').innerText().catch(() => '');
   const zoomBtns = await mp.locator('[data-act=zoom-in], [data-act=zoom-out], .map-controls').count();
-  const recentRows = await mp.locator('.recent-row').count();
+  // 往上拖世界名那一行 → 拉到顶;点拖动条 → 收起
+  const wRow = await box('.ps-title');
+  let wsFull: Rect = null;
+  let tiles = 0;
+  let capsuleHidden = false;
+  let ws1: Rect = null;
+  let terrainPeek = false;
+  if (wRow) {
+    await swipe([[wRow.x + 60, wRow.y + wRow.height / 2]], [[wRow.x + 60, wRow.y + wRow.height / 2 - 420]]);
+    await mp.waitForTimeout(500);
+    wsFull = await box('.psheet.ps-full');
+    tiles = await mp.locator('.ps-tiles > *').count();
+    capsuleHidden = !(await mp.locator('.bottom-row').isVisible());
+    await mp.tap('.psheet .sheet-grip');
+    await mp.waitForTimeout(500);
+    ws1 = await box('.psheet.ps-peek');
+    // 再拉到顶,点"改地形":卡片先收起、上面是工具条;点"完成"退出
+    await mp.tap('.psheet .sheet-grip');
+    await mp.waitForTimeout(500);
+    await mp.locator('.psheet [data-act=terrain]').scrollIntoViewIfNeeded().catch(() => {});
+    await mp.tap('.psheet [data-act=terrain]').catch(() => {});
+    await mp.waitForTimeout(500);
+    terrainPeek = (await mp.locator('.psheet.ps-peek').count()) === 1 && (await mp.locator('.terrain-bar').isVisible().catch(() => false));
+    await mp.tap('[data-act=terrain-done]').catch(() => {});
+    await mp.waitForTimeout(400);
+  }
   // 双指捏合:两指从中间往两边分开 → 放大;中点下的地方还在中点下
   const k0 = (await mp.evaluate(() => (window as any).__wfView)).k;
   const mid0 = await mp.evaluate(([x, y]) => (window as any).__wfClientToWorld(x, y), [195, 380]);
@@ -3159,8 +3191,9 @@ for (const style of ['realistic', 'fantasy']) {
   const pol = ((await mp.evaluate('window.__wfPickables()')) as Pick[])
     .filter((q) => q.kind === 'polity' && q.x > 40 && q.x < VW - 40 && q.y > 130 && q.y < VH - 200)
     .sort((a, b) => Math.abs(a.x - VW / 2) + Math.abs(a.y - VH / 2) - Math.abs(b.x - VW / 2) - Math.abs(b.y - VH / 2))[0];
-  type Rect = { x: number; y: number; width: number; height: number } | null;
   let sheet0: Rect = null;
+  let row1: Rect = null;
+  let fullCapsuleHidden = false;
   let sheet1: Rect = null;
   let ring: Rect = null;
   let hover = 0;
@@ -3177,15 +3210,17 @@ for (const style of ['realistic', 'fantasy']) {
     await mp.waitForTimeout(1100);
     hover = await mp.locator('.hover-card').count();
     sheet0 = await box('.inspector.sheet');
+    row1 = await box('.bottom-row');
     ring = await box('.tp-mark .tp-ring');
     info = (await mp.locator('.inspector').innerText().catch(() => '')).replace(/\n/g, ' / ');
     // 往上拖拖动条 → 展开
-    const grip = await box('.sheet-grip');
+    const grip = await box('.inspector .sheet-grip');
     if (grip) {
       await swipe([[VW / 2, grip.y + grip.height / 2]], [[VW / 2, grip.y + grip.height / 2 - 260]]);
       await mp.waitForTimeout(500);
       full = /sheet-full/.test((await mp.locator('.inspector').getAttribute('class')) ?? '');
       sheet1 = await box('.inspector.sheet');
+      fullCapsuleHidden = !(await mp.locator('.bottom-row').isVisible());
     }
     // 干预 → 结盟 → 点名牌
     await mp.tap('.inspector [data-act=intervene]');
@@ -3223,8 +3258,10 @@ for (const style of ['realistic', 'fantasy']) {
   await mp.waitForTimeout(300);
   const dark = await mp.locator('.app').getAttribute('data-theme');
   const lpClosed = !(await mp.locator('.lp-pop').count());
-  // 概览:国家列表点一国 → 概览收起、抽屉里是这国
-  await mp.tap('[data-act=overview]');
+  // 概览:关掉详情卡片,点世界卡片上的世界名 → 概览;国家列表点一国 → 概览收起、详情卡片里是这国
+  await mp.tap('.inspector .cp-x').catch(() => {});
+  await mp.waitForTimeout(400);
+  await mp.tap('.psheet [data-act=overview]');
   await mp.waitForTimeout(400);
   const ovRow = mp.locator('.ov-row').first();
   const ovName = await ovRow.locator('.ov-name').innerText().catch(() => '');
@@ -3233,52 +3270,75 @@ for (const style of ['realistic', 'fantasy']) {
   await mp.waitForTimeout(900);
   const ovClosed = !(await mp.locator('.ov-root:not([hidden])').count());
   const ovIns = await mp.locator('.inspector').innerText().catch(() => '');
-  // 搜索:全宽的框,点一条 → 抽屉里是它
+  // 搜索:点世界卡片上的搜索框打字 → 卡片拉到顶、下面是搜索结果;点一条 → 详情卡片里是它
   await mp.tap('.inspector .cp-x').catch(() => {});
-  await mp.waitForTimeout(300);
-  await mp.tap('[data-act=search]');
-  await mp.waitForTimeout(300);
-  const sb = await box('.search-box');
-  const hit = mp.locator('.search-row').first();
+  await mp.waitForTimeout(400);
+  await mp.tap('.psheet [data-act=search]');
+  await mp.keyboard.type((ovName || pol?.text || '王').slice(0, 1));
+  await mp.waitForTimeout(500);
+  const sb = await box('.psheet .sb-search');
+  const searchFull = (await mp.locator('.psheet.ps-full').count()) === 1;
+  const hit = mp.locator('.psheet .search-row').first();
   const hitName = await hit.locator('.search-name').innerText().catch(() => '');
   await hit.tap().catch(() => {});
   await mp.waitForTimeout(900);
   const searchIns = await mp.locator('.inspector').innerText().catch(() => '');
+  // 拉到顶的世界卡片里点"新世界":卡片先收起,看得到新生成的世界(关掉详情卡片时世界卡片还是搜索时拉到顶的样子)
+  await mp.tap('.inspector .cp-x').catch(() => {});
+  await mp.waitForTimeout(400);
+  if (!(await mp.locator('.psheet.ps-full').count())) {
+    await mp.tap('.psheet .sheet-grip').catch(() => {});
+    await mp.waitForTimeout(500);
+  }
+  const newFull = (await mp.locator('.psheet.ps-full .ps-tiles [data-act=new-world]').count()) === 1;
+  await mp.tap('.psheet .ps-tiles [data-act=new-world]').catch(() => {});
+  await mp.waitForTimeout(500);
+  const newPeek = (await mp.locator('.psheet.ps-peek').count()) === 1;
   console.log(
-    `手机布局:底部一行 ${JSON.stringify(row)},轨道高 ${track?.height};副标「${sub}」;提示「${hint0}」;+ − ${zoomBtns} 个;最近事件 ${recentRows} 条;` +
+    `手机布局:胶囊 ${JSON.stringify(row)},轨道 ${JSON.stringify(track)};世界卡片 ${JSON.stringify(ws0)}「${sub}」;右上 ${btnActs} ${JSON.stringify(btns)};提示「${hint0}」;+ − ${zoomBtns} 个;` +
+      `上拖 → 拉到顶 ${JSON.stringify(wsFull)}、大按钮 ${tiles} 个、胶囊藏起 ${capsuleHidden};点拖动条 → 收起 ${JSON.stringify(ws1)};拉到顶点改地形 → 收起 ${terrainPeek};` +
       `捏合 k ${k0.toFixed(2)} → ${k1.toFixed(2)}(中点下 ${mid0?.map((v: number) => v.toFixed(0))} → ${mid1?.map((v: number) => v.toFixed(0))});单指拖动 ${panned};点两下回正 k ${kReset.toFixed(2)};` +
-      `点「${pol?.text}」→ 抽屉 ${JSON.stringify(sheet0)}、国都圆环 ${JSON.stringify(ring)}、悬停卡片 ${hover};上拖 → 展开 ${full} ${JSON.stringify(sheet1)};` +
-      `干预页 ${cmds} 条;结盟提示「${pickToast}」、抽屉藏起 ${hiddenWhilePicking};点「${tgtText}」→「${doneToast}」;撤销 →「${undoToast}」;` +
-      `图层抽屉 ${JSON.stringify(lp)} → 实景 ${dark}、收起 ${lpClosed};概览「${ovRowText}」→ 收起 ${ovClosed};搜索框 ${JSON.stringify(sb)} → 「${hitName}」`,
+      `点「${pol?.text}」→ 详情卡片 ${JSON.stringify(sheet0)}、胶囊 ${JSON.stringify(row1)}、国都圆环 ${JSON.stringify(ring)}、悬停卡片 ${hover};上拖 → 拉到顶 ${full} ${JSON.stringify(sheet1)}、胶囊藏起 ${fullCapsuleHidden};` +
+      `干预页 ${cmds} 条;结盟提示「${pickToast}」、卡片藏起 ${hiddenWhilePicking};点「${tgtText}」→「${doneToast}」;撤销 →「${undoToast}」;` +
+      `图层抽屉 ${JSON.stringify(lp)} → 实景 ${dark}、收起 ${lpClosed};概览「${ovRowText}」→ 收起 ${ovClosed};搜索框 ${JSON.stringify(sb)} 拉到顶 ${searchFull} → 「${hitName}」;拉到顶 ${newFull} 点新世界 → 收起 ${newPeek}`,
   );
-  if (!row || Math.abs(row.y + row.height - VH) > 1 || row.width !== VW || !track || track.height < 32) errs.push(`手机:时间轴没有固定在最底部、全宽 / 轨道太矮(${JSON.stringify(row)},轨道 ${track?.height})`);
-  if (!/^种子 7，\d+ 国 概览 ›$/.test(sub)) errs.push(`手机:副标不对(${sub})`);
+  if (!ws0 || Math.abs(ws0.y - (VH - PEEK)) > 2 || Math.abs(ws0.y + ws0.height - VH) > 1 || ws0.width !== VW) errs.push(`手机:世界卡片没有收在最底(${JSON.stringify(ws0)})`);
+  if (!row || !ws0 || Math.abs(row.y + row.height - (ws0.y - 10)) > 2 || Math.abs(row.width - (VW - 24)) > 1 || row.height > 56)
+    errs.push(`手机:时间轴胶囊不在世界卡片上面 / 不是一行(${JSON.stringify(row)})`);
+  if (!track || !row || track.height < 32 || track.y < row.y || track.y + track.height > row.y + row.height) errs.push(`手机:时间轴轨道不在胶囊里 / 太矮(${JSON.stringify(track)})`);
+  if (!/^种子 7，现存 \d+ 国$/.test(sub)) errs.push(`手机:世界名后面的副标不对(${sub})`);
+  if (btnActs !== 'layers,globe' || !btns || Math.abs(btns.x + btns.width - (VW - 12)) > 1 || btns.y > 20 || btns.height < 80)
+    errs.push(`手机:右上不是竖排的图层、地球两个按钮(${btnActs} ${JSON.stringify(btns)})`);
+  if (!wsFull || Math.abs(wsFull.y - 0.08 * VH) > 8 || tiles !== 4 || !capsuleHidden) errs.push(`手机:往上拖世界卡片没有拉到顶(${JSON.stringify(wsFull)},大按钮 ${tiles},胶囊藏起 ${capsuleHidden})`);
+  if (!ws1 || Math.abs(ws1.y - (VH - PEEK)) > 2) errs.push(`手机:点拖动条没有收起世界卡片(${JSON.stringify(ws1)})`);
+  if (!terrainPeek) errs.push('手机:拉到顶的世界卡片里点"改地形",卡片没有收起 / 工具条没出来');
   if (!hint0.includes('双指缩放') || hint1 !== 0) errs.push(`手机:操作提示不对 / 捏合后没消失(${hint0})`);
   if (zoomBtns) errs.push('手机:右下还有地球仪 / 缩放按钮');
-  if (recentRows > 1) errs.push(`手机:最近事件应只有 1 条(${recentRows})`);
   if (!(k1 > k0 * 1.6)) errs.push(`手机:双指捏合后地图比例没变(${k0} → ${k1})`);
   if (!mid0 || !mid1 || Math.hypot(mid1[0] - mid0[0], mid1[1] - mid0[1]) > 12) errs.push(`手机:捏合不是以两指中点为中心(${mid0} → ${mid1})`);
   if (!panned) errs.push('手机:单指拖动没有平移');
   if (Math.abs(kReset - 1) > 0.01) errs.push(`手机:点两下没有回正(k ${kReset})`);
   if (!pol) errs.push('手机:没找到能点的国家');
   else {
-    const halfTop = 0.55 * VH - 92;
-    if (!sheet0 || Math.abs(sheet0.y - halfTop) > 8 || Math.abs(sheet0.y + sheet0.height - (VH - 92)) > 2 || sheet0.width !== VW)
-      errs.push(`手机:点国家后底部抽屉的位置不对(${JSON.stringify(sheet0)},半高上边应在 ${halfTop})`);
-    if (!/ \/ 国家，/.test(info) || !info.includes('干预历史')) errs.push(`手机:抽屉里不是国家面板(${info.slice(0, 80)})`);
-    if (!ring || !sheet0 || !(ring.y > 60 && ring.y + ring.height < sheet0.y)) errs.push(`手机:选中的国家没有落在抽屉上方(国都圆环 ${JSON.stringify(ring)})`);
+    const halfTop = 0.5 * VH;
+    if (!sheet0 || Math.abs(sheet0.y - halfTop) > 8 || Math.abs(sheet0.y + sheet0.height - VH) > 1 || sheet0.width !== VW)
+      errs.push(`手机:点国家后详情卡片的位置不对(${JSON.stringify(sheet0)},半屏上边应在 ${halfTop})`);
+    if (!row1 || !sheet0 || Math.abs(row1.y + row1.height - (sheet0.y - 10)) > 2) errs.push(`手机:时间轴胶囊没有跟到详情卡片上面(${JSON.stringify(row1)})`);
+    if (!/ \/ 国家，/.test(info) || !info.includes('干预历史')) errs.push(`手机:卡片里不是国家面板(${info.slice(0, 80)})`);
+    if (!ring || !row1 || !(ring.y > 20 && ring.y + ring.height < row1.y)) errs.push(`手机:选中的国家没有落在时间轴胶囊上方(国都圆环 ${JSON.stringify(ring)})`);
     if (hover) errs.push('手机:点了以后出了悬停卡片');
-    if (!full || !sheet1 || Math.abs(sheet1.y - 0.12 * VH) > 8) errs.push(`手机:往上拖没有展开(${JSON.stringify(sheet1)})`);
+    if (!full || !sheet1 || Math.abs(sheet1.y - 0.08 * VH) > 8 || !fullCapsuleHidden) errs.push(`手机:往上拖没有拉到顶 / 胶囊没藏起来(${JSON.stringify(sheet1)})`);
     if (cmds !== 6) errs.push(`手机:干预页不对(${cmds} 条命令)`);
-    if (!/^选择与.+结盟的国家 \d+ 年起生效 取消$/.test(pickToast) || !hiddenWhilePicking) errs.push(`手机:选目标的提示条 / 抽屉收起不对(${pickToast})`);
+    if (!/^选择与.+结盟的国家 \d+ 年起生效 取消$/.test(pickToast) || !hiddenWhilePicking) errs.push(`手机:选目标的提示条 / 卡片收起不对(${pickToast})`);
     if (!/^已从 \d+ 年重新推演 · .+与.+结盟 撤销$/.test(doneToast)) errs.push(`手机:点名牌后没有生效(${doneToast})`);
     if (!/^已撤销/.test(undoToast)) errs.push(`手机:撤销后没有"已撤销"(${undoToast})`);
   }
   if (!lp || Math.abs(lp.y + lp.height - VH) > 1 || lp.width !== VW) errs.push(`手机:图层弹层不是底部抽屉(${JSON.stringify(lp)})`);
   if (dark !== 'dark' || !lpClosed) errs.push(`手机:图层抽屉里切到实景不对(${dark})`);
   if (!ovClosed || !ovName || !ovIns.includes(ovName)) errs.push(`手机:概览的国家列表点一国没有打开这国(${ovName})`);
-  if (!sb || sb.width < VW - 30) errs.push(`手机:搜索框没有全宽展开(${JSON.stringify(sb)})`);
+  if (!sb || sb.width < VW - 40 || !searchFull) errs.push(`手机:搜索时世界卡片没有拉到顶(${JSON.stringify(sb)})`);
   if (!hitName || !searchIns.includes(hitName)) errs.push(`手机:搜索点一条没有打开它(${hitName})`);
+  if (!newFull || !newPeek) errs.push(`手机:拉到顶的世界卡片里点"新世界",卡片没有收起(拉到顶 ${newFull},收起 ${newPeek})`);
   await mctx.close();
 }
 

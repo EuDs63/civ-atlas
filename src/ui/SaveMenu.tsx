@@ -18,6 +18,7 @@ import { SHARE_WARN_LENGTH, TITLE_MAX, editCount, encodeShare, hasShareData, sav
 import { GENERATOR_VERSION } from '../gen/edits';
 import { useEdits } from './editsStore';
 import {
+  addFileSaver,
   currentSave,
   currentWorld,
   deleteWorld,
@@ -26,7 +27,6 @@ import {
   notify,
   persistent,
   renameWorld,
-  setFileSaver,
   storageIsFull,
   useSavesVersion,
   type StoredWorld,
@@ -334,10 +334,7 @@ export function SaveMenu({ ready, onOpenText, onOpenStored, icon }: SaveMenuProp
     if (!open) setManual(null);
   }, [open]);
   // 存储满了 / 浏览器不让存时,提示条上的"存成文件"
-  useEffect(() => {
-    setFileSaver(saveCurrentFile);
-    return () => setFileSaver(null);
-  }, []);
+  useEffect(() => addFileSaver(saveCurrentFile), []);
 
   const pickFile = () => fileRef.current?.click();
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
