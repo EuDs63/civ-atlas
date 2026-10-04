@@ -15,6 +15,7 @@ import { HABITABLE_SUIT } from '../src/gen/civ/cultures';
 import { labelImage, pixelRegions, washPixels } from '../src/render/civ/territory';
 import { borderLines } from '../src/render/civ/borders';
 import { CIV_SHOW_OFF } from '../src/render/civ/overlay';
+import { warFront, warMarkPoints, warSpans } from '../src/render/civ/warfare';
 import { capitalAt, populationAt } from '../src/gen/civ/growth';
 import { warStats } from '../src/gen/civ/wars';
 import { politicsStats } from '../src/gen/civ/politics';
@@ -222,6 +223,13 @@ for (const c of cases) {
       for (const pl of placed.labels) for (const g of pl.glyphs) if (!Number.isFinite(g.x) || !Number.isFinite(g.y) || !Number.isFinite(g.a)) cn++;
     }
     worstLabels = Math.max(worstLabels, labelMs);
+    // 战事:每场仗打完不早于开打;战线、双剑的坐标、浓淡不能有 NaN
+    for (const s of warSpans(civ)) if (!(s.end >= s.start)) cn++;
+    for (const y of [civ.endYear * 0.5, civ.endYear * 0.8, civ.endYear]) {
+      const wp = { world: w, raster: r, civ, style: 'fantasy' as const, year: y, show: { ...CIV_SHOW_OFF, polities: true, wars: true } };
+      for (const l of warFront(wp)) for (let k = 0; k < l.pts.length; k++) if (!Number.isFinite(l.pts[k])) cn++;
+      for (const m of warMarkPoints(wp, true)) if (!Number.isFinite(m.x) || !Number.isFinite(m.y) || !(m.alpha > 0 && m.alpha <= 1)) cn++;
+    }
     if (nan || rn || cn) process.exitCode = 1;
     const isDefaultCells = !('cells' in c) && !terrain;
     if (isDefaultCells) {

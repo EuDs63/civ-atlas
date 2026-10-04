@@ -6,7 +6,8 @@
  * 2. 文字层(canvas.civ-labels):只盖住视口里看得见的那一块地图,分辨率 = 屏幕像素 × devicePixelRatio,
  *    缩放、平移、换年份时重画。它不在被 CSS 放大的地图框里,而是在最上面的屏幕层里(App 传进来的 labelsHost,
  *    见 mapWrap.ts 的"屏幕层"),按地图框的位置摆,一个画布像素对一个屏幕像素 —— 放大到 12 倍字和城镇符号也是清晰的。
- *    画的东西:地理名、国名、城名和城镇符号,一起避让(render/labels/draw.ts 的 placeMap)。
+ *    画的东西:地理名、国名、城名和城镇符号,一起避让(render/labels/draw.ts 的 placeMap);
+ *    底下先画战事的战线和双剑(render/civ/warfare.ts,不参与避让)。
  *    回放 / 拖时间轴时城名只排国都和大城的,每帧更快;停下来就补上城、镇、村的名字。
  *
  * 3. 高亮层(canvas.civ-hl,阶段 3 编年史):点编年史的一条,事发的州、相关国家的国土闪约两秒
@@ -31,6 +32,7 @@ import type { Civ, Year } from '../gen/civ/types';
 import { drawCivOverlay, type CivDrawParams, type CivStyle, type CivViewport } from '../render/civ/overlay';
 import { civLabelChars, civLabelItems, civMapLayer, labelViewExtras, reserveCanvasBoxes, type CivMapLayer } from '../render/civ/labels';
 import { drawSettlementMarks } from '../render/civ/settlements';
+import { drawWarfare, warsShown } from '../render/civ/warfare';
 import { drawPlacedLabels, placeMap, placedMarkBox, toCanvas, type LabelItem, type LabelView } from '../render/labels/draw';
 import { ensureFonts, fontsReady, preloadFonts } from '../render/labels/fonts';
 import { drawHighlight, drawSelection, drawSelectionLabels } from '../render/civ/highlight';
@@ -135,6 +137,8 @@ interface LabelsDebug {
   proj?: string;
   lon?: number;
   fitted?: boolean;
+  /** 画了几段战线、几个双剑(战事关着 / 没在打仗 = null 或 0) */
+  wars?: { lines: number; marks: number } | null;
 }
 
 export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null, labelsHost = null }: CivLayerProps) {
@@ -407,7 +411,8 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
     };
     const items = mapLayer ? geoItems.concat(mapLayer.items) : geoItems;
     const marks = mapLayer?.marks ?? [];
-    if ((!items.length && !marks.length) || !extras || !fontsOk) return clear();
+    const wars = !!params && warsShown(params);
+    if ((!items.length && !marks.length && !wars) || !extras || !fontsOk) return clear();
     const t0 = performance.now();
     // 看得见的那块:地图框(已被 CSS 放大)和舞台(视口)的交集,换回地图框自己的坐标
     // (舞台换成视窗,地图框往右多算一份 —— 见 mapWrap.ts 的 visibleBox)
@@ -457,6 +462,8 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
       const cx = (W / 2 - lv.ox) / lv.scale;
       at = mp ? toCanvas(lv, world.mesh.x[c], world.mesh.y[c]) : [nearX(world.mesh.x[c], cx, lv.wrap ?? 0) * lv.scale + lv.ox, world.mesh.y[c] * lv.scale + lv.oy];
     }
+    // 战线、双剑压在国界上、城镇符号和字底下
+    const war = wars && params ? drawWarfare(ctx, params, lv, mp ? projector(mp) : null) : null;
     drawSelectionLabels(ctx, placed, lv, sel, style, at);
     drawSettlementMarks(ctx, placed.marks, style);
     drawPlacedLabels(ctx, placed.labels, lv);
@@ -476,6 +483,7 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
       style: fontStyle,
       k,
       texts: placed.labels.map((l) => l.item.text),
+      wars: war,
       proj: mp?.def.id ?? 'equirect',
       lon: mp?.lon0,
       fitted: !!fitMp,

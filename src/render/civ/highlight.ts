@@ -89,7 +89,8 @@ export function highlightBox(world: World, civ: Civ, marks: Uint8Array): [number
 
 const pixCache = new WeakMap<Civ, { raster: Raster; pix: Int16Array }>();
 
-function pixOf(world: World, raster: Raster, civ: Civ): Int16Array {
+/** 每个像素属于哪个州(territory.ts 的 pixelRegions,按 civ + raster 缓存;战事的斜线也用) */
+export function pixOf(world: World, raster: Raster, civ: Civ): Int16Array {
   const hit = pixCache.get(civ);
   if (hit && hit.raster === raster) return hit.pix;
   const pix = pixelRegions(world.mesh, raster, civ.regions.of);

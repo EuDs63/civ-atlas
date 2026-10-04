@@ -17,6 +17,8 @@
  *     背面的不画,靠近球边缘的淡出
  *   - 矢量线:国界、道路与航线、选中的国家 / 州的描边、选中的大河 / 山脉的淡光、编年史高亮的描边 —— 每帧按正射投影逐顶点画
  *     (render/globeLines.ts),线宽按屏幕像素定,放大到 8 倍也锐利;背面裁掉,跨 180° 经线不断
+ *   - 战事(render/civ/warfare.ts):战线在矢量线里,朝守方的短齿、交战处的双剑按投影后的位置用画布像素画;
+ *     易手的州的斜线画在文明贴图里
  *   - 城镇符号和文字:和平面主图同一套排版(render/globeLabels.ts):山名沿山脊、河名逐字正立沿河、国名顺着国土、
  *     城名在符号旁、海名疏排,一起避让,按缩放分级出现;始终正立朝着屏幕,背面的不画,靠近球边缘的淡出。
  *     转动、拖时间轴时只排大字(国名、大洋和海、国都和大城的名字),停下约 0.15 秒后排全部
@@ -91,17 +93,22 @@ import { Layer } from '../gen/civ/types';
 import {
   borderStrokes,
   buildLineSet,
+  drawGlobeWarTeeth,
   fadeRim,
   globeBorderSets,
+  globePoint,
   globeProjector,
   globeRouteSets,
+  globeWarSet,
   routeStrokes,
   strokeGlobeLines,
+  warStrokes,
   type GlobeLineSet,
   type GlobeLineStroke,
   type GlobeProjector,
 } from '../render/globeLines';
-import { globeGlyphAlpha, globeLabelView, globePolityItem, globeToCanvas, isQuickLabel, visibleMarks, type GlobeLabelView } from '../render/globeLabels';
+import { MARK_MIN_D, globeGlyphAlpha, globeLabelView, globePolityItem, globeToCanvas, isQuickLabel, visibleMarks, type GlobeLabelView } from '../render/globeLabels';
+import { ALL_FIGHTS_K, drawSwords, swordHalf, warFront, warMarkPoints, warsShown } from '../render/civ/warfare';
 import { drawGlobeGlyphs, globeGlyphSet, placeGlobeGlyphs, type GlobeGlyphSet, type GlobeGlyphView, type PlacedGlobeGlyph } from '../render/globeGlyphs';
 import { fantasyGlobeBase, releaseFantasyGlobeBase } from '../render/fantasy';
 import type { LabelPick } from './mapPick';
@@ -368,6 +375,8 @@ interface OverlayInput {
   shift: number;
   /** 手绘符号(山、丘陵……,每帧正立着画;贴图里带着符号时 = null),不透明度跟着矢量线 */
   glyphs: { set: GlobeGlyphSet; placed: PlacedGlobeGlyph[]; view: GlobeGlyphView } | null;
+  /** 战事(战线的短齿、双剑每帧按画布像素画;战线本身在 lines 里);没开 / 不画 = null */
+  war: CivDrawParams | null;
   /** 编年史高亮的描边、圆圈(不闪的时候 = null),alpha = 闪到多亮 */
   hl: { strokes: GlobeLineStroke[]; ring: { box: [number, number, number, number]; colors: [string, string, string] } | null; alpha: number } | null;
 }
@@ -444,6 +453,8 @@ function drawOverlay(ctx: CanvasRenderingContext2D, o: OverlayInput): GlobePlace
   if (o.lines.length && o.lineAlpha > 0.01) {
     ctx.globalAlpha = o.lineAlpha;
     placed.verts = strokeGlobeLines(ctx, P, o.lines, o.unit * dpr);
+    // 战线朝守方的短齿
+    if (o.war) drawGlobeWarTeeth(ctx, P, globeWarSet(warFront(o.war), o.world.width, o.world.height), o.unit * dpr, style);
     ctx.globalAlpha = 1;
   }
   // 编年史高亮:描边(线宽和国界一样按屏幕定)、事发地很小时外面套一个圆圈(按屏幕大小),不透明度跟着闪
@@ -455,6 +466,18 @@ function drawOverlay(ctx: CanvasRenderingContext2D, o: OverlayInput): GlobePlace
     ctx.globalAlpha = 1;
   }
   if ((o.lines.length && o.lineAlpha > 0.01) || gl?.placed.length || hl) fadeRim(ctx, P);
+  // 战事的双剑:州治往右上挪一点,大小和线宽一样按 unit(放大以后不再变);背面、贴着球边缘的不画
+  if (o.war && o.lineAlpha > 0.01) {
+    const kEq = equivalentZoom(f.R, REF_MAP_CSS);
+    const sh = swordHalf(o.unit * dpr, 1, dpr);
+    const swords: { x: number; y: number; h: number; a: number }[] = [];
+    for (const m of warMarkPoints(o.war, kEq >= ALL_FIGHTS_K)) {
+      const [x, y, d] = globePoint(P, m.x, m.y, o.world.width, o.world.height);
+      if (d < MARK_MIN_D) continue;
+      swords.push({ x: x + 0.9 * sh, y: y - 0.9 * sh, h: sh, a: m.alpha * o.lineAlpha });
+    }
+    drawSwords(ctx, swords, style);
+  }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   if (o.cpuDecor) {
     if (o.graticule) {
@@ -575,6 +598,8 @@ function civLineStrokes(cp: CivDrawParams | null): GlobeLineStroke[] {
   if (cp.show.polities && civ.polities.length) {
     const sets = globeBorderSets(borderLines(cp, Layer.Polity), world.width, world.height, style === 'fantasy');
     out.push(...borderStrokes(sets, style));
+    // 战事的战线压在国界上(短齿、双剑在 drawOverlay 里按画布像素画)
+    if (warsShown(cp)) out.push(...warStrokes(globeWarSet(warFront(cp), world.width, world.height), style));
   }
   if (cp.show.routes && civ.routes.length) out.push(...routeStrokes(globeRouteSets(routeLines(world.mesh, civ, cp.year), world.width, world.height), style));
   return out;
@@ -1008,6 +1033,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       lines: civLineStrokes(cp).concat(selStrokes(w, h)),
       unit: lineUnit(s.view, w, h, p.world.width, s.shift),
       lineAlpha: 1 - s.replayMix,
+      war: cp && warsShown(cp) ? cp : null,
       hl: s.hlA > 0.001 && (s.hlTex.strokes.length || s.hlTex.ring) ? { strokes: s.hlTex.strokes, ring: s.hlTex.ring, alpha: s.hlA } : null,
       placement: pl,
       shift: s.shift,

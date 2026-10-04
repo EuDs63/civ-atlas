@@ -973,6 +973,13 @@ button.ov-iv-text:hover {
   align-items: center;
   gap: 4px;
 }
+/* 战事图例:和地图上的战线同一个红;深色界面换亮一点的红,看得清 */
+.lp-war .lp-route {
+  color: #a8261a;
+}
+[data-theme='dark'] .lp-war .lp-route {
+  color: var(--ev-war);
+}
 .lp-cultures {
   display: grid;
   grid-template-columns: 1fr 1fr;

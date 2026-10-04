@@ -1,8 +1,8 @@
 /**
  * 图层弹层(LayerPopover.tsx)里的文明开关和图例:
  *
- *   CivToggles     图层大图下面一行小字开关:地名、宜居度、州、城址、道路(可以同时开几个,再点一次关闭);
- *                  开着宜居度 / 道路时下面一行小图例(贫瘠 → 富饶的色带;大路 / 小路 / 航线)
+ *   CivToggles     图层大图下面一行小字开关:地名、宜居度、州、城址、道路、战事(可以同时开几个,再点一次关闭);
+ *                  开着宜居度 / 道路 / 战事时下面一行小图例(贫瘠 → 富饶的色带;大路 / 小路 / 航线;战线 / 战时易手 / 交战处)
  *   CultureLegend  选中"民族"图层时:这一年还在的民族,按地盘大小排的紧凑色块列表(族名 + 州数)
  *
  * 国家的图例不再单独放:世界概览的"国家"页就是(WorldOverviewCountries.tsx)。
@@ -21,6 +21,7 @@ const TOGGLES: { key: Exclude<keyof CivShow, 'polities' | 'cultures'>; name: str
   { key: 'regions', name: '州', hint: '按山脊、大河自然划分的地区,是文明扩张的基本单位' },
   { key: 'sites', name: '城址', hint: '每州最宜居的一块地;圆点越大,这一州能养活的人越多' },
   { key: 'routes', name: '道路', hint: '实线是大城之间的大路,虚线是小路;海上的点线是港口之间的航线' },
+  { key: 'wars', name: '战事', hint: '正在打的仗(开着国家时画):红线是战线,斜线是这场仗里易手的州,双剑是打过仗的地方' },
 ];
 
 /** "道路"图例:实线大路、虚线小路、点线航线 */
@@ -70,6 +71,35 @@ export function CivToggles() {
               {l.name}
             </span>
           ))}
+        </div>
+      )}
+      {show.wars && show.polities && (
+        <div className="lp-key lp-war">
+          {/* 和地图上画的一样:战线(短齿朝守方)、易手的州(斜线)、交战处(双剑) */}
+          <span className="lp-route">
+            <svg width="22" height="10" aria-hidden="true">
+              <line x1="1.5" y1="3" x2="20.5" y2="3" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+              {[4, 9, 14, 19].map((x) => (
+                <line key={x} x1={x} y1="3" x2={x} y2="7.5" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
+              ))}
+            </svg>
+            战线
+          </span>
+          <span className="lp-route">
+            <svg width="14" height="12" aria-hidden="true">
+              <rect x="0.5" y="0.5" width="13" height="11" rx="2" fill="currentColor" fillOpacity={0.08} stroke="currentColor" strokeOpacity={0.35} />
+              {[-6, -1, 4, 9, 14].map((x) => (
+                <line key={x} x1={x} y1="12" x2={x + 12} y2="0" stroke="currentColor" strokeWidth={1} opacity={0.7} />
+              ))}
+            </svg>
+            战时易手
+          </span>
+          <span className="lp-route">
+            <svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true">
+              <path d="M-5 5L5 -5M5 5L-5 -5M-4.2 1.4L-1.4 4.2M4.2 1.4L1.4 4.2" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+            </svg>
+            交战处
+          </span>
         </div>
       )}
     </>

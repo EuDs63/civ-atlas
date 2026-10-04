@@ -3,7 +3,8 @@
  * 放在这里而不是 App.tsx 里,这样以后加开关 / 时间轴时只改文明自己的文件。
  *
  * 网址参数(截图脚本用):
- *   civ=habitat,regions,sites,routes,cultures,polities   直接打开对应显示;前面加减号是关掉,如 civ=-labels 关掉默认打开的地名
+ *   civ=habitat,regions,sites,routes,cultures,polities,wars   直接打开对应显示;前面加减号是关掉,
+ *                                               如 civ=-labels 关掉默认打开的地名、civ=-wars 关掉默认打开的战事
  *   civYear=1200                                时间轴停在第 1200 年(不给 = 结束年份);给了就不自动播放
  *   chron=1 / chron=all                         打开世界概览的编年史页(1 = 只看大事,all = 全部)
  *   play=0 / play=1                             打开网页时不自动播放 / 自动播放

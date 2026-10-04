@@ -4,7 +4,7 @@
  * 分两步,重活放后台线程(src/exportWorker.ts),界面不卡:
  *   1. drawMapBase(后台线程,OffscreenCanvas):地形(当前画风;2× 时用重新铺的两倍像素)+ 文明底图(国土 / 民族色块、国界、道路,
  *      当前时间轴年份、和屏幕上开着的一样)+ 写实风 / 数据图层的外框和罗盘(手绘风的外框、罗盘本来就画在地形里)。
- *   2. drawMapLabels(主线程,要用页面里加载好的字体):地名、国名、城名和城镇符号,按"整图、缩放 1 倍"排版 ——
+ *   2. drawMapLabels(主线程,要用页面里加载好的字体):地名、国名、城名和城镇符号(还有战事的战线、双剑),按"整图、缩放 1 倍"排版 ——
  *      地图按世界宽(2048 CSS 像素)显示、2× 时像素密度 × 2:2× 和 1× 排出来一模一样,只是更清楚。
  *      排版、避让和屏幕上是同一套(render/labels/draw.ts 的 placeMap),文字之间不重叠、国名落在国土上。
  *
@@ -24,6 +24,7 @@ import { renderLayer, type LayerId } from './layers';
 import { drawCivOverlay, type CivShow, type CivStyle } from './civ/overlay';
 import { civLabelChars, civLabelItems, civMapLayer, labelViewExtras } from './civ/labels';
 import { drawSettlementMarks, SYMBOL_BOX, SYMBOL_GROW, type SettlementKind } from './civ/settlements';
+import { drawWarfare, warsShown } from './civ/warfare';
 import { drawPlacedLabels, placeMap, type LabelMark, type LabelView, type PlacedMark } from './labels/draw';
 import { ensureFonts, familyFor, fontCss } from './labels/fonts';
 import { capitalAt, polityAlive, polityName } from '../gen/civ/growth';
@@ -311,10 +312,16 @@ export async function drawMapLabels(ctx: CanvasRenderingContext2D, p: ExportMapP
   // 弯边投影:国名按投影后的国土拟合
   const layer = civMapLayer(params, { proj: exportProj(p) });
   const items = geo.concat(layer.items);
-  if (!items.length && !layer.marks.length) return { labels: 0, marks: 0 };
+  const wars = warsShown(params);
+  if (!items.length && !layer.marks.length && !wars) return { labels: 0, marks: 0 };
   await ensureFonts(p.style, civLabelChars(p.civ), 15000);
   const lv = exportLabelView(p, S);
   const placed = placeMap(items, layer.marks, lv);
+  // 战事的战线、双剑:压在国界上、城镇符号和字底下(和屏幕上一样)
+  if (wars) {
+    const mp = exportProj(p);
+    drawWarfare(ctx, params, lv, mp ? projector(mp) : null);
+  }
   drawSettlementMarks(ctx, placed.marks, p.style);
   drawPlacedLabels(ctx, placed.labels, lv);
   return { labels: placed.labels.length, marks: placed.marks.length };

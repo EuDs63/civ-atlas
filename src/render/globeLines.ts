@@ -10,6 +10,7 @@
  *   - 屏幕上挨得太近(不到 MIN_SEG 像素)的顶点合并,整球视图下的顶点数少一大半
  *   - 靠近球边缘的线淡一点(和贴图边缘的暗角、大气光一致),见 fadeRim
  * 手绘风国界"每一笔粗细不一":按位置分三档粗细(和平面主图 inkDashes 同一个公式),每档一条线、虚线按屏幕像素。
+ * 战事的战线也在这里画(短齿按投影后的折线布,见 drawGlobeWarTeeth)。
  *
  * 纯计算的部分(建线、投影、裁剪)单测在 Node 里跑;画只用到 moveTo / lineTo / stroke。
  */
@@ -17,6 +18,7 @@ import type { Polyline } from './civ/lines';
 import type { SidedLine } from './civ/borders';
 import { inkPen } from './civ/borders';
 import type { CivStyle } from './civ/overlay';
+import { strokeFront, warLook, WAR_SIZE } from './civ/warfare';
 import { globeBasis, type GlobeFrame, type GlobeView } from './globe';
 
 const PI = Math.PI;
@@ -515,4 +517,64 @@ export function routeStrokes(r: GlobeRouteSets, style: CivStyle): GlobeLineStrok
     { sets: [r.trail], color: 'rgba(246,230,186,0.85)', width: 0.9, dash: [2.4, 2] },
     { sets: [r.road], color: 'rgba(248,228,174,0.97)', width: 1.2 },
   ];
+}
+
+// ---------------------------------------------------------------------------
+// 战事(warfare.ts):战线每帧按投影画;短齿、双剑按画布像素画在投影后的位置上
+
+const warCache = new WeakMap<readonly Polyline[], { W: number; set: GlobeLineSet }>();
+
+/** 战线(warfare.ts 的 warFront,守方在左边)→ 线组 */
+export function globeWarSet(front: readonly Polyline[], W: number, H: number): GlobeLineSet {
+  const hit = warCache.get(front);
+  if (hit && hit.W === W) return hit.set;
+  const set = buildLineSet(front, W, H);
+  warCache.set(front, { W, set });
+  return set;
+}
+
+/** 战线的描法(纸色垫底 + 红线,和平面主图一样的线宽) */
+export function warStrokes(set: GlobeLineSet, style: CivStyle): GlobeLineStroke[] {
+  const look = warLook(style);
+  return [
+    { sets: [set], color: look.paper, width: WAR_SIZE.frontPaper },
+    { sets: [set], color: look.red, width: WAR_SIZE.front },
+  ];
+}
+
+/**
+ * 战线上朝守方的短齿:先把战线按这一帧的投影描成画布上的折线(背面的裁掉,顺序不变),再在折线上按画布像素布齿。
+ * 正射投影从球外看,东在右、北在上,和平面主图一样:"守方在左边"投过来还是在左边
+ */
+export function drawGlobeWarTeeth(ctx: CanvasRenderingContext2D, P: GlobeProjector, set: GlobeLineSet, unit: number, style: CivStyle): void {
+  if (!set.chunks) return;
+  const polys: number[][] = [];
+  let cur: number[] = [];
+  traceLineSet(
+    {
+      moveTo(x, y) {
+        cur = [x, y];
+        polys.push(cur);
+      },
+      lineTo(x, y) {
+        cur.push(x, y);
+      },
+    },
+    set,
+    P,
+    12 + 10 * unit,
+  );
+  strokeFront(ctx, polys, unit, unit, style, false);
+}
+
+/** 世界坐标的一点 → 画布位置和朝向(朝向 < 0 = 在背面) */
+export function globePoint(P: GlobeProjector, wx: number, wy: number, W: number, H: number): [number, number, number] {
+  const lon = (wx / W) * TAU - PI;
+  const lat = PI / 2 - (wy / H) * PI;
+  const cl = Math.cos(lat);
+  const x = cl * Math.cos(lon);
+  const y = cl * Math.sin(lon);
+  const z = Math.sin(lat);
+  const { c, e, n } = P;
+  return [P.cx + P.R * (x * e[0] + y * e[1] + z * e[2]), P.cy - P.R * (x * n[0] + y * n[1] + z * n[2]), x * c[0] + y * c[1] + z * c[2]];
 }
