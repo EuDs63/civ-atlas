@@ -42,7 +42,7 @@ import {
 } from './common';
 import { keyed, smoothstep, subSeed } from '../gen/util';
 import { geometryOf } from '../gen/geometry';
-import { addProjectedLine, clipOutline, glyphMetric, insideProj, outlineOnCanvas, projector, relShifts, type GlyphMetric, type MapProj, type Projector, type ProjectionId } from './projection';
+import { addProjectedLine, clipOutline, glyphMetric, insideProj, outlineOnCanvas, projectLinePts, projector, relShifts, reprojectImage, type GlyphMetric, type MapProj, type Projector, type ProjectionId } from './projection';
 
 const PAPER = hexRGB('#efe2c2');
 const PAPER_EDGE = hexRGB('#c9ae7c');
@@ -86,66 +86,126 @@ export function renderFantasy(ctx: CanvasRenderingContext2D, world: World, r: Ra
 }
 
 /**
- * 海岸墨线、湖岸描边盖掉的像素原来是什么颜色(按投影重画时要一张"不带墨线"的像素层:墨线改成逐点投影的矢量线,
- * 线宽处处一致)。只记这些像素(约占全图百分之几),要用时再拼出那一张(fantasyBaseNoInk)
+ * 一批像素的原色(像素下标 + r, g, b):只记少数像素(约占全图百分之几到二十),要用时再拼回去(见 InkPatch)。
+ * 颜色存成 0–255(写进去时和写进 ImageData 一样取整)
  */
-interface InkPatch {
-  /** 海岸墨线:像素下标、原色(r, g, b 交错,已乘纸纹) */
-  coastK: number[];
-  coastC: number[];
-  /** 湖岸描边 */
-  lakeK: number[];
-  lakeC: number[];
+export class PixelPatch {
+  k = new Int32Array(4096);
+  c = new Uint8ClampedArray(3 * 4096);
+  n = 0;
+  push(k: number, r: number, g: number, b: number): void {
+    if (this.n === this.k.length) {
+      const k2 = new Int32Array(this.n * 2);
+      k2.set(this.k);
+      const c2 = new Uint8ClampedArray(this.n * 6);
+      c2.set(this.c);
+      this.k = k2;
+      this.c = c2;
+    }
+    const o = this.n * 3;
+    this.k[this.n] = k;
+    this.c[o] = r;
+    this.c[o + 1] = g;
+    this.c[o + 2] = b;
+    this.n++;
+  }
+  /** 把这些像素写进 d(RGBA),不透明 */
+  putInto(d: Uint8ClampedArray): void {
+    const { k, c } = this;
+    for (let i = 0; i < this.n; i++) {
+      const o = k[i] * 4;
+      d[o] = c[i * 3];
+      d[o + 1] = c[i * 3 + 1];
+      d[o + 2] = c[i * 3 + 2];
+      d[o + 3] = 255;
+    }
+  }
 }
 
+/**
+ * 墨线、波纹盖掉的像素原来是什么颜色。按投影重画、放大后的细节层要"不带墨线"的像素层(墨线改成矢量线,线宽处处一致、
+ * 放大多少倍都顺滑):只记这些像素,要用时再拼出那一张(fantasyBaseNoInk、fantasyBaseClean)
+ */
+interface InkPatch {
+  /** 海岸墨线(原色已乘纸纹;波纹、排线还在) */
+  coast: PixelPatch;
+  /** 湖岸描边 */
+  lake: PixelPatch;
+  /** 岸线外的波纹、近岸排线盖到的海面:这两样都没画时的颜色(海岸墨线也没画) */
+  sea: PixelPatch;
+}
+
+/**
+ * 放大后按矢量画波纹、近岸排线要用的两张场(铺像素时顺带记下;画法见 drawFantasySeaLines)
+ */
+interface SeaFields {
+  /** 每个像素离最近陆地的距离(像素,× DIST_Q / scale 存成整数,封顶约 16 格;陆地、湖 = 0) */
+  dist: Uint16Array;
+  /** 波纹、排线的浓淡倍数(0–255):冰区淡出(附近结冰越多越淡)× 没被海冰盖住的比例;陆地、湖、冰面 = 0 */
+  fade: Uint8Array;
+}
+/** SeaFields.dist 的精度:每格分成多少份 */
+export const DIST_Q = 4096;
+
 /** 当前这张地图的像素层(只留一份,换了世界就释放) */
-let base: { raster: Raster; canvas: AnyCanvas; patch: InkPatch } | null = null;
+let base: { raster: Raster; canvas: AnyCanvas; patch: InkPatch; sea: SeaFields } | null = null;
 
 /** 像素层:纸、水彩、海、海冰、海岸墨线、湖岸(不含符号、河流、图框) */
 export function fantasyBase(world: World, r: Raster): AnyCanvas {
   if (base?.raster === r) return base.canvas;
   if (base) base.canvas.width = base.canvas.height = 0;
   const cv = makeCanvas(r.w, r.h);
-  const patch: InkPatch = { coastK: [], coastC: [], lakeK: [], lakeC: [] };
-  paintBase(cv.getContext('2d') as CanvasRenderingContext2D, world, r, patch);
-  base = { raster: r, canvas: cv, patch };
+  const patch: InkPatch = { coast: new PixelPatch(), lake: new PixelPatch(), sea: new PixelPatch() };
+  const sea: SeaFields = { dist: new Uint16Array(r.w * r.h), fade: new Uint8Array(r.w * r.h) };
+  paintBase(cv.getContext('2d') as CanvasRenderingContext2D, world, r, patch, sea);
+  base = { raster: r, canvas: cv, patch, sea };
   return cv;
 }
 
-/** 不带海岸墨线、湖岸描边的像素层(弯边投影按投影重画时用;墨线另外按投影画成矢量线,见 drawFantasyCoasts) */
+/** 像素层 src 上把 patches 记下的像素依次换回原色,拼成一张新画布 */
+function patchedBase(src: AnyCanvas, r: Raster, patches: PixelPatch[]): AnyCanvas {
+  const cv = makeCanvas(r.w, r.h);
+  const ctx = cv.getContext('2d') as CanvasRenderingContext2D;
+  ctx.drawImage(src, 0, 0);
+  const img = new ImageData(r.w, r.h);
+  for (const p of patches) p.putInto(img.data);
+  const tmp = makeCanvas(r.w, r.h);
+  (tmp.getContext('2d') as CanvasRenderingContext2D).putImageData(img, 0, 0);
+  ctx.drawImage(tmp, 0, 0);
+  tmp.width = tmp.height = 0;
+  return cv;
+}
+
+/** 不带海岸墨线、湖岸描边的像素层(弯边投影的地形图按投影重画时用;墨线另外按投影画成矢量线,见 drawFantasyCoasts) */
 let noInk: { raster: Raster; canvas: AnyCanvas } | null = null;
 
 export function fantasyBaseNoInk(world: World, r: Raster): AnyCanvas {
   const src = fantasyBase(world, r);
   if (noInk?.raster === r) return noInk.canvas;
   if (noInk) noInk.canvas.width = noInk.canvas.height = 0;
-  const patch = base!.patch;
-  const cv = makeCanvas(r.w, r.h);
-  const ctx = cv.getContext('2d') as CanvasRenderingContext2D;
-  ctx.drawImage(src, 0, 0);
-  // 盖掉墨线的像素换回原色:先湖岸、再海岸(两样都描过的像素,海岸记下的是两样都没描时的颜色)
-  const img = new ImageData(r.w, r.h);
-  const d = img.data;
-  const put = (K: number[], C: number[]) => {
-    for (let i = 0; i < K.length; i++) {
-      const o = K[i] * 4;
-      d[o] = C[i * 3];
-      d[o + 1] = C[i * 3 + 1];
-      d[o + 2] = C[i * 3 + 2];
-      d[o + 3] = 255;
-    }
-  };
-  put(patch.lakeK, patch.lakeC);
-  put(patch.coastK, patch.coastC);
-  const tmp = makeCanvas(r.w, r.h);
-  (tmp.getContext('2d') as CanvasRenderingContext2D).putImageData(img, 0, 0);
-  ctx.drawImage(tmp, 0, 0);
-  tmp.width = tmp.height = 0;
-  noInk = { raster: r, canvas: cv };
-  return cv;
+  // 先湖岸、再海岸(两样都描过的像素,海岸记下的是两样都没描时的颜色)
+  const { lake, coast } = base!.patch;
+  noInk = { raster: r, canvas: patchedBase(src, r, [lake, coast]) };
+  return noInk.canvas;
 }
 
-function paintBase(ctx: CanvasRenderingContext2D, world: World, r: Raster, patch: InkPatch) {
+/**
+ * 不带海岸墨线、湖岸描边、岸线外波纹、近岸排线的像素层(放大后的细节层用:这几样都改画成矢量线,
+ * 见 drawFantasyCoasts、drawFantasySeaLines)。第一次放大时拼出来
+ */
+let clean: { raster: Raster; canvas: AnyCanvas } | null = null;
+
+export function fantasyBaseClean(world: World, r: Raster): AnyCanvas {
+  const src = fantasyBase(world, r);
+  if (clean?.raster === r) return clean.canvas;
+  if (clean) clean.canvas.width = clean.canvas.height = 0;
+  // 波纹、排线盖到的像素最后换:记下的颜色连海岸墨线也没画
+  const { lake, coast, sea } = base!.patch;
+  clean = { raster: r, canvas: patchedBase(src, r, [lake, coast, sea]) };
+  return clean.canvas;
+}
+
+function paintBase(ctx: CanvasRenderingContext2D, world: World, r: Raster, patch: InkPatch, sea: SeaFields) {
   const { w, h, water, biome } = r;
   const N = w * h;
   const S = r.scale;
@@ -182,7 +242,7 @@ function paintBase(ctx: CanvasRenderingContext2D, world: World, r: Raster, patch
 
   const img = ctx.createImageData(w, h);
   const d = img.data;
-  paintPixels(r, d, { dLand, dSea, shade, calm, iceM, iceNear, pr, pg, pb, patch });
+  paintPixels(r, d, { dLand, dSea, shade, calm, iceM, iceNear, pr, pg, pb, patch, sea });
   // 湖岸描边(东西相连,左右两列也描:邻居在另一头)
   for (let py = 1; py < h - 1; py++) {
     for (let px = 0; px < w; px++) {
@@ -192,8 +252,7 @@ function paintBase(ctx: CanvasRenderingContext2D, world: World, r: Raster, patch
       const rt = px < w - 1 ? k + 1 : k - w + 1;
       if (water[lf] !== 2 || water[rt] !== 2 || water[k - w] !== 2 || water[k + w] !== 2) {
         const o = k * 4;
-        patch.lakeK.push(k);
-        patch.lakeC.push(d[o], d[o + 1], d[o + 2]);
+        patch.lake.push(k, d[o], d[o + 1], d[o + 2]);
         d[o] = d[o] * 0.35 + INK[0] * 0.65;
         d[o + 1] = d[o + 1] * 0.35 + INK[1] * 0.65;
         d[o + 2] = d[o + 2] * 0.35 + INK[2] * 0.65;
@@ -352,8 +411,8 @@ export function fantasyCoastLines(r: Raster): { sea: Float32Array[]; lake: Float
     else if (water[k] === 2) lake[k] = 1;
   }
   c = {
-    sea: traceMask(r, sea, true),
-    lake: traceMask(r, lake, false).map((p) => chaikinPts(chaikinPts(p))),
+    sea: traceMask(r, sea, elevCross(r.elev)),
+    lake: traceMask(r, lake).map((p) => chaikinPts(chaikinPts(p))),
   };
   coastCache.set(r, c);
   return c;
@@ -400,14 +459,26 @@ const MS_EXIT = new Int8Array(16 * 4).fill(-1);
   pair(10, 2, 1);
 }
 
+/** 相邻两个像素 ka、kb 之间海拔过零处(从 ka 量起的比例;不过零 = 中点):海岸线、像素层画海岸墨线都按它 */
+function elevCross(elev: ArrayLike<number>): (ka: number, kb: number) => number {
+  return (ka, kb) => {
+    const ea = elev[ka];
+    const eb = elev[kb];
+    return ea < 0 !== eb < 0 && ea !== eb ? Math.max(0.02, Math.min(0.98, ea / (ea - eb))) : 0.5;
+  };
+}
+
+/** traceMask 只用到像素图的这几样 */
+export type GridLike = Pick<Raster, 'w' | 'h' | 'scale'>;
+
 /**
  * 在二值图 inside 上走方格(marching squares 沿线追踪),描出里外的分界折线(世界坐标,x 展开成连续的)。
  * 方格 (x, y) 的四角是像素 (x, y)、(x+1, y)、(x+1, y+1)、(x, y+1) 的中心(x 东西相连);
- * 线过像素之间的边:byElev 时交点按海拔过零处插值,否则取中点。
+ * 线过像素之间的边:交点在 cross(两头的像素)处(从前一个像素量起的比例),不给 = 中点。
  * 边编号:横边 (x, y)—(x+1, y) = 2(y·w + x),竖边 (x, y)—(x, y+1) = 2(y·w + x) + 1
  */
-function traceMask(r: Raster, inside: Uint8Array, byElev: boolean): Float32Array[] {
-  const { w, h, elev, scale: S } = r;
+function traceMask(r: GridLike, inside: Uint8Array, cross?: (ka: number, kb: number) => number): Float32Array[] {
+  const { w, h, scale: S } = r;
   const W = w / S;
   const visited = new Uint8Array(2 * w * h);
   const caseAt = (x: number, y: number) => {
@@ -424,12 +495,7 @@ function traceMask(r: Raster, inside: Uint8Array, byElev: boolean): Float32Array
     const vert = id & 1;
     const ka = y * w + x;
     const kb = vert ? ka + w : y * w + (x + 1 === w ? 0 : x + 1);
-    let t = 0.5;
-    if (byElev) {
-      const ea = elev[ka];
-      const eb = elev[kb];
-      if (ea < 0 !== eb < 0 && ea !== eb) t = Math.max(0.02, Math.min(0.98, ea / (ea - eb)));
-    }
+    const t = cross ? cross(ka, kb) : 0.5;
     out.push(vert ? (x + 0.5) / S : (x + 0.5 + t) / S, vert ? (y + 0.5 + t) / S : (y + 0.5) / S);
   };
   const out: Float32Array[] = [];
@@ -643,13 +709,18 @@ export function simplifyLine(p: Float32Array, tol: number): Float32Array {
 
 /**
  * 范围 [x0, x1] × [y0, y1](世界坐标,x 可以伸出左右边)里有哪些段:每一份调一次 fn(段号, 横向平移量)。
- * 东西相连(周期 W):一段平移整圈后落进范围的也算(挨着左右边的段在另一边再出一份;范围比一整圈宽时可能出好几份)
+ * 东西相连(周期 W):一段平移整圈后落进范围的也算(挨着左右边的段在另一边再出一份;范围比一整圈宽时可能出好几份)。
+ * W = 0:不相连(弯边投影的地图平面),只看外框和范围有没有交叠
  */
 export function forChunksIn(c: CoastChunks, W: number, x0: number, y0: number, x1: number, y1: number, fn: (j: number, dx: number) => void): void {
   const b = c.box;
   for (let j = 0; j < c.pts.length; j++) {
     const o = j * 4;
     if (b[o + 1] > y1 || b[o + 3] < y0) continue;
+    if (!W) {
+      if (b[o] <= x1 && b[o + 2] >= x0) fn(j, 0);
+      continue;
+    }
     // 从刚好不在范围左边的那一份起,往右一份一份地挪
     for (let dx = Math.ceil((x0 - b[o + 2]) / W) * W; b[o] + dx <= x1; dx += W) fn(j, dx);
   }
@@ -671,6 +742,326 @@ function chunkPath(c: CoastChunks, lod: number, W: number, x0: number, y0: numbe
     else out.addPath(p);
   });
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// 放大后的岸线外波纹、近岸排线(矢量线)
+
+/**
+ * 放大后矢量画的波纹、近岸排线(代替像素层里的那两样;每张像素图一份,第一次放大时算):
+ *   波纹 = 离陆地距离场的等值线(RIPPLE_D 格;走方格、交点按距离插值,和像素层的位置一样),切成小段(同海岸);
+ *   排线 = 每隔几行、离陆地 HATCH_D 格以内的海面横线段,靠岸那一头停在海岸线上(按海拔过零处插值)。
+ * 浓淡(离岸越远越淡、冰区淡出、被海冰盖住的地方不画)不写进线里:线的颜色取一张按像素算好的浓度图
+ * (画布图案,放大时双线性插值)—— 线是锐的,淡出是平滑的,和像素层逐像素的浓淡一致
+ */
+interface SeaLines {
+  raster: Raster;
+  /** 三圈波纹(世界坐标折线,x 展开成连续的) */
+  rings: Float32Array[][];
+  /** 同上,切成小段(等距圆柱只画视口附近的段) */
+  ringChunks: CoastChunks[];
+  /** 排线:(x0, x1, y) 交错,世界坐标,按 y 从小到大 */
+  hatch: Float32Array;
+  /** 浓度图(颜色 = 墨色,透明度 = 浓度;和像素图一样大):波纹 / 排线 */
+  rippleFade: AnyCanvas;
+  hatchFade: AnyCanvas;
+  pats: { ripple: CanvasPattern; hatch: CanvasPattern } | null;
+}
+let seaLines: SeaLines | null = null;
+
+/** 波纹、排线只用到像素图的这几样 */
+export type SeaGrid = Pick<Raster, 'w' | 'h' | 'scale' | 'water' | 'elev'>;
+
+/**
+ * 三圈波纹的等值线:dist(见 SeaFields)上 RIPPLE_D 格处走方格,再抹平一遍。浓度为 0 的地方(冰面、冰区深处)那几截不要
+ */
+export function seaRippleLines(r: SeaGrid, dist: Uint16Array, fade: Uint8Array): Float32Array[][] {
+  const N = r.w * r.h;
+  const inside = new Uint8Array(N);
+  return RIPPLE_D.map((D) => {
+    const L = D * DIST_Q;
+    for (let k = 0; k < N; k++) inside[k] = dist[k] < L ? 1 : 0;
+    const lines = traceMask(r, inside, (ka, kb) => (L - dist[ka]) / (dist[kb] - dist[ka]));
+    // 交点一格一个,放大很多倍时看得出折角:抹平一遍
+    return dropFaded(lines.map(chaikinPts), r, fade);
+  });
+}
+
+/** 折线上浓度为 0 的那几截去掉(两头的点四周四个像素的浓度都是 0 的线段),剩下的断成几条 */
+function dropFaded(lines: Float32Array[], r: GridLike, fade: Uint8Array): Float32Array[] {
+  const { w, h, scale: S } = r;
+  const on = (x: number, y: number) => {
+    const fx = Math.floor(x * S - 0.5);
+    const fy = Math.floor(y * S - 0.5);
+    for (let j = 0; j < 2; j++) {
+      const yy = Math.min(h - 1, Math.max(0, fy + j));
+      for (let i = 0; i < 2; i++) if (fade[yy * w + ((((fx + i) % w) + w) % w)]) return true;
+    }
+    return false;
+  };
+  const out: Float32Array[] = [];
+  for (const p of lines) {
+    const m = p.length / 2;
+    const ok = new Uint8Array(m);
+    let all = true;
+    for (let i = 0; i < m; i++) {
+      ok[i] = on(p[i * 2], p[i * 2 + 1]) ? 1 : 0;
+      if (!ok[i]) all = false;
+    }
+    if (all) {
+      out.push(p);
+      continue;
+    }
+    // 线段 i → i+1 留下:两头有一头有浓度
+    let a = -1;
+    for (let i = 0; i < m; i++) {
+      const keep = i < m - 1 && (ok[i] || ok[i + 1]);
+      if (keep && a < 0) a = i;
+      if (!keep && a >= 0) {
+        out.push(p.slice(a * 2, i * 2 + 2));
+        a = -1;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 近岸排线:每隔 hatchRowOf(scale) 行,离陆地 HATCH_D 格以内、浓度不为 0 的海面像素连成横线段(x0, x1, y,世界坐标)。
+ * 挨着陆地的一头停在海岸线上(两个像素之间海拔过零处);另一头伸到下一个像素的中心(那里浓度已经是 0,淡出看不出头)。
+ * 东西相连:跨过左右边的那一段 x 展开成连续的(可能伸出右边)
+ */
+export function seaHatchSegments(r: SeaGrid, dist: Uint16Array, fade: Uint8Array): Float32Array {
+  const { w, h, water, scale: S } = r;
+  const L = HATCH_D * DIST_Q;
+  const cross = elevCross(r.elev);
+  const ok = (k: number) => water[k] === 1 && dist[k] < L && fade[k] > 0;
+  const out: number[] = [];
+  for (let py = 0; py < h; py += hatchRowOf(S)) {
+    const row = py * w;
+    const y = (py + 0.5) / S;
+    // 从一个不画的像素起扫一整圈(跨过左右边的线段不断开)
+    let x0 = 0;
+    while (x0 < w && ok(row + x0)) x0++;
+    if (x0 === w) {
+      out.push(0, w / S, y);
+      continue;
+    }
+    let a = -1;
+    for (let u = x0 + 1; u <= x0 + w; u++) {
+      const on = u < x0 + w && ok(row + (u % w));
+      if (on && a < 0) a = u;
+      if (!on && a >= 0) {
+        // 线段:像素 a … u − 1(展开的列号)
+        const ka = row + (a % w);
+        const kl = row + ((a - 1) % w);
+        const kb = row + ((u - 1) % w);
+        const kr = row + (u % w);
+        const xa = water[kl] === 1 ? a - 0.5 : a - 0.5 + cross(kl, ka);
+        const xb = water[kr] === 1 ? u + 0.5 : u - 0.5 + cross(kb, kr);
+        out.push(xa / S, xb / S, y);
+        a = -1;
+      }
+    }
+  }
+  return Float32Array.from(out);
+}
+
+/**
+ * 排线的浓度图(0–255):浓淡倍数 × 离岸越远越淡(1 − 距离 / HATCH_D 格)。
+ * 挨着海面的陆地像素取相邻海面像素里最大的那个 —— 排线一直画到海岸线上,浓度图在岸边不往下掉
+ */
+export function seaHatchAlpha(r: SeaGrid, dist: Uint16Array, fade: Uint8Array): Uint8Array {
+  const { w, h, water } = r;
+  const N = w * h;
+  const L = HATCH_D * DIST_Q;
+  const a = new Uint8Array(N);
+  for (let k = 0; k < N; k++) if (water[k] === 1 && fade[k] && dist[k] < L) a[k] = Math.round(fade[k] * (1 - dist[k] / L));
+  // 离陆地不到 1.5 格的海面像素把自己的浓度推给四周的陆地像素(取最大)
+  const near = 1.5 * DIST_Q;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const k = y * w + x;
+      const v = a[k];
+      if (!v || water[k] !== 1 || dist[k] > near) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const q = yy * w + (x + dx < 0 ? x + dx + w : x + dx >= w ? x + dx - w : x + dx);
+          if (water[q] !== 1 && a[q] < v) a[q] = v;
+        }
+      }
+    }
+  }
+  return a;
+}
+
+/**
+ * 范围 [x0, x1] × [y0, y1](世界坐标,x 可以伸出左右边)里有哪些排线:每一份调一次 fn(第几条, 横向平移量)。
+ * 东西相连(周期 W;W = 0 不相连),同 forChunksIn
+ */
+export function forHatchIn(seg: Float32Array, W: number, x0: number, y0: number, x1: number, y1: number, fn: (i: number, dx: number) => void): void {
+  const n = seg.length / 3;
+  // 按 y 排好的:先二分找到第一条 y ≥ y0 的
+  let lo = 0;
+  let hi = n;
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (seg[m * 3 + 2] < y0) lo = m + 1;
+    else hi = m;
+  }
+  for (let i = lo; i < n && seg[i * 3 + 2] <= y1; i++) {
+    const a = seg[i * 3];
+    const b = seg[i * 3 + 1];
+    if (!W) {
+      if (a <= x1 && b >= x0) fn(i, 0);
+      continue;
+    }
+    for (let dx = Math.ceil((x0 - b) / W) * W; a + dx <= x1; dx += W) fn(i, dx);
+  }
+}
+
+/** 浓度图:颜色 = 墨色,透明度 = alpha */
+function inkAlphaCanvas(alpha: Uint8Array, w: number, h: number): AnyCanvas {
+  const img = new ImageData(w, h);
+  const d = img.data;
+  for (let k = 0; k < w * h; k++) {
+    if (!alpha[k]) continue;
+    const o = k * 4;
+    d[o] = INK[0];
+    d[o + 1] = INK[1];
+    d[o + 2] = INK[2];
+    d[o + 3] = alpha[k];
+  }
+  const cv = makeCanvas(w, h);
+  (cv.getContext('2d') as CanvasRenderingContext2D).putImageData(img, 0, 0);
+  return cv;
+}
+
+function seaLinesOf(world: World, r: Raster): SeaLines {
+  fantasyBase(world, r);
+  if (seaLines?.raster === r) return seaLines;
+  if (seaLines) seaLines.rippleFade.width = seaLines.rippleFade.height = seaLines.hatchFade.width = seaLines.hatchFade.height = 0;
+  const { dist, fade } = base!.sea;
+  const rings = seaRippleLines(r, dist, fade);
+  seaLines = {
+    raster: r,
+    rings,
+    ringChunks: rings.map((ls) => coastChunks(ls)),
+    hatch: seaHatchSegments(r, dist, fade),
+    rippleFade: inkAlphaCanvas(fade, r.w, r.h),
+    hatchFade: inkAlphaCanvas(seaHatchAlpha(r, dist, fade), r.w, r.h),
+    pats: null,
+  };
+  return seaLines;
+}
+
+/**
+ * 弯边投影:波纹、排线投影到地图平面(每个投影 + 中心一份)。波纹逐点投影后照样切成小段(只画视口附近的、按画布像素抽稀,
+ * 同等距圆柱);排线:纬线投影后还是水平线,横线段投影后还是横线段(伸出 ±180° 的那截在另一边再出一份),按 y 排好。
+ * 浓度图按投影重铺一张(和地图平面一样大)
+ */
+let seaPaths: { raster: Raster; key: string; rings: CoastChunks[]; hatch: Float32Array; rippleFade: AnyCanvas; hatchFade: AnyCanvas; pats: { ripple: CanvasPattern; hatch: CanvasPattern } | null } | null = null;
+
+/** 排线 (x0, x1, y) 投影到地图平面,按 y 排好 */
+export function projectHatch(seg: Float32Array, pj: Projector): Float32Array {
+  const unit = { s: 1, ox: 0, oy: 0 };
+  const out: number[] = [];
+  for (let i = 0; i < seg.length; i += 3)
+    for (const p of projectLinePts([seg[i], seg[i + 2], seg[i + 1], seg[i + 2]], 2, pj, unit)) {
+      const xa = p[0];
+      const xb = p[p.length - 2];
+      out.push(Math.min(xa, xb), Math.max(xa, xb), p[1]);
+    }
+  const n = out.length / 3;
+  const order = Array.from({ length: n }, (_, i) => i).sort((i, j) => out[i * 3 + 2] - out[j * 3 + 2]);
+  const res = new Float32Array(out.length);
+  order.forEach((i, j) => res.set(out.slice(i * 3, i * 3 + 3), j * 3));
+  return res;
+}
+
+/** 浓度图当线的颜色:图案按像素图的像素 → 世界(地图平面)坐标摆放 */
+function fadePatterns(ctx: CanvasRenderingContext2D, ripple: AnyCanvas, hatch: AnyCanvas, S: number, rep: 'repeat' | 'no-repeat') {
+  const m = new DOMMatrix([1 / S, 0, 0, 1 / S, 0, 0]);
+  const make = (cv: AnyCanvas) => {
+    const p = ctx.createPattern(cv, rep)!;
+    p.setTransform(m);
+    return p;
+  };
+  return { ripple: make(ripple), hatch: make(hatch) };
+}
+
+/**
+ * 放大后的岸线外波纹、近岸排线(代替像素层里的那两样,像素层放大后是一格一格的方块),位置、浓淡和像素层一样,
+ * 线宽跟着符号一起按 glyphScale 收(和海岸墨线同一套)。画在海岸墨线之前。
+ * 只画画布附近的波纹段、排线,波纹按画布像素抽稀(同 drawFantasyCoasts 的等距圆柱)。
+ *   弯边投影(v.proj):地图平面上的段、排线(见 seaPaths),浓度图按投影重铺
+ *   等距圆柱:世界坐标;东西相连,伸出左右边的在另一边再画一份,浓度图左右平铺
+ */
+export function drawFantasySeaLines(ctx: CanvasRenderingContext2D, world: World, r: Raster, v: VecView): void {
+  const sl = seaLinesOf(world, r);
+  const S = r.scale;
+  const gs = glyphScale(v.k);
+  let chunks: CoastChunks[];
+  let seg: Float32Array;
+  let W: number;
+  let pats: { ripple: CanvasPattern; hatch: CanvasPattern };
+  const pj = v.proj;
+  if (pj) {
+    if (!seaPaths || seaPaths.raster !== r || seaPaths.key !== pj.mp.key) {
+      if (seaPaths) seaPaths.rippleFade.width = seaPaths.rippleFade.height = seaPaths.hatchFade.width = seaPaths.hatchFade.height = 0;
+      const unit = { s: 1, ox: 0, oy: 0 };
+      const rings = sl.rings.map((ls) => coastChunks(ls.flatMap((q) => projectLinePts(q, 2, pj, unit).map((p) => Float32Array.from(p)))));
+      const reproj = (src: AnyCanvas) => {
+        const cv = makeCanvas(r.w, r.h);
+        reprojectImage(cv.getContext('2d') as CanvasRenderingContext2D, src, r.w, r.h, pj.mp, { s: S, ox: 0, oy: 0 }, 'low');
+        return cv;
+      };
+      seaPaths = { raster: r, key: pj.mp.key, rings, hatch: projectHatch(sl.hatch, pj), rippleFade: reproj(sl.rippleFade), hatchFade: reproj(sl.hatchFade), pats: null };
+    }
+    seaPaths.pats ??= fadePatterns(ctx, seaPaths.rippleFade, seaPaths.hatchFade, S, 'no-repeat');
+    ({ rings: chunks, hatch: seg, pats } = seaPaths);
+    W = 0;
+  } else {
+    sl.pats ??= fadePatterns(ctx, sl.rippleFade, sl.hatchFade, S, 'repeat');
+    ({ ringChunks: chunks, hatch: seg, pats } = sl);
+    W = r.w / S;
+  }
+  // 抽稀、范围同 drawFantasyCoasts
+  let lod = 0;
+  while (lod + 1 < COAST_LOD.length && COAST_LOD[lod + 1] * v.s <= COAST_TOL) lod++;
+  const pad = RIPPLE_SIG * gs + COAST_LOD[lod];
+  const x0 = -v.ox / v.s - pad;
+  const y0 = -v.oy / v.s - pad;
+  const x1 = (ctx.canvas.width - v.ox) / v.s + pad;
+  const y1 = (ctx.canvas.height - v.oy) / v.s + pad;
+  const rings = chunks.map((c) => chunkPath(c, lod, W, x0, y0, x1, y1));
+  const hatch = new Path2D();
+  forHatchIn(seg, W, x0, y0, x1, y1, (i, dx) => {
+    hatch.moveTo(seg[i * 3] + dx, seg[i * 3 + 2]);
+    hatch.lineTo(seg[i * 3 + 1] + dx, seg[i * 3 + 2]);
+  });
+  ctx.save();
+  ctx.setTransform(v.s, 0, 0, v.s, v.ox, v.oy);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'low';
+  // 排线:一个像素高(放大后按 glyphScale 收)
+  ctx.strokeStyle = pats.hatch;
+  ctx.globalAlpha = HATCH_A;
+  ctx.lineCap = 'butt';
+  ctx.lineWidth = gs / S;
+  ctx.stroke(hatch);
+  // 波纹:墨量和像素层的高斯剖面一样的实线
+  ctx.strokeStyle = pats.ripple;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = RIPPLE_SIG * Math.sqrt(Math.PI) * gs;
+  for (let i = 0; i < rings.length; i++) {
+    ctx.globalAlpha = RIPPLE_A[i];
+    ctx.stroke(rings[i]);
+  }
+  ctx.restore();
 }
 
 /** 弯边投影的符号层(缩放 1 倍,和地图平面一样大;林块、河、山……,不含海岸):地形图贴它,文明层按它的形状"让位" */
@@ -729,14 +1120,22 @@ export function fantasyInkProj(world: World, r: Raster, mp: MapProj, forest: num
 }
 
 /**
- * 回到等距圆柱时释放按投影重画用的缓存(符号层、遮罩几十 MB 显存)。
- * 不带墨线的像素层留着:等距圆柱放大后的细节层也用它
+ * 回到等距圆柱时释放按投影重画用的缓存(符号层、遮罩、不带墨线的像素层、投影后的波纹浓度图,几十 MB 显存)。
+ * 等距圆柱放大后的细节层用的是 fantasyBaseClean,不用不带墨线的那一份
  */
 export function releaseFantasyProjCaches(): void {
   if (projSym) {
     projSym.canvas.width = projSym.canvas.height = 0;
     if (projSym.ink) projSym.ink.hard.width = projSym.ink.hard.height = projSym.ink.soft.width = projSym.ink.soft.height = 0;
     projSym = null;
+  }
+  if (noInk) {
+    noInk.canvas.width = noInk.canvas.height = 0;
+    noInk = null;
+  }
+  if (seaPaths) {
+    seaPaths.rippleFade.width = seaPaths.rippleFade.height = seaPaths.hatchFade.width = seaPaths.hatchFade.height = 0;
+    seaPaths = null;
   }
   coastPaths = null;
   projCellCache = null;
@@ -869,9 +1268,26 @@ interface PixelFields {
   pr: Float32Array;
   pg: Float32Array;
   pb: Float32Array;
-  /** 记下海岸墨线盖掉的像素原色(见 InkPatch) */
+  /** 记下墨线、波纹盖掉的像素原色(见 InkPatch) */
   patch: InkPatch;
+  /** 记下放大后画矢量波纹、排线要用的场 */
+  sea: SeaFields;
 }
+
+/**
+ * 岸线外的三圈波纹:离最近陆地几格(× raster.scale)、浓度。像素层里剖面是高斯 exp(−(Δ / (RIPPLE_SIG 格))²);
+ * 放大后的矢量线取墨量相同的实线(宽 RIPPLE_SIG·√π 格)
+ */
+const RIPPLE_D = [4, 9, 15];
+const RIPPLE_A = [0, 1, 2].map((i) => 0.42 - i * 0.12);
+const RIPPLE_SIG = 0.55;
+/** 近岸排线:离陆地几格以内画、最浓多少(离岸越远越淡) */
+const HATCH_D = 9;
+const HATCH_A = 0.16;
+/** 近岸排线隔几行画一道(像素) */
+const hatchRowOf = (S: number) => Math.max(2, Math.round(3 * S));
+/** 波纹浓度低于这个就算没画(差不到半个色阶) */
+const RIPPLE_EPS = 1e-3;
 
 /** 逐像素铺纸色、水彩、海冰、海岸墨线(单独成函数:热循环单独编译优化,快一些) */
 function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
@@ -879,11 +1295,13 @@ function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
   const N = w * h;
   const S = r.scale;
   const { dLand, dSea, shade, calm, iceM, iceNear, pr, pg, pb, patch } = f;
+  const { dist: seaDist, fade: seaFade } = f.sea;
+  const distQ = DIST_Q / S;
   const snowR = Math.max(1, Math.round(3 * S)); // 雪地明暗的柔化半径
   const rimD = Math.max(2, Math.round(2.5 * S)); // 冰块东南侧背光边的宽度
   let iceHatch = Math.max(3, Math.round(3 * S));
-  const ripples = [4, 9, 15].map((v) => v * S);
-  const hatchRow = Math.max(2, Math.round(3 * S));
+  const ripples = RIPPLE_D.map((v) => v * S);
+  const hatchRow = hatchRowOf(S);
   // 东西相连:纸纹、水彩斑驳的噪声格数取整,冰面排线的间距取图宽的约数 —— 左右两边对得上;
   // 主图是一整圈星球,不是一页纸,这里不做纸边做旧(画在视窗上,见 drawPaperEdge)
   while (w % iceHatch) iceHatch++;
@@ -910,6 +1328,13 @@ function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
     let cb = p2;
     let t: number;
     const grain = 1 + 0.035 * (fiber - 0.5);
+    // 波纹、排线画上之前的颜色(放大后的细节层另外画成矢量线,底图要一份没画这两样的,见 InkPatch.sea)
+    let touched = false;
+    let qr = 0;
+    let qg = 0;
+    let qb = 0;
+    const dk = dLand[k];
+    seaDist[k] = dk * distQ < 65535 ? Math.round(dk * distQ) : 65535;
 
     if (water[k] === 1) {
       const nq = iceNear[k];
@@ -939,6 +1364,7 @@ function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
           B = sum / cnt;
         } else B = m0; // 上下左右都和自己一样:冰面内部或开阔水面(斜角的零星差别忽略)
       }
+      let fo = 0; // 波纹、排线的浓淡倍数(SeaFields.fade)
       if (B < 1) {
         const dl = dLand[k];
         // 海色按海底深浅(铺像素时的海深本来就平滑,直接用):
@@ -973,23 +1399,29 @@ function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
           open = 1 - smoothstep(0.02, 0.3, conc);
         }
         if (open > 0) {
+          qr = cr;
+          qg = cg;
+          qb = cb;
           // 近岸排线
-          if (dl < 9 * S && py % hatchRow === 0) {
-            t = 0.16 * (1 - dl / (9 * S)) * open;
+          if (dl < HATCH_D * S && py % hatchRow === 0) {
+            t = HATCH_A * (1 - dl / (HATCH_D * S)) * open;
             cr += (INK[0] - cr) * t;
             cg += (INK[1] - cg) * t;
             cb += (INK[2] - cb) * t;
+            touched = t > 0;
           }
           // 岸线外的波纹
           let a = 0;
           for (let i = 0; i < ripples.length; i++) {
-            const u = (dl - ripples[i]) / (0.55 * S);
-            a = Math.max(a, Math.exp(-u * u) * (0.42 - i * 0.12));
+            const u = (dl - ripples[i]) / (RIPPLE_SIG * S);
+            a = Math.max(a, Math.exp(-u * u) * RIPPLE_A[i]);
           }
           t = a * open;
           cr += (INK[0] - cr) * t;
           cg += (INK[1] - cg) * t;
           cb += (INK[2] - cb) * t;
+          if (t > RIPPLE_EPS) touched = true;
+          fo = open;
         }
       }
       if (B > 0) {
@@ -1013,6 +1445,12 @@ function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
         cr += (ir - cr) * ice;
         cg += (ig - cg) * ice;
         cb += (ib - cb) * ice;
+        fo *= 1 - ice;
+        if (touched) {
+          qr += (ir - qr) * ice;
+          qg += (ig - qg) * ice;
+          qb += (ib - qb) * ice;
+        }
         // 冰缘墨线(B≈0.5);冰区稀疏处(零星碎冰)线条更淡
         const e = 4 * B * (1 - B);
         if (e > 0.3) {
@@ -1020,8 +1458,14 @@ function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
           cr += (ICE_INK[0] - cr) * t;
           cg += (ICE_INK[1] - cg) * t;
           cb += (ICE_INK[2] - cb) * t;
+          if (touched) {
+            qr += (ICE_INK[0] - qr) * t;
+            qg += (ICE_INK[1] - qg) * t;
+            qb += (ICE_INK[2] - qb) * t;
+          }
         }
       }
+      seaFade[k] = Math.round(fo * 255);
     } else if (water[k] === 2) {
       cr += (SEA[0] - cr) * 0.55;
       cg += (SEA[1] - cg) * 0.55;
@@ -1080,14 +1524,12 @@ function paintPixels(r: Raster, d: Uint8ClampedArray, f: PixelFields) {
       const sd = Math.abs(e / g);
       const a = Math.max(0, Math.min(1, (1.15 * S - sd) / (0.8 * S)));
       t = a * 0.95;
-      if (t > 0) {
-        patch.coastK.push(k);
-        patch.coastC.push(cr * grain, cg * grain, cb * grain);
-      }
+      if (t > 0) patch.coast.push(k, cr * grain, cg * grain, cb * grain);
       cr += (INK[0] - cr) * t;
       cg += (INK[1] - cg) * t;
       cb += (INK[2] - cb) * t;
     }
+    if (touched) patch.sea.push(k, qr * grain, qg * grain, qb * grain);
     const o = k * 4;
     d[o] = cr * grain;
     d[o + 1] = cg * grain;
