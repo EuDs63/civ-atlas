@@ -1277,7 +1277,8 @@ button.primary:hover {
 .stage:active {
   cursor: grabbing;
 }
-.canvas-wrap {
+.canvas-wrap,
+.canvas-wrap-upper {
   position: absolute;
   inset: 0;
   transform-origin: 0 0;
@@ -1285,29 +1286,49 @@ button.primary:hover {
   align-items: center;
   justify-content: center;
 }
-.map-box {
+/* 文明层、回放那一层地图框不接鼠标:按下、单击照旧落在地形图那一层(.canvas-wrap)上 */
+.canvas-wrap-upper {
+  pointer-events: none;
+}
+/* 地图框:地形图一层(.map-box),文明层、回放一层(.map-box-upper),两层大小、变换一样 */
+.map-box,
+.map-box-upper {
   position: relative;
   /* 地图框按舞台"盖满"时比舞台宽:不许被 flex 压窄 */
   flex: none;
 }
-.map-box canvas {
+.map-box canvas,
+.map-box-upper canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
 }
 /* 球面世界:和世界一样大的画布在右边再接一份(左右无限拖动,见 ui/mapWrap.ts) */
-.map-box canvas.wrap-copy {
+.map-box canvas.wrap-copy,
+.map-box-upper canvas.wrap-copy {
   left: 100%;
   right: auto;
 }
-.map-box canvas.overlay {
+.map-box-upper canvas.overlay {
   opacity: 0;
   transition: opacity 0.5s;
   pointer-events: none;
 }
-.map-box canvas.overlay.show {
+.map-box-upper canvas.overlay.show {
   opacity: 1;
+}
+/* 屏幕层:铺满舞台、不跟着地图 CSS 缩放;里面按屏幕像素画的画布自己按地图框的位置摆(mapWrap.ts 的 placeOnScreen) */
+.screen-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.screen-layer canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
 }
 .caption {
   position: absolute;

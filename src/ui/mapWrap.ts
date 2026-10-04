@@ -6,6 +6,11 @@
  * 平移量 x 每次都挪整数圈,让主图那一份的左边正好落在视窗左边或更左一点 —— 右边接的那一份就补满视窗,转多少圈都是这两份。
  * 拖动时只改 CSS 变换,底图一张都不用重画;文字层、细节层、视窗装饰按"展开"的世界坐标(x 可以超出 [0, 宽))画。
  *
+ * 屏幕层(.screen-layer):文字层、细节层、视窗装饰这几张按屏幕像素画的画布不放进被 CSS 放大的地图框,
+ * 而是放在铺满舞台、不缩放的屏幕层里,按地图框的位置自己摆(placeOnScreen)—— 画布像素和屏幕像素一一对应。
+ * 放在放大十几倍的容器里时,有的浏览器(Safari)会按很低的分辨率显示它们,放大后整片发糊。
+ * 上下顺序和原来一样:地形图(放大的地图框)→ 细节层、视窗装饰(屏幕层)→ 文明层、回放(又一层放大的地图框)→ 文字层(屏幕层)。
+ *
  * 视窗:外框和地图框一样大、一样居中(缩放 1 倍时正好是地图框,放大后是"外框 ∩ 舞台"),左右不随平移动 ——
  * 视窗外面的那一份被裁掉,所以永远只看到一整圈以内,同一个地方不会出现两次。
  * 手绘风的纸边做旧、外框、罗盘就画在这个外框上(MapDecor),拖动时地图从下面滑过。
@@ -165,6 +170,9 @@ export interface Visible {
   /** 看得见的那一块左上角的屏幕坐标(clientX / clientY) */
   left: number;
   top: number;
+  /** 地图框左上角在舞台(屏幕层)里的位置 */
+  ox: number;
+  oy: number;
 }
 
 /**
@@ -190,7 +198,43 @@ export function visibleBox(box: HTMLElement): Visible | null {
   const vx1 = Math.min(boxRight, right);
   const vy1 = Math.min(br.bottom, sr.bottom);
   if (vx1 - vx0 < 1 || vy1 - vy0 < 1) return null;
-  return { k, bw, bh, x0: (vx0 - br.left) / k, y0: (vy0 - br.top) / k, x1: (vx1 - br.left) / k, y1: (vy1 - br.top) / k, frameX, left: vx0, top: vy0 };
+  return {
+    k,
+    bw,
+    bh,
+    x0: (vx0 - br.left) / k,
+    y0: (vy0 - br.top) / k,
+    x1: (vx1 - br.left) / k,
+    y1: (vy1 - br.top) / k,
+    frameX,
+    left: vx0,
+    top: vy0,
+    ox: br.left - sr.left,
+    oy: br.top - sr.top,
+  };
+}
+
+/** 屏幕层里的画布 → 同一个舞台里的地图框(地形图那一层的 .map-box;按它的位置、缩放倍数摆) */
+export function mapBoxOf(el: Element | null): HTMLElement | null {
+  return (el?.closest('.stage')?.querySelector('.map-box') as HTMLElement | null) ?? null;
+}
+
+/**
+ * 屏幕层里的一张画布(按屏幕像素画的:文字层、细节层、视窗装饰)摆到屏幕上:
+ * 它画的是地图框坐标 (x0, y0) 起的一块、画的时候缩放 k0 倍,CSS 宽高 = 画布像素 ÷ 画的时候的像素密度。
+ * 现在的缩放倍数和画的时候一样时只平移(对齐到屏幕像素,不糊);不一样时(细节层放大一点点还没重画)再按比例缩放
+ */
+export function placeOnScreen(cv: HTMLCanvasElement, vis: Visible, x0: number, y0: number, k0: number): void {
+  const s = vis.k / k0;
+  let X = vis.ox + x0 * vis.k;
+  let Y = vis.oy + y0 * vis.k;
+  const same = Math.abs(s - 1) < 1e-6;
+  if (same) {
+    const dpr = window.devicePixelRatio || 1;
+    X = Math.round(X * dpr) / dpr;
+    Y = Math.round(Y * dpr) / dpr;
+  }
+  cv.style.transform = `translate(${X}px, ${Y}px)${same ? '' : ` scale(${s})`}`;
 }
 
 // ---------------------------------------------------------------------------

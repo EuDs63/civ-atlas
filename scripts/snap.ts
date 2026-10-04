@@ -3,7 +3,8 @@
  *   不带第三个参数:截整个界面;canvas:只要地图原图;crop=...:地图局部放大(像素放大,看细节用)
  *   zoom=4,0.7,0.3:像用户一样用滚轮把地图放大 4 倍(以地图上 70%、30% 处为中心),截地图区域 ——
  *     文字层随缩放重画,看"放大后文字清不清楚"用这个
- *   地图原图 = .map-box 里所有看得见的 canvas 按各自的位置、混合模式叠在一起(地形 + 文明层 + 文字层……)
+ *   地图原图 = 地图的各层(地图框 .map-box / .map-box-upper、屏幕层 .screen-layer)里所有看得见的 canvas
+ *   按各自在屏幕上的位置、混合模式叠在一起(地形 + 细节层 + 文明层 + 文字层……)
  *   文明层:网址里加 civ=habitat / civ=regions,sites 等;地名默认打开,civ=-labels 关掉(见 src/ui/civView.ts)
  *   canvas / crop / zoom 用 2 倍像素密度截(文字层按屏幕像素画,这样叠到 2048 宽的原图上也清晰)
  *   世界东西相连:加 center=经度(如 center=90、center=180)先把地图转到这条经线在正中再截
@@ -76,12 +77,12 @@ if (zoom) {
   await page.locator('main.stage').screenshot({ path: out });
 } else if (full) {
   const dataUrl = await page.evaluate((crop) => {
-    // 把 .map-box 里所有看得见的 canvas 按各自的位置叠成一张(尺寸以第一张为准)。
-    // 文字层只盖住视口里看得见的那块,按它的 CSS 位置(地图框坐标,缩放前)换算到原图上
+    // 把地图各层里所有看得见的 canvas 按页面上的先后(= 上下顺序)叠成一张(尺寸以第一张为准)。
+    // 文字层、细节层只盖住视口里看得见的那块:按它在屏幕上的位置换回地图框坐标(缩放前),再换算到原图上
     const box = document.querySelector('.map-box') as HTMLElement;
     const bw = box.clientWidth;
     const bh = box.clientHeight;
-    const layers = [...document.querySelectorAll('.map-box canvas')] as HTMLCanvasElement[];
+    const layers = [...document.querySelectorAll('.map-box canvas, .map-box-upper canvas, .screen-layer canvas')] as HTMLCanvasElement[];
     // 截视窗里的那一整圈 —— 从外框左边(地图框坐标 fx)起,右边接的那一份(.wrap-copy)也叠进来
     const br = box.getBoundingClientRect();
     const sr = (box.closest('.stage') as HTMLElement).getBoundingClientRect();
@@ -91,14 +92,16 @@ if (zoom) {
     cv.height = layers[0].height;
     const cc = cv.getContext('2d')!;
     cc.imageSmoothingQuality = 'high';
+    const k = br.width / bw;
     for (const l of layers) {
       const st = getComputedStyle(l);
-      if (!l.width || !l.height || st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) continue;
+      const lr = l.getBoundingClientRect();
+      if (!l.width || !l.height || !lr.width || st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) continue;
       cc.globalAlpha = Number(st.opacity);
       cc.globalCompositeOperation = st.mixBlendMode === 'multiply' ? 'multiply' : 'source-over';
       const sx = cv.width / bw;
       const sy = cv.height / bh;
-      cc.drawImage(l, (parseFloat(st.left) - fx) * sx, parseFloat(st.top) * sy, parseFloat(st.width) * sx, parseFloat(st.height) * sy);
+      cc.drawImage(l, ((lr.left - br.left) / k - fx) * sx, ((lr.top - br.top) / k) * sy, (lr.width / k) * sx, (lr.height / k) * sy);
     }
     cc.globalAlpha = 1;
     cc.globalCompositeOperation = 'source-over';

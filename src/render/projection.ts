@@ -290,6 +290,30 @@ export function unprojectWorld(mp: MapProj, mx: number, my: number): [number, nu
   return [wx >= mp.W ? 0 : wx, ((HALF_PI - r[1]) / Math.PI) * mp.H];
 }
 
+/**
+ * 只换中央经线(from → to,同一种投影、同样大小)时,地图平面上 my0 … my1 这几行横向挪了多少:
+ * 每一行整体平移 −s · kx(φ) · Δλ,纬度不同挪得不一样多。
+ * 返回中间那一行的挪动量 dx,和这几行相对它的最大偏差 err(都是地图平面单位)。
+ * 放大后拖动转中心时,细节层把画好的那一块整体平移 dx(ui/TerrainDetail.tsx),偏差小就先不重画
+ */
+export function centerShift(from: MapProj, to: MapProj, my0: number, my1: number): { dx: number; err: number } {
+  const { def, s, H } = to;
+  const dLam = wrapLon(to.lon0 - from.lon0) * DEG;
+  // 这一行的纬线比例(外轮廓上下以外按最上 / 最下那一行算)
+  const kAt = (my: number) => {
+    const y = Math.max(-to.yMax, Math.min(to.yMax, (H / 2 - my) / s));
+    const phi = def.phi(y);
+    return def.kx(Number.isFinite(phi) ? phi : Math.sign(y) * def.latMax);
+  };
+  const kc = kAt((my0 + my1) / 2);
+  // kx 从赤道往两极单调变小:这几行里最大、最小的在两头,跨过赤道时最大的在赤道上
+  const k0 = kAt(my0);
+  const k1 = kAt(my1);
+  const hi = (my0 - H / 2) * (my1 - H / 2) < 0 ? def.kx(0) : Math.max(k0, k1);
+  const lo = Math.min(k0, k1);
+  return { dx: -s * kc * dLam, err: s * Math.abs(dLam) * Math.max(hi - kc, kc - lo) };
+}
+
 /** 地图平面上这一点在不在外轮廓里(往里缩 pad 个地图平面单位) */
 export function insideProj(mp: MapProj, mx: number, my: number, pad = 0): boolean {
   const { def, s, W, H } = mp;

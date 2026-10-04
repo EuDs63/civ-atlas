@@ -1,5 +1,5 @@
 import './theme.css';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { DEFAULT_PARAMS, type World, type WorldParams } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import { renderRealistic } from '../render/realistic';
@@ -274,6 +274,8 @@ export function App() {
   const mouseAt = useRef<[number, number]>([0, 0]);
   const [replay, setReplay] = useState<Replay | null>(null);
   const [replayOn, setReplayOn] = useState(false);
+  /** 最上面的屏幕层(文字层放在这里,见 CivLayer 的 labelsHost) */
+  const [labelsHost, setLabelsHost] = useState<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   /** 地形图、回放帧在右边接的那一份(左右无限拖动,见 mapWrap.ts) */
   const canvasCopyRef = useRef<HTMLCanvasElement>(null);
@@ -1916,6 +1918,9 @@ export function App() {
   }, [noCiv]);
 
   const civReady = !!civ && civ.viable;
+  // 两层放大的地图框共用一个变换、按视窗裁;两层屏幕层按同一个视窗裁(见下面的 JSX)
+  const wrapStyle: CSSProperties = { transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`, clipPath: wrapClip(view, sb, wrapW), display: globeOn ? 'none' : undefined };
+  const screenStyle: CSSProperties = { clipPath: screenClip(view, sb, wrapW), display: globeOn ? 'none' : undefined };
   return (
     <div
       className={`app${chron.open ? ' chron-open' : ''}${panelOpen ? ' panel-open' : ''}${narrow && panelOpen && panelUi.sheet === 'full' ? ' sheet-full' : ''}${picking ? ' picking' : ''}${globeOn ? ' globe-on' : ''}${data ? '' : ' booting'}`}
@@ -1947,23 +1952,30 @@ export function App() {
         }}
         onDoubleClick={resetView}
       >
-        <div
-          className="canvas-wrap"
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`, clipPath: wrapClip(view, sb, wrapW), display: globeOn ? 'none' : undefined }}
-        >
+        {/* 地图分四层叠(见 mapWrap.ts 的"屏幕层"):和世界一样大的画布放在被 CSS 放大的地图框里,
+            按屏幕像素画的(细节层、视窗装饰、文字层)放在不缩放的屏幕层里 */}
+        <div className="canvas-wrap" style={wrapStyle}>
           <div className="map-box" data-wrap={curved ? undefined : '1'} data-proj={projection} style={{ width: box.w, height: box.h }}>
             <canvas ref={canvasRef} />
             {/* 右边接的那一份(左右无限拖动,见 mapWrap.ts;弯边投影时不用) */}
             <canvas ref={canvasCopyRef} className="wrap-copy" />
-            {/* 放大后的地形细节(弯边投影:按投影一行一行铺) */}
-            {data && <TerrainDetail world={data.world} raster={data.raster} style={style} view={view} mp={mp} />}
-            {data && <MapDecor world={data.world} style={style} view={view} mp={mp} />}
-            {data && <CivLayer world={data.world} raster={data.raster} civ={civ} geo={rawCiv} style={style} view={view} mp={mp} />}
+          </div>
+        </div>
+        <div className="screen-layer" style={screenStyle}>
+          {/* 放大后的地形细节(弯边投影:按投影一行一行铺) */}
+          {data && <TerrainDetail world={data.world} raster={data.raster} style={style} view={view} mp={mp} />}
+          {data && <MapDecor world={data.world} style={style} view={view} mp={mp} />}
+        </div>
+        <div className="canvas-wrap-upper" style={wrapStyle}>
+          <div className="map-box-upper" style={{ width: box.w, height: box.h }}>
+            {data && <CivLayer world={data.world} raster={data.raster} civ={civ} geo={rawCiv} style={style} view={view} mp={mp} labelsHost={labelsHost} />}
             <canvas ref={overlayRef} className={`overlay ${replayOn && replay ? 'show' : ''}`} />
             <canvas ref={overlayCopyRef} className={`overlay wrap-copy ${replayOn && replay ? 'show' : ''}`} />
             {data && !curved && <TerrainOverlay width={data.world.width} height={data.world.height} shown={shownTerrain} wrap={wrapW} />}
           </div>
         </div>
+        {/* 文字层(CivLayer 放进来);回放世界形成时藏起来(回放画面盖住文明层,字也不露出来) */}
+        <div className="screen-layer" ref={setLabelsHost} style={replayOn && replay ? { ...screenStyle, display: 'none' } : screenStyle} />
         {/* 地图上钉在事发地的事件标签 */}
         {data && <EventPins civ={civ} world={data.world} toClient={globeOn ? globeToClient : worldToClient} hidden={replayOn} />}
         {data && globeOn && (
@@ -2069,4 +2081,11 @@ function wrapClip(v: { k: number; x: number; y: number }, b: StageBox, wrap: num
   const l = (wl - v.x) / v.k;
   const r = b.sw - (wr - v.x) / v.k;
   return `inset(-100000px ${r}px -100000px ${l}px)`;
+}
+
+/** 屏幕层(不缩放,铺满舞台)按同一个视窗裁:舞台坐标 */
+function screenClip(v: { k: number }, b: StageBox, wrap: number): string | undefined {
+  if (!wrap || !b.sw || !b.bw) return undefined;
+  const [wl, wr] = windowSpan(v.k, b);
+  return `inset(0px ${b.sw - wr}px 0px ${wl}px)`;
 }

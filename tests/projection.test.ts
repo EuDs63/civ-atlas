@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECTION_IDS,
   PROJECTIONS,
+  centerShift,
   graticuleLines,
   insideProj,
   isProjectionId,
@@ -117,6 +118,41 @@ describe('地图投影', () => {
     expect(g.parallels.length).toBe(5);
     // 中央经线 0° 时 ±180° 就是外轮廓,不另画
     expect(graticuleLines(mapProj('mollweide', 0, W, H), 30).meridians.length).toBe(11);
+  });
+
+  it('只换中央经线:每一行整体横移 −s · kx(φ) · Δλ,centerShift 给出中间行的挪动量和上下各行的最大偏差', () => {
+    for (const id of PROJECTION_IDS) {
+      for (const [l0, l1] of [
+        [20, 26],
+        [178, -176], // 跨 ±180°:实际只转了 6°
+        [-40, -52],
+      ]) {
+        const from = mapProj(id, l0, W, H);
+        const to = mapProj(id, l1, W, H);
+        // 地图平面上这一行、靠近中央经线的一点实际横移多少
+        const moved = (my: number) => {
+          const phi = from.def.phi((H / 2 - my) / from.s);
+          const wy = ((Math.PI / 2 - phi) / Math.PI) * H;
+          const wx = ((l0 + 180) / 360) * W;
+          return projectWorld(to, wx, wy)[0] - projectWorld(from, wx, wy)[0];
+        };
+        // 北半球一条、跨赤道一条
+        for (const [my0, my1] of [
+          [H / 2 - 300, H / 2 - 220],
+          [H / 2 - 40, H / 2 + 60],
+        ]) {
+          const { dx, err } = centerShift(from, to, my0, my1);
+          expect(Math.abs(moved((my0 + my1) / 2) - dx)).toBeLessThan(1e-6);
+          let worst = 0;
+          for (let my = my0; my <= my1; my += 4) worst = Math.max(worst, Math.abs(moved(my) - dx));
+          expect(worst).toBeLessThanOrEqual(err + 1e-6);
+          // 偏差估计不夸大(不然拖动时白白重画)
+          expect(err).toBeLessThan(worst + 0.05 * Math.abs(dx) + 1e-6);
+        }
+      }
+    }
+    // 墨卡托、等距圆柱:各纬线一样长,转中心就是整块平移,没有偏差
+    expect(centerShift(mapProj('mercator', 0, W, H), mapProj('mercator', 30, W, H), 100, 900).err).toBeLessThan(1e-9);
   });
 
   it('wrapLon / isProjectionId', () => {

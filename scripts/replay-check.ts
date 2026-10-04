@@ -2290,7 +2290,7 @@ for (const style of ['realistic', 'fantasy']) {
 
   // 5. 手绘风:外框、罗盘、纸边做旧画在视窗上(视窗装饰层画了,地形图本身没有外框)
   const decor = await page.evaluate(() => {
-    const d = document.querySelector('.map-box canvas.decor') as HTMLCanvasElement | null;
+    const d = document.querySelector('canvas.decor') as HTMLCanvasElement | null;
     return { shown: !!d && d.style.display !== 'none' && d.width > 0, dbg: (window as any).__wfDecor };
   });
   console.log(`视窗装饰:${JSON.stringify(decor)}`);
@@ -2424,6 +2424,34 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(`罗宾森里左右拖:中央经线 ${c0.toFixed(1)}° → ${c1.toFixed(1)}°;悬停「${hov.split('\n')[0]}」`);
   if (Math.abs(((c1 - c0 + 540) % 360) - 180) < 20) errs.push('投影:罗宾森里左右拖动没有转中央经线');
   if (!hov) errs.push('投影:罗宾森里悬停没有信息');
+  // 3b. 放大后左右拖:细节层(放大后按屏幕像素重画的那一层)不藏起来,跟着整块平移;松手后按新的中央经线重画
+  await page.mouse.move(mb.x + mb.width * 0.5, mb.y + mb.height * 0.5);
+  for (let i = 0; i < 40 && (await view()).k < 8; i++) {
+    await page.mouse.wheel(0, -200);
+    await page.waitForTimeout(30);
+  }
+  await page.waitForTimeout(400);
+  const kz = (await view()).k;
+  let dHidden = 0;
+  let dSlid = 0;
+  await page.mouse.down();
+  for (let s = 1; s <= 15; s++) {
+    await page.mouse.move(mb.x + mb.width * (0.5 - (0.2 * s) / 15), mb.y + mb.height * 0.5);
+    await page.waitForTimeout(16);
+    const d = await page.evaluate(() => ({ ...(window as any).__wfDetail, shown: (document.querySelector('canvas.detail') as HTMLElement).style.display !== 'none' }));
+    if (!d.on || !d.shown) dHidden++;
+    else if (d.slide) dSlid++;
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  const dEnd = await page.evaluate(() => (window as any).__wfDetail);
+  const lonEnd = (await view()).lon;
+  console.log(`罗宾森放大 ${kz.toFixed(1)} 倍左右拖:15 步里细节层藏起来 ${dHidden} 次、整块平移 ${dSlid} 次;松手后按 ${dEnd?.lon?.toFixed(1)}°(中央经线 ${lonEnd.toFixed(1)}°)重画`);
+  if (dHidden) errs.push('投影:罗宾森放大后左右拖动时细节层藏起来了(露出放大的整图,发糊)');
+  if (!dSlid) errs.push('投影:罗宾森放大后左右拖动时细节层没有跟着平移');
+  if (!dEnd?.on || dEnd.slide || Math.abs(dEnd.lon - lonEnd) > 1e-6) errs.push('投影:罗宾森放大后拖完,细节层没有按新的中央经线重画');
+  await page.evaluate(() => (window as any).__wfSetView({ k: 1, x: 0, y: 0 }));
+  await page.waitForTimeout(300);
   // 4. 只用左键:右键不出菜单;弹层里的中央经线滑条转到 −120°(显示"120°W")
   await page.mouse.click(mb.x + mb.width * 0.3, mb.y + mb.height * 0.5, { button: 'right' });
   const ctx = await page.locator('.ctx-menu').count();

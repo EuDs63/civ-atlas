@@ -1,11 +1,11 @@
 /**
- * 文明叠加层,两张画布(都在 .map-box 里,截图脚本能叠到):
+ * 文明叠加层(截图脚本能叠到):
  *
  * 1. 文明底图(canvas.civ):和地图同样大小,只在文明数据、画风、开关、年份变化时重画,地形图不动。
  *    国土色块、国界、道路画在这里。
  * 2. 文字层(canvas.civ-labels):只盖住视口里看得见的那一块地图,分辨率 = 屏幕像素 × devicePixelRatio,
- *    缩放、平移、换年份时重画。它在 .map-box 里跟着一起被 CSS 放大 k 倍,所以把它的 CSS 尺寸设成"看得见的那块 ÷ k",
- *    放大后正好一个画布像素对一个屏幕像素 —— 放大到 12 倍字和城镇符号也是清晰的。
+ *    缩放、平移、换年份时重画。它不在被 CSS 放大的地图框里,而是在最上面的屏幕层里(App 传进来的 labelsHost,
+ *    见 mapWrap.ts 的"屏幕层"),按地图框的位置摆,一个画布像素对一个屏幕像素 —— 放大到 12 倍字和城镇符号也是清晰的。
  *    画的东西:地理名、国名、城名和城镇符号,一起避让(render/labels/draw.ts 的 placeMap)。
  *    回放 / 拖时间轴时城名只排国都和大城的,每帧更快;停下来就补上城、镇、村的名字。
  *
@@ -24,6 +24,7 @@
  * 要等的字是这个文明所有可能出现的字(各国各档国号、所有城名),回放时国号升格、新城出现都不用再等字体。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { World } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import type { Civ, Year } from '../gen/civ/types';
@@ -35,7 +36,7 @@ import { ensureFonts, fontsReady, preloadFonts } from '../render/labels/fonts';
 import { drawHighlight, drawSelection, drawSelectionLabels } from '../render/civ/highlight';
 import { getCivHighlight, setCivHighlight, useCivHighlight, useCivShow, useCivTime, useSelection } from './civView';
 import { setMapPlacement } from './mapPick';
-import { mirrorCanvas, visibleBox } from './mapWrap';
+import { mapBoxOf, mirrorCanvas, placeOnScreen, visibleBox } from './mapWrap';
 import { nearX } from '../render/common';
 import { labelProjection, projector, type MapProj } from '../render/projection';
 import { ProjLayer, useMapMoving } from './projection';
@@ -110,6 +111,8 @@ export interface CivLayerProps {
   view?: CivViewport;
   /** 弯边投影(当前投影 + 中心);等距圆柱 = null / 不给 */
   mp?: MapProj | null;
+  /** 文字层放在哪(屏幕层,不随地图 CSS 缩放;还没有 = 先不画字) */
+  labelsHost?: HTMLElement | null;
 }
 
 interface LabelsDebug {
@@ -134,7 +137,7 @@ interface LabelsDebug {
   fitted?: boolean;
 }
 
-export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null }: CivLayerProps) {
+export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null, labelsHost = null }: CivLayerProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLCanvasElement>(null);
   const hlRef = useRef<HTMLCanvasElement>(null);
@@ -383,19 +386,19 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
   // 地图框大小变了(窗口缩放)也要重画
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    const box = textRef.current?.parentElement;
+    const box = mapBoxOf(textRef.current);
     if (!box || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => setTick((t) => t + 1));
     ro.observe(box);
     return () => ro.disconnect();
-  }, []);
+  }, [labelsHost]);
 
   // 地图上盖着的界面(四角的字、时间轴、面板 / 抽屉、提示条……):它们下面不放字和符号(和地球仪同一份清单,见 uiAvoid.ts)
   const avoid = useAvoidBoxes(textRef);
 
   useLayoutEffect(() => {
     const cv = textRef.current;
-    const box = cv?.parentElement;
+    const box = mapBoxOf(cv);
     if (!cv || !box) return;
     const ctx = cv.getContext('2d')!;
     const clear = () => {
@@ -414,20 +417,14 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
     const dpr = window.devicePixelRatio || 1;
     const lx0 = vis.x0;
     const ly0 = vis.y0;
-    Object.assign(cv.style, {
-      left: `${lx0}px`,
-      top: `${ly0}px`,
-      right: 'auto',
-      bottom: 'auto',
-      width: `${vis.x1 - vis.x0}px`,
-      height: `${vis.y1 - vis.y0}px`,
-    });
     const W = Math.max(1, Math.round((vis.x1 - vis.x0) * k * dpr));
     const H = Math.max(1, Math.round((vis.y1 - vis.y0) * k * dpr));
     if (cv.width !== W || cv.height !== H) {
       cv.width = W;
       cv.height = H;
     } else clear();
+    Object.assign(cv.style, { width: `${W / dpr}px`, height: `${H / dpr}px` });
+    placeOnScreen(cv, vis, lx0, ly0, k);
     const scale = (bw / extras.worldW) * k * dpr;
     const lv: LabelView = { ...extras, scale, ox: -lx0 * k * dpr, oy: -ly0 * k * dpr, dpr, k, mapCss: bw, canvasW: W, canvasH: H };
     if (mp) {
@@ -483,7 +480,7 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
       lon: mp?.lon0,
       fitted: !!fitMp,
     };
-  }, [geoItems, mapLayer, extras, fontsOk, fontStyle, style, text, view, tick, params, fast, sel, civ, world, mp, fitMp, avoid]);
+  }, [geoItems, mapLayer, extras, fontsOk, fontStyle, style, text, view, tick, params, fast, sel, civ, world, mp, fitMp, avoid, labelsHost]);
 
   return (
     <>
@@ -493,7 +490,7 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
       <canvas ref={selCopy} className="civ-sel wrap-copy" style={{ pointerEvents: 'none' }} />
       <canvas ref={hlRef} className="civ-hl" style={{ pointerEvents: 'none', opacity: 0 }} />
       <canvas ref={hlCopy} className="civ-hl wrap-copy" style={{ pointerEvents: 'none', opacity: 0 }} />
-      <canvas ref={textRef} className="civ-labels" style={{ pointerEvents: 'none' }} />
+      {labelsHost && createPortal(<canvas ref={textRef} className="civ-labels" style={{ pointerEvents: 'none' }} />, labelsHost)}
     </>
   );
 }

@@ -4,7 +4,7 @@
  *
  * 外框缩放 1 倍时就是地图框;放大后按同样的比例变大、上下跟着地图走(拖到两极能看到上下边),
  * 左右始终居中在舞台上(见 mapWrap.ts 的 frameSpan)。
- * 画布只盖住看得见的那一块(和文字层一样,按屏幕像素画),在地形之上、文明层之下。
+ * 画布只盖住看得见的那一块(和文字层一样,按屏幕像素画,放在屏幕层里 —— 见 mapWrap.ts 的"屏幕层"),在地形之上、文明层之下。
  *
  * 弯边投影(mp,见 ui/projection.ts):图框换成投影的外轮廓(椭圆、桶形)双线,罗盘挪到轮廓外的左下角;
  * 写实风 / 数据图层沿轮廓描一道细线(盖住轮廓边缘的锯齿)。
@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { World } from '../gen/world';
 import { drawFrame, drawPaperVignette, drawProjFrame } from '../render/fantasy';
 import { drawGraticule, drawNeatOutline, type MapProj } from '../render/projection';
-import { visibleBox } from './mapWrap';
+import { mapBoxOf, placeOnScreen, visibleBox } from './mapWrap';
 import { useGraticule } from './projection';
 
 export function MapDecor({ world, style, view, mp = null }: { world: World; style: string; view: { k: number; x: number; y: number }; mp?: MapProj | null }) {
@@ -24,7 +24,7 @@ export function MapDecor({ world, style, view, mp = null }: { world: World; styl
   // 地图框大小变了(窗口缩放)也要重画
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    const box = ref.current?.parentElement;
+    const box = mapBoxOf(ref.current);
     if (!box || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => setTick((t) => t + 1));
     ro.observe(box);
@@ -33,7 +33,7 @@ export function MapDecor({ world, style, view, mp = null }: { world: World; styl
 
   useLayoutEffect(() => {
     const cv = ref.current;
-    const box = cv?.parentElement;
+    const box = mapBoxOf(cv);
     if (!cv || !box) return;
     const hide = () => {
       if (cv.style.display !== 'none') cv.style.display = 'none';
@@ -50,15 +50,8 @@ export function MapDecor({ world, style, view, mp = null }: { world: World; styl
       cv.width = W;
       cv.height = H;
     }
-    Object.assign(cv.style, {
-      display: '',
-      left: `${vis.x0}px`,
-      top: `${vis.y0}px`,
-      right: 'auto',
-      bottom: 'auto',
-      width: `${vis.x1 - vis.x0}px`,
-      height: `${vis.y1 - vis.y0}px`,
-    });
+    Object.assign(cv.style, { display: '', width: `${W / dpr}px`, height: `${H / dpr}px` });
+    placeOnScreen(cv, vis, vis.x0, vis.y0, vis.k);
     const ctx = cv.getContext('2d')!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
