@@ -1,0 +1,325 @@
+/*
+ * 宽屏布局(.app.has-side,视口宽 > 760px):地图(.stage)铺满整个窗口,左边浮着一张圆角卡片(侧栏 Sidebar.tsx,宽 --side-w,
+ * 四周留 --side-gap);卡片右边那一块(从 --side-room 起)是"看得见的地图"。
+ * 浮在地图上的按钮都是毛玻璃(.glass):右上图层分段按钮、导出、编年史(MapBar);右下地球、缩放(MapControls);
+ * 底部一条胶囊形的时间轴(CivTimeline)。提示条、操作提示、回放说明在地图那一块里居中。
+ * 窄屏(手机)的布局不受这里影响(没有 .has-side)。
+ */
+.app.has-side {
+  --side-w: 340px;
+  --side-gap: 14px;
+  /* 卡片占掉的宽度(左边距 + 卡片 + 右边留空;flyTo.ts 的 sideRoom 和这里一致) */
+  --side-room: calc(var(--side-w) + 2 * var(--side-gap));
+  /* 卡片右边那一块地图的水平中线 */
+  --map-mid: calc(var(--side-room) + (100% - var(--side-room)) / 2);
+}
+@media (min-width: 1100px) {
+  .app.has-side {
+    --side-w: 372px;
+  }
+}
+/* 浮在地图上的侧栏卡片 */
+.app.has-side .sidebar {
+  left: var(--side-gap);
+  top: var(--side-gap);
+  bottom: var(--side-gap);
+  border: 0;
+  border-radius: 14px;
+  box-shadow: var(--shadow-float);
+}
+.app.has-side .sidebar .sb-body {
+  border-radius: 0 0 14px 14px;
+}
+
+/* 毛玻璃:浮在地图上的按钮、时间轴 */
+.glass {
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-panel);
+  border-radius: 10px;
+}
+
+/* ---- 右上:写作进度、图层分段按钮、导出、编年史 ---- */
+.map-bar {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - var(--side-room) - 14px);
+}
+.map-bar button {
+  font: inherit;
+}
+.seg-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+}
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+.seg-btn:hover:not(:disabled):not(.on) {
+  background: var(--hover-bg);
+}
+.seg-btn.on {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  font-weight: 600;
+}
+[data-theme='dark'] .seg-btn.on {
+  background: rgba(255, 255, 255, 0.18);
+}
+.seg-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.seg-caret {
+  opacity: 0.6;
+}
+/* "更多图层"的弹层挂在整条分段按钮下面、右对齐 */
+.map-bar .lp-seg {
+  position: static;
+}
+.map-bar .lp-pop {
+  top: calc(100% + 8px);
+  bottom: auto;
+  right: 0;
+  left: auto;
+  max-height: calc(100vh - 120px);
+}
+/* 导出菜单同样从按钮下面展开;窗口矮时在菜单里滚动(留出按钮条折成两行时的高度) */
+.map-bar .export-menu {
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  border-radius: var(--r-panel);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+}
+.mb-btn {
+  height: 36px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+.mb-btn:hover:not(:disabled),
+.mb-btn.on {
+  background: var(--panel-solid);
+}
+.mb-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.map-bar .export {
+  position: relative;
+}
+.map-bar .book-chip {
+  height: 36px;
+  border-radius: 10px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-panel);
+  text-shadow: none;
+}
+
+/* 窗口窄、整条放不下(平板竖着拿这种宽度):导出、编年史只留图标,分段按钮收紧;右上还有写作进度时再放不下就折到下一行 */
+@media (max-width: 1000px) {
+  .app.has-side .map-bar {
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .app.has-side .map-bar .mb-label {
+    display: none;
+  }
+  .app.has-side .map-bar .mb-btn {
+    padding: 0 10px;
+  }
+  .app.has-side .seg-btn {
+    padding: 0 9px;
+    font-size: 13px;
+  }
+}
+
+/* ---- 右下:地球 / 平面、放大、缩小 ---- */
+.app.has-side .map-controls {
+  right: 14px;
+  bottom: 104px;
+  gap: 10px;
+}
+.app.has-side .mc-btn {
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--ink);
+}
+.app.has-side .mc-globe {
+  height: 38px;
+  margin: 0;
+  padding: 0 11px 0 9px;
+  gap: 5px;
+  border-radius: 10px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  font-size: 13px;
+  font-weight: 600;
+}
+.mc-zooms {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app.has-side .mc-zoom {
+  width: 38px;
+  height: 36px;
+  border-radius: 0;
+  font-size: 20px;
+  color: var(--ink-2);
+}
+.app.has-side .mc-zoom + .mc-zoom {
+  border-top: 0.5px solid var(--line);
+}
+.app.has-side .mc-btn:hover {
+  background: var(--hover-bg);
+}
+
+/* ---- 底部:胶囊形的时间轴 ---- */
+.app.has-side .bottom-row {
+  left: var(--side-room);
+  right: 14px;
+  bottom: 14px;
+  text-shadow: none;
+}
+.app.has-side .civ-timeline.timebar {
+  height: 72px;
+  padding: 0 18px 0 14px;
+  gap: 14px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-panel);
+  border-radius: 16px;
+  text-shadow: none;
+}
+.app.has-side .timebar button {
+  text-shadow: none;
+}
+.app.has-side button.tb-play {
+  width: 40px;
+  height: 40px;
+}
+.app.has-side .tb-year {
+  min-width: 92px;
+  font-size: 20px;
+}
+.app.has-side .tb-speed {
+  order: 9;
+  padding: 2px;
+  gap: 0;
+  border-radius: 8px;
+  background: var(--btn);
+}
+.app.has-side .tb-speed button {
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.app.has-side .tb-speed button:hover {
+  background: transparent;
+}
+.app.has-side .tb-speed button.on {
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+[data-theme='dark'] .app.has-side .tb-speed button.on,
+.app.has-side[data-theme='dark'] .tb-speed button.on {
+  background: rgba(255, 255, 255, 0.18);
+}
+.app.has-side .tb-tick {
+  display: none;
+}
+.app.has-side .tb-label {
+  top: 35px;
+}
+
+/* ---- 在地图那一块里居中的:提示条、第一次打开的操作提示、回放说明、改地形工具条;数据图层的图例在地图左上 ---- */
+.app.has-side .toast {
+  left: var(--map-mid);
+  top: 64px;
+}
+/* 改地形工具条在右上的图层按钮下面;提示条再挪到工具条下面 */
+.app.has-side .terrain-bar {
+  left: var(--map-mid);
+  top: 64px;
+  max-width: calc(100% - var(--side-room) - 32px);
+}
+.app.has-side .stage.terrain-on ~ .toast {
+  top: calc(var(--tbar-bottom, 112px) + 8px);
+}
+.app.has-side .first-hint {
+  left: var(--map-mid);
+  bottom: 104px;
+  padding: 7px 14px;
+  border-radius: 18px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-panel);
+  text-shadow: none;
+  font-size: 13.5px;
+}
+.app.has-side > .caption,
+.app.has-side .bottom-tl .civ-top {
+  left: var(--map-mid);
+}
+.app.has-side .corner-tl {
+  left: calc(var(--side-room) + 2px);
+  top: 16px;
+  text-shadow: none;
+}
+
+/* ---- 侧栏里的详情面板:不再浮着,铺满侧栏下半截 ---- */
+.sidebar .inspector.cpanel {
+  position: static;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: none;
+}
+/* 在地图上选目标、正在推演时:宽屏的面板不挡地图,留着,只是变淡、不能点(取消用提示条上的"取消"或 Esc) */
+.sidebar .inspector.cpanel.hidden {
+  display: flex;
+  opacity: 0.45;
+  pointer-events: none;
+}

@@ -67,15 +67,13 @@ export function clampView(v: GlobeView): GlobeView {
 }
 
 /**
- * 画布上的球:球心在画布正中稍偏上(下面有时间轴),半径按短边和缩放倍数。
- * shift = 球心横向挪多少(和 w、h 同一种像素单位;右侧的国家面板打开时往左挪半个面板宽,见 GLOBE_PANEL_SHIFT)
+ * 画布上的球:球心在画布正中稍偏上(下面有时间轴),半径按看得见的那一块的短边和缩放倍数。
+ * shift = 球心横向挪多少(和 w、h 同一种像素单位;宽屏左边有侧栏卡片时往右挪,球落在卡片右边那一块的正中);
+ * 一边挪了 shift,看得见的宽度按两边各少 |shift| 算(窗口窄时球不会伸到卡片底下、窗口外面)
  */
 export function globeFrame(v: GlobeView, w: number, h: number, shift = 0): GlobeFrame {
-  return { w, h, cx: w / 2 + shift, cy: h * 0.48, R: GLOBE_FILL * Math.min(w, h) * v.k };
+  return { w, h, cx: w / 2 + shift, cy: h * 0.48, R: GLOBE_FILL * Math.min(Math.max(1, w - 2 * Math.abs(shift)), h) * v.k };
 }
-
-/** 右侧的国家面板打开时球心往左挪多少(CSS 像素):面板宽 360 的一半,球落在"去掉面板后的可见区域"正中 */
-export const GLOBE_PANEL_SHIFT = -180;
 
 /** 视图的三个方向(世界坐标):c = 朝着观察者(球心 → 视图中心),e = 屏幕右(中心处的东),n = 屏幕上(中心处的北) */
 export function globeBasis(lon: number, lat: number): { c: Vec3; e: Vec3; n: Vec3 } {

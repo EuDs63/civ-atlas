@@ -1,12 +1,12 @@
 /**
  * 州的面板(和国家面板同一套样子,零件见 panelParts.tsx),按时间轴当前那一年:
  *
- *   顶部  颜色块(当年所属国)、"州 · 第 N 年"、关闭;州名(可改);"属 大昌 · 第 12 州 · 设为中心"(没有国家 = "无主之地")
- *   三格  主体民族(族名可改)/ 宜居度 / 人口(州里的城;一州同一时刻最多一座城)
+ *   顶部  颜色块(当年所属国)、州名(可改)、"州，属 大昌，第 12 州"(没有国家 = "无主之地")、关闭
+ *   按钮  在这里立国(主操作)/ 划给… / 改名 / 更多(设为中心、让 AI 讲名字由来)(每个面板只有一个主操作,和国家面板一样)
+ *   概况  主体民族(族名可改)、宜居度、人口(州里的城;一州同一时刻最多一座城)、州里的城(可点;故城标出来)、地貌、
+ *         民族(族名由来 / 起族名)
  *   历任归属 按时长分段的色条,点一段跳到它开始的那年
- *   州里的城(可点;故城标出来)、地貌、民族(族名由来 / 起族名)
- *   相关事件 最近 5 条(可点)、这一州的干预(可撤销)
- *   底部 2×2 在这里立国(主色)/ 划给… / 改名 / 名字由来(每个面板只有一个主色按钮,和国家面板一样)
+ *   大事  最近 5 条(可点)、这一州的干预(可撤销)
  *
  * "在这里立国""划给…"换到干预页:生效年份(−100 −10 [年份] +10)+ 国名(可不填)/ 永久;
  * "划给…"在地图上选国家(地图压暗、可选的国家浮出名牌,见 TargetPlates.tsx)。下了干预回到信息页,App 在后台重推,
@@ -23,17 +23,24 @@ import { addIntervention, useEdits } from './editsStore';
 import { habitatScore, habitatWord } from './civDescribe';
 import { MineList, getPolityPick, nameAt, regionOrders, setPolityPick } from './Interventions';
 import { NameEdit } from './NameEdit';
+import { AiMenuItem, MenuItem } from './PopMenu';
+import { Icon } from './icons';
 import { setSheet } from './panelStore';
 import { entriesUpTo, firstOwned, ownerSpans, ownersOf, regionEntries } from './panelData';
 import {
+  Act,
+  Acts,
   AiBox,
   AiSuggestLink,
-  CenterLink,
+  CenterAct,
+  CenterItem,
   EventList,
   Foot,
   Link,
+  MoreAct,
   OwnerBar,
   PanelHead,
+  Row,
   Stats,
   SubLine,
   YearStepper,
@@ -57,7 +64,7 @@ export function RegionPanel(props: DetailProps) {
   const canAct = civ.viable && civ.polities.length > 0;
   return (
     <div className="cp" data-region={id} data-page={page ?? 'info'}>
-      <PanelHead color={po ? rgb(po.color) : undefined} tag="州" year={year}>
+      <PanelHead color={po ? rgb(po.color) : undefined}>
         <NameEdit
           k={regionKey(civ, id)}
           kind="region"
@@ -74,6 +81,7 @@ export function RegionPanel(props: DetailProps) {
         <SubLine
           className="ins-status"
           parts={[
+            '州',
             po ? (
               <>
                 属 <Link to={{ kind: 'polity', id: po.id }}>{polityName(po, year)}</Link>
@@ -82,7 +90,6 @@ export function RegionPanel(props: DetailProps) {
               '无主之地'
             ),
             named && `第 ${id + 1} 州`,
-            <CenterLink world={world} civ={civ} sel={{ kind: 'region', id }} year={year} />,
           ]}
         />
       </PanelHead>
@@ -90,25 +97,30 @@ export function RegionPanel(props: DetailProps) {
         <RegionOrder civ={civ} id={id} year={year} page={page} back={() => setPage(null)} />
       ) : (
         <>
-          <RegionInfo {...props} ai={ai} aiRef={aiRef} />
-          <Foot>
-            {canAct && (
+          <Acts>
+            {canAct ? (
               <>
-                <button className="cp-btn primary" data-act="found" onClick={() => (setPage('found'), setSheet('full'))}>
+                <Act icon="flag" primary act="found" onClick={() => (setPage('found'), setSheet('full'))}>
                   在这里立国
-                </button>
-                <button className="cp-btn" data-act="cede" onClick={() => (setPage('cede'), setSheet('full'))}>
+                </Act>
+                <Act icon="map" act="cede" onClick={() => (setPage('cede'), setSheet('full'))}>
                   划给…
-                </button>
+                </Act>
               </>
+            ) : (
+              <CenterAct world={world} civ={civ} sel={{ kind: 'region', id }} year={year} />
             )}
-            <button className="cp-btn" data-act="rename" onClick={() => setRenaming(true)}>
+            <Act icon="rename" act="rename" onClick={() => setRenaming(true)}>
               改名
-            </button>
-            <button className="cp-btn" data-ain="explain" disabled={ai.busy} onClick={ai.ask}>
-              名字由来
-            </button>
-          </Foot>
+            </Act>
+            <MoreAct>
+              {canAct && <CenterItem world={world} civ={civ} sel={{ kind: 'region', id }} year={year} />}
+              <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
+                让 AI 讲名字由来
+              </AiMenuItem>
+            </MoreAct>
+          </Acts>
+          <RegionInfo {...props} ai={ai} aiRef={aiRef} />
         </>
       )}
     </div>
@@ -153,57 +165,48 @@ function RegionInfo({ civ, raw, raster, id, year, names, ai, aiRef }: DetailProp
             ) : (
               '—'
             ),
-            size: 'text',
           },
           { k: '宜居度', v: score, note: habitatWord(score) },
-          { k: '人口', v: pop > 0 ? populationLabel(pop).replace(/万人$/, '万') : '—', size: 'small' },
+          { k: '人口', v: pop > 0 ? populationLabel(pop) : '—' },
         ]}
-      />
-      <OwnerBar civ={civ} spans={spans} year={year} />
-      <div className={`cp-grid${spans.length ? '' : ' cp-grid-top'}`}>
+      >
         {cities.length > 0 && (
-          <>
-            <span className="cp-k">城</span>
-            <span className="cp-links">
-              {cities.map((s) => {
-                const gone = s.ended !== undefined && s.ended <= year;
-                const cap = !gone && civ.polities.some((p) => polityAlive(p, year) && capitalAt(p, year) === s.id);
-                return (
-                  <span key={s.id} className={gone ? 'cp-gone' : ''}>
-                    <Link to={{ kind: 'settlement', id: s.id }}>{s.name}</Link>
-                    <em>{gone ? '故城' : cap ? '都城' : SETTLEMENT_RANKS[settlementRank(populationAt(s, year))].name}</em>
-                  </span>
-                );
-              })}
-            </span>
-          </>
+          <Row k="城" className="cp-links">
+            {cities.map((s) => {
+              const gone = s.ended !== undefined && s.ended <= year;
+              const cap = !gone && civ.polities.some((p) => polityAlive(p, year) && capitalAt(p, year) === s.id);
+              return (
+                <span key={s.id} className={gone ? 'cp-gone' : ''}>
+                  <Link to={{ kind: 'settlement', id: s.id }}>{s.name}</Link>
+                  <em>{gone ? '故城' : cap ? '都城' : SETTLEMENT_RANKS[settlementRank(populationAt(s, year))].name}</em>
+                </span>
+              );
+            })}
+          </Row>
         )}
-        <span className="cp-k">地貌</span>
-        <span>
+        <Row k="地貌">
           {BIOMES[civ.regions.biome[id]]?.name ?? '—'}
-          {Number.isFinite(elev) && ` · 平均海拔 ${Math.round(elev).toLocaleString()} 米`}
-        </span>
+          {Number.isFinite(elev) && `，平均海拔 ${Math.round(elev).toLocaleString()} 米`}
+        </Row>
         {cu && (
-          <>
-            <span className="cp-k">民族</span>
-            <span className="cp-links">
-              <span>{KIND_INFO[cu.kind].name}民族</span>
-              <button className="ins-link" data-act="culture-explain" disabled={culture.ai.busy} onClick={culture.ai.ask}>
-                族名由来
-              </button>
-              <button className="ins-link" data-act="culture-suggest" onClick={culture.ai.suggest}>
-                起族名
-              </button>
-            </span>
-          </>
+          <Row k="民族" className="cp-links">
+            <span>{KIND_INFO[cu.kind].name}民族</span>
+            <button className="ins-link" data-act="culture-explain" disabled={culture.ai.busy} onClick={culture.ai.ask}>
+              族名由来
+            </button>
+            <button className="ins-link" data-act="culture-suggest" onClick={culture.ai.suggest}>
+              起族名
+            </button>
+          </Row>
         )}
-      </div>
+      </Stats>
+      <OwnerBar civ={civ} spans={spans} year={year} />
       <EventList upTo={upTo} />
       {mine.length > 0 && (
-        <div className="cp-events cp-mine">
-          <span className="cp-k">这一州的干预</span>
+        <section className="cp-sec cp-mine">
+          <div className="cp-sec-head">这一州的干预</div>
           <MineList civ={civ} mine={mine} />
-        </div>
+        </section>
       )}
       <AiBox ai={culture.ai} aiRef={culture.aiRef} />
       <AiBox ai={ai} aiRef={aiRef} />

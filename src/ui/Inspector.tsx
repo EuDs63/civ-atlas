@@ -35,6 +35,25 @@ import './countryPanel.css';
 
 /** 最近一次画面板时的历史(冒烟检查、截图挑例子用) */
 let lastCiv: Civ | null = null;
+/** 上次显示的是哪个选中的东西(稳定键;见 useSelectionReset) */
+let lastShown = '';
+
+/**
+ * 换了选中的东西(按稳定键:重推历史后编号变了还算同一个):面板回到信息页;窄屏的抽屉回到半高。
+ * 和上次显示的比(记在模块里,和面板页签一样是全局的):面板哪天重新挂上,也不会停在上一个东西的干预页
+ */
+export function useSelectionReset(raw: Civ | null, onReset?: () => void) {
+  const { sel } = useSelection();
+  const stable = raw && sel ? selectionKey(raw, sel) : '';
+  useLayoutEffect(() => {
+    if (lastShown === stable) return;
+    lastShown = stable;
+    setPanelTab('info');
+    setSheet('half');
+    onReset?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stable]);
+}
 
 export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: Civ | null; raster: Raster | null; world: World }) {
   const { sel } = useSelection();
@@ -45,18 +64,9 @@ export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: C
   const narrow = useNarrow();
   const sheetDrag = useSheetDrag(narrow, sheet);
   lastCiv = civ;
-  // 换了选中的东西(按稳定键:重推历史后编号变了还算同一个):回到信息页;窄屏的抽屉回到半高
-  const stable = raw && sel ? selectionKey(raw, sel) : '';
-  const last = useRef(stable);
-  useLayoutEffect(() => {
-    if (last.current === stable) return;
-    last.current = stable;
-    setPanelTab('info');
-    setSheet('half');
-    sheetDrag.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stable]);
+  useSelectionReset(raw, sheetDrag.reset);
   if (!civ || !raw || !sel) return null;
+  const stable = selectionKey(raw, sel);
   const year = Math.floor(Math.min(civ.endYear, Math.max(0, t.year ?? civ.endYear)));
   const common = { civ, raw, raster, world, year, names: edits.names };
   let body: ReactNode = null;

@@ -19,6 +19,12 @@
   font-family: var(--tb-sans);
   color: var(--ink, #231c13);
 }
+/* 时间轴、最近事件用系统字体(地图上的事件标签 .ev-pins 照旧用宋体,和地名一个样子) */
+.timebar,
+.recent-ev {
+  --tb-serif: var(--font-sans);
+  --tb-sans: var(--font-sans);
+}
 .tb-compat {
   --panel: rgba(247, 242, 231, 0.95);
   --line: rgba(35, 28, 19, 0.15);
@@ -135,16 +141,23 @@
   outline: 1px solid var(--line-strong, rgba(35, 28, 19, 0.4));
   outline-offset: 2px;
 }
-button.tb-play {
+/* 播放:蓝色圆按钮 */
+.timebar button.tb-play {
   flex: none;
   width: 36px;
   height: 36px;
   padding: 0;
-  border: 1.5px solid var(--ink, #231c13);
+  border: 0;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--accent, #007aff);
+  color: var(--on-accent, #fff);
+  text-shadow: none;
+}
+.timebar button.tb-play:hover {
+  background: var(--accent-hover, #0066d6);
 }
 /* 播放:三角形;暂停(.on):两道竖条 */
 .tb-play i {
@@ -181,15 +194,16 @@ button.tb-play {
 }
 .tb-speed button {
   padding: 4px 8px;
-  border-radius: 3px;
+  border-radius: 6px;
   font-size: 13px;
   line-height: 1.2;
 }
 .tb-speed button.on {
   background: var(--btn, rgba(35, 28, 19, 0.07));
+  font-weight: 600;
 }
 
-/* 轨道:高 44;基线在 24;菱形在 13;"令"从 4 到 26;播放头 18–31;年份字在 32 */
+/* 轨道:高 44;基线(5 像素粗的圆角条)在 22–27;事件小圆点在 13;"令"从 4 到 26;播放头 15–36;年份字在 32 */
 .tb-track {
   position: relative;
   flex: 1;
@@ -206,16 +220,18 @@ button.tb-play {
 .tb-base {
   left: 0;
   right: 0;
-  top: 24px;
-  height: 1px;
-  background: var(--line-strong, rgba(35, 28, 19, 0.4));
+  top: 22px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--btn, rgba(118, 118, 128, 0.12));
 }
 .tb-prog {
   left: 0;
-  top: 23px;
-  height: 3px;
+  top: 22px;
+  height: 5px;
+  border-radius: 3px;
   width: calc(var(--p, 0) * 100%);
-  background: var(--ink, #231c13);
+  background: var(--accent, #007aff);
 }
 .tb-tick {
   width: 1px;
@@ -247,23 +263,23 @@ button.tb-play {
   transform: translateX(-100%);
 }
 .tb-mark {
-  top: 13px;
-  width: 5px;
-  height: 5px;
-  margin-left: -2.5px;
+  top: 10px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
   background: var(--c);
-  transform: rotate(45deg);
   transition: transform 0.12s;
 }
 /* 几件合并成的:大一圈 */
 .tb-mark.many {
-  top: 12.5px;
-  width: 6px;
-  height: 6px;
-  margin-left: -3px;
+  top: 9.5px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
 }
 .tb-mark.on {
-  transform: rotate(45deg) scale(1.6);
+  transform: scale(1.6);
 }
 .tb-order {
   top: 4px;
@@ -289,15 +305,18 @@ button.tb-play {
   background: var(--accent-hover, #a03a28);
 }
 .tb-head {
-  top: 18px;
+  top: 14px;
   left: calc(var(--p, 0) * 100%);
-  width: 13px;
-  height: 13px;
-  margin-left: -6.5px;
+  width: 21px;
+  height: 21px;
+  margin-left: -10.5px;
   box-sizing: border-box;
   border-radius: 50%;
-  border: 2px solid var(--ink, #231c13);
-  background: var(--panel-solid, #f6f1e6);
+  border: 0;
+  background: #fff;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.3),
+    0 0 0 0.5px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
 
@@ -310,9 +329,11 @@ button.tb-play {
   max-width: min(380px, 90vw);
   padding: 6px 0;
   background: var(--panel, rgba(247, 242, 231, 0.95));
-  border: 1px solid var(--line, rgba(35, 28, 19, 0.15));
-  border-radius: 4px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 0;
+  border-radius: 10px;
+  box-shadow: var(--shadow-float, 0 14px 36px rgba(0, 0, 0, 0.22));
   text-shadow: none;
   cursor: default;
 }

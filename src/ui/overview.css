@@ -59,8 +59,7 @@
   min-width: 0;
 }
 .ov-name {
-  font: 700 22px/1.3 var(--font-serif);
-  letter-spacing: 0.04em;
+  font: 700 22px/1.3 var(--font-sans);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -70,24 +69,11 @@
   color: var(--ink-2);
   white-space: nowrap;
 }
-.ov-stats {
-  display: flex;
-  gap: 26px;
+/* 统计那一句长,窄屏放不下就折行 */
+.ov-subline.ov-stats {
+  white-space: normal;
 }
-.ov-stats > div {
-  display: flex;
-  flex-direction: column;
-}
-.ov-stats b {
-  font: 600 20px/1.3 var(--font-serif);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.ov-stats span {
-  font-size: 12px;
-  color: var(--ink-2);
-  white-space: nowrap;
-}
+
 .ov-actions {
   margin-left: auto;
   display: flex;
@@ -148,14 +134,17 @@
   color: var(--ink);
 }
 .ov-x {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
-  background: transparent;
+  border-radius: 50%;
+  background: var(--btn);
   color: var(--ink-2);
-  border-radius: var(--r-btn);
-  padding: 4px 8px;
+  padding: 0;
   margin-left: 4px;
-  font-size: 16px;
-  line-height: 1;
 }
 .ov-x:hover {
   background: var(--hover-bg);
@@ -247,23 +236,20 @@
   color: var(--ink-2);
 }
 
-/* ---- 底部一行小字:源代码 · 隐私政策 · 用户协议 ---- */
+/* ---- 底部一行小字:源代码、隐私政策、用户协议 ---- */
 .ov-about {
   flex: none;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+  gap: 4px 18px;
   padding: 7px 24px 8px;
   border-top: 1px solid var(--line);
   font-size: 12px;
   line-height: 1.4;
   color: var(--ink-2);
 }
-.ov-about i {
-  font-style: normal;
-  padding: 0 7px;
-  opacity: 0.6;
-}
+
 .ov-about a {
   color: inherit;
   text-decoration: none;
@@ -272,6 +258,10 @@
   color: var(--link);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.ov-ver {
+  margin-left: auto;
+  color: var(--ink-3);
 }
 
 /* ---- 国家页:表格 ---- */
@@ -677,12 +667,6 @@ button.ov-iv-text:hover {
   .ov-summary {
     flex-basis: 100%;
     gap: 12px;
-  }
-  .ov-stats {
-    gap: 18px;
-  }
-  .ov-stats b {
-    font-size: 17px;
   }
   .ov-actions {
     margin-left: 0;

@@ -1,19 +1,20 @@
 /**
- * 右侧面板的公共零件:国家(CountryPanel)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)四种面板共用,
+ * 详情面板的公共零件:国家(CountryPanel)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)四种面板共用,
  * 保证它们看起来是同一套东西(样式都在 countryPanel.css)。
  *
- *   PanelHead    顶部:颜色块、"国家 · 第 N 年"、关闭;下面放名字和一行关键信息
+ *   PanelHead    顶部:颜色块、名字、一行关键信息("国家，1446 年立国")、右上角圆形的关闭
+ *   Acts / Act   名字下面一排图标按钮(第一个是主操作,蓝底);MoreAct = 最后一个"更多",点开一列菜单
+ *   CenterAct    "设为中心"按钮:把地图的中央经线转到选中的东西
  *   Link         面板里可以点的名字(选中那个国家 / 城 / 州)
- *   CenterLink   "设为中心":把地图的中央经线转到选中的东西
- *   Stats        三格数字(两格也行)
- *   SegBar       分段色条(朝代、历任归属):按时长分段,点一段跳到它开始的那年;OwnerBar = 历任归属(城、州)
+ *   Stats        "概况":一组圆角的行,左边名目、右边数值;children = 接在后面的行(Row)
+ *   SegBar       分段色条(历任归属):按时长分段,点一段跳到它开始的那年;OwnerBar = 历任归属(城、州)
  *   Spark        小柱图(疆域、兴衰)
- *   EventList    相关事件(最近几条,点了跳到那一年、地图上闪出事发地)
- *   Foot         底部按钮(2×2;三个按钮时一行三个)
+ *   EventList    大事(最近几条,点了跳到那一年、地图上闪出事发地)
+ *   Foot         底部按钮(干预页、立国 / 划给的表单页:返回、确定)
  *   YearStepper  生效年份:−100 −10 [年份] +10,下面一句"该年之前的历史不变,之后重新推演。"
  *   useRevealAi  名字由来 / AI 起名:内容在面板最下面,点了滚过去让它露出来
  */
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { Civ } from '../gen/civ/types';
 import type { Raster } from '../gen/raster';
 import type { World } from '../gen/world';
@@ -25,6 +26,8 @@ import { useAiName, type AiName, type AiNameProps } from './AiNamePanel';
 import { selectionLon } from './ProjectionPanel';
 import { requestMapCenter } from './mapWrap';
 import { evLabel, evText, evType } from './timelineLayout';
+import { Icon, type IconName } from './icons';
+import { MenuItem, PopMenu } from './PopMenu';
 import './countryPanel.css';
 
 /** 四种面板共同的参数 */
@@ -47,21 +50,59 @@ export const jumpTo = (y: number) => setCivTime({ year: y, playing: false, scrub
 export const rgb = (c: readonly number[]) => `rgb(${c.join(',')})`;
 export const rgba = (c: readonly number[], a: number) => `rgba(${c.join(',')},${a})`;
 
-/** 面板顶部:颜色块、"国家 · 第 N 年"、关闭;下面是名字和一行小字 */
-export function PanelHead({ color, tag, year, children }: { color?: string; tag: string; year: number; children?: ReactNode }) {
+/** 面板顶部:颜色块、名字(children 里的 NameEdit)和一行小字(SubLine),右上角圆形的关闭 */
+export function PanelHead({ color, children }: { color?: string; children?: ReactNode }) {
   return (
     <div className="cp-head">
-      <div className="cp-tag">
-        {color && <i className="cp-sw" style={{ background: color }} />}
-        <span>
-          {tag} · 第 {year} 年
-        </span>
-        <button className="cp-x ins-close" onClick={clearSelection} title="关闭(Esc)" aria-label="关闭">
-          ✕
-        </button>
-      </div>
-      {children}
+      {color && <i className="cp-sw" style={{ background: color }} />}
+      <div className="cp-title">{children}</div>
+      <button className="cp-x ins-close" onClick={clearSelection} title="关闭(Esc)" aria-label="关闭">
+        <Icon name="close" size={13} />
+      </button>
     </div>
+  );
+}
+
+/** 名字下面一排图标按钮 */
+export function Acts({ children }: { children: ReactNode }) {
+  return <div className="cp-acts">{children}</div>;
+}
+
+/** 一个图标按钮:图标在上、字在下;primary = 主操作(蓝底) */
+export function Act({
+  icon,
+  children,
+  primary,
+  act,
+  ain,
+  disabled,
+  title,
+  onClick,
+}: {
+  icon: IconName;
+  children: ReactNode;
+  primary?: boolean;
+  act?: string;
+  /** 名字由来 / AI 起名的按钮(data-ain) */
+  ain?: string;
+  disabled?: boolean;
+  title?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className={`cp-act${primary ? ' primary' : ''}`} data-act={act} data-ain={ain} disabled={disabled} title={title} onClick={onClick}>
+      <Icon name={icon} size={19} />
+      <span>{children}</span>
+    </button>
+  );
+}
+
+/** 最后一个按钮"更多":点开一列菜单(MenuItem) */
+export function MoreAct({ children }: { children: ReactNode }) {
+  return (
+    <PopMenu className="cp-act" icon={<Icon name="more" size={19} />} label={<span>更多</span>} act="more" align="right" side title="更多操作">
+      {children}
+    </PopMenu>
   );
 }
 
@@ -74,25 +115,34 @@ export function Link({ to, children }: { to: MapSelection; children: ReactNode }
   );
 }
 
-/** "设为中心":把地图的中央经线转到选中的东西 */
-export function CenterLink({ world, civ, sel, year }: { world: World; civ: Civ; sel: MapSelection; year: number }) {
+/** "设为中心"按钮:把地图的中央经线转到选中的东西(算不出位置时按钮不可点) */
+export function CenterAct({ world, civ, sel, year }: { world: World; civ: Civ; sel: MapSelection; year: number }) {
   const lon = selectionLon(world, civ, sel, year);
-  if (lon === null) return null;
   return (
-    <button className="ins-link" data-act="set-center" onClick={() => requestMapCenter(lon)}>
+    <Act icon="center" act="set-center" disabled={lon === null} title="把地图转到以它为中心" onClick={() => lon !== null && requestMapCenter(lon)}>
       设为中心
-    </button>
+    </Act>
   );
 }
 
-/** 一行关键信息:几段用" · "连起来(空的段不写) */
+/** "更多"菜单里的"设为中心"(按钮放不下时用) */
+export function CenterItem({ world, civ, sel, year }: { world: World; civ: Civ; sel: MapSelection; year: number }) {
+  const lon = selectionLon(world, civ, sel, year);
+  return (
+    <MenuItem icon={<Icon name="center" size={16} />} act="set-center" disabled={lon === null} onClick={() => lon !== null && requestMapCenter(lon)}>
+      设为中心
+    </MenuItem>
+  );
+}
+
+/** 一行关键信息:几段用"，"连起来(空的段不写) */
 export function SubLine({ parts, className }: { parts: ReactNode[]; className?: string }) {
   const shown = parts.filter((x) => x !== null && x !== undefined && x !== false && x !== '');
   return (
     <div className={`cp-sub${className ? ` ${className}` : ''}`}>
       {shown.map((x, i) => (
         <span key={i}>
-          {i > 0 && ' · '}
+          {i > 0 && '，'}
           {x}
         </span>
       ))}
@@ -101,32 +151,43 @@ export function SubLine({ parts, className }: { parts: ReactNode[]; className?: 
 }
 
 // ---------------------------------------------------------------------------
-// 三格数字
+// 概况
 
 export interface Stat {
   k: string;
   v: ReactNode;
-  /** num 宋体大数字(默认)/ small 稍小的数字(人口)/ text 一般文字(民族名) */
-  size?: 'num' | 'small' | 'text';
   /** 数字后面的小字("富饶") */
   note?: ReactNode;
   title?: string;
 }
 
-export function Stats({ items }: { items: Stat[] }) {
-  const style: CSSProperties | undefined = items.length !== 3 ? { gridTemplateColumns: `repeat(${items.length}, 1fr)` } : undefined;
+/** 一组圆角的行:左边名目、右边数值;title = 上面的小标题;children = 接在后面的行(Row) */
+export function Stats({ items, title = '概况', children }: { items: Stat[]; title?: string; children?: ReactNode }) {
   return (
-    <div className="cp-stats" style={style}>
-      {items.map((s, i) => (
-        <div key={i} className="cp-stat" data-stat={s.k} title={s.title}>
-          <span className="cp-k">{s.k}</span>
-          <span className={s.size === 'text' ? 'cp-folk' : s.size === 'small' ? 'cp-num small' : 'cp-num'}>
+    <section className="cp-sec">
+      {title && <div className="cp-sec-head">{title}</div>}
+      <div className="cp-grid cp-stats">
+        {items.map((s, i) => (
+          <Row key={i} k={s.k} stat title={s.title}>
             {s.v}
             {s.note && <em className="cp-num-note">{s.note}</em>}
-          </span>
-        </div>
-      ))}
-    </div>
+          </Row>
+        ))}
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** 概况里的一行(两格:名目、数值;放在 .cp-grid 里) */
+export function Row({ k, children, className, stat, title }: { k: string; children: ReactNode; className?: string; stat?: boolean; title?: string }) {
+  return (
+    <>
+      <span className="cp-k">{k}</span>
+      <span className={`cp-v${stat ? ' cp-stat' : ''}${className ? ` ${className}` : ''}`} data-stat={stat ? k : undefined} title={title}>
+        {children}
+      </span>
+    </>
   );
 }
 
@@ -149,7 +210,7 @@ export interface Seg {
 export function SegBar({ label, segs, years, className }: { label: string; segs: Seg[]; years: [number, number]; className?: string }) {
   return (
     <div className={`cp-dyn${className ? ` ${className}` : ''}`}>
-      <span className="cp-k">{label}</span>
+      <span className="cp-sec-head">{label}</span>
       <div className="cp-dyn-bar">
         {segs.map((s, i) => (
           <button
@@ -235,32 +296,33 @@ export function Spark({ bars, title, fill }: { bars: Bar[]; title?: string; fill
 // 相关事件
 
 /**
- * 相关事件:upTo = 到当前年份为止的(按年份排好),显示最近 5 条(新的在上)。
- * more = 标题右边的"全部 ›";empty = 一条都没有时写的一行(不给 = 整块不显示)
+ * 大事:upTo = 到当前年份为止的(按年份排好),显示最近 5 条(新的在上)。
+ * more = 标题右边的"全部 N 件"(不给 = 只写条数);empty = 一条都没有时写的一行(不给 = 整块不显示)
  */
 export function EventList({ upTo, more, empty }: { upTo: readonly ChronicleEntry[]; more?: ReactNode; empty?: string }) {
   if (!upTo.length && empty === undefined) return null;
   const recent = upTo.slice(-5).reverse();
   return (
-    <div className="cp-events">
-      <div className="cp-events-head">
-        <span className="cp-k">相关事件 · {upTo.length} 条</span>
-        {more}
+    <section className="cp-sec cp-events">
+      <div className="cp-sec-head cp-events-head">
+        <span>大事</span>
+        {more || (upTo.length > 0 && <span className="cp-count">{upTo.length} 件</span>)}
       </div>
-      {recent.map((e: ChronicleEntry) => (
-        <button key={e.id} className="cp-ev" data-ev={evType(e)} onClick={() => pickChronicleEntry(e)}>
-          <span className="cp-ev-year">{Math.floor(e.year)}</span>
-          <b className="tb-ev">{evLabel(e)}</b>
-          <span className="cp-ev-text">{evText(e)}</span>
-        </button>
-      ))}
-      {!recent.length && <span className="cp-none">{empty}</span>}
-    </div>
+      <div className="cp-group">
+        {recent.map((e: ChronicleEntry) => (
+          <button key={e.id} className="cp-ev" data-ev={evType(e)} title={evLabel(e)} onClick={() => pickChronicleEntry(e)}>
+            <span className="cp-ev-year">{Math.floor(e.year)}</span>
+            <span className="cp-ev-text">{evText(e)}</span>
+          </button>
+        ))}
+        {!recent.length && <span className="cp-none">{empty}</span>}
+      </div>
+    </section>
   );
 }
 
 // ---------------------------------------------------------------------------
-// 底部按钮
+// 底部按钮(干预页、表单页)
 
 export function Foot({ children, cols = 2 }: { children: ReactNode; cols?: 2 | 3 }) {
   return <div className={`cp-foot ${cols === 3 ? 'cp-grid3' : 'cp-grid2'}`}>{children}</div>;

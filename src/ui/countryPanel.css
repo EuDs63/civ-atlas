@@ -1,16 +1,22 @@
 /*
- * 右侧面板:国家(CountryPanel / CommandPage)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)和它们共用的零件
+ * 详情面板:国家(CountryPanel / CommandPage)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)和它们共用的零件
  * (panelParts)、名字(NameEdit)、AI 释名 / 起名(AiNamePanel);地图上的选目标层(TargetPlates:压暗、名牌、国都圆环)。
+ * 宽屏的面板放在左边侧栏里(desktop.css 把外壳改成铺满侧栏),窄屏是底部抽屉(本文件最后)。
+ * 样子照常见的地图应用:名字下面一排图标按钮,内容是一节节圆角的行。
  *
  * 颜色一律用主题变量(theme.css:浅 / 深两套随图层切换):--ink --ink-2 --panel --panel-solid --line --line-strong --btn --link
  * --accent --accent-hover --halo。
  */
 
-.inspector.cpanel,
-.tp-layer,
-.tp-mark {
-  /* 宋体不写地图文字那份子集字体(只有地名用字),数字、改过的名字缺字会换成别的字体 */
+.inspector.cpanel {
+  /* 拉丁原形(斜体)用的衬线字 */
   --cp-serif: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', 'SimSun', serif;
+}
+
+/* 面板只挂一份,外面套的容器(App 的 inspectorHost)和放容器的空位不占地方,面板直接按所在的位置排 */
+.inspector-host,
+.inspector-slot {
+  display: contents;
 }
 
 /* ---- 面板外壳:右侧,宽 340,上 72、下 84 ---- */
@@ -67,41 +73,48 @@
   min-height: 0;
 }
 
-/* ---- 顶部 ---- */
+/* ---- 顶部:颜色块、名字、一行小字、右上角圆形的关闭 ---- */
 .cp-head {
-  padding: 16px 18px 14px;
+  padding: 16px 14px 4px 16px;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-bottom: 1px solid var(--line);
-}
-.cp-tag {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.cp-sw {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
+  align-items: flex-start;
+  gap: 10px;
   flex: none;
 }
+.cp-sw {
+  width: 12px;
+  height: 12px;
+  border-radius: 3.5px;
+  flex: none;
+}
+.cp-head > .cp-sw {
+  margin-top: 9px;
+}
+.cp-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 .cpanel .cp-x {
-  position: static;
-  margin-left: auto;
-  padding: 2px 6px;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
-  border-radius: var(--r-btn, 3px);
-  background: transparent;
-  color: var(--ink);
-  font-size: 15px;
-  line-height: 1.2;
+  border-radius: 50%;
+  background: var(--btn);
+  color: var(--ink-2);
   cursor: pointer;
 }
 .cpanel .cp-x:hover {
   background: var(--hover-bg);
+  color: var(--ink);
 }
 .cp-sub {
   font-size: 13px;
@@ -116,11 +129,12 @@
   text-align: left;
 }
 .cpanel .ins-link:hover {
-  color: var(--accent);
+  text-decoration: underline;
 }
 .cpanel .ins-link:disabled {
   color: var(--ink-2);
   cursor: default;
+  text-decoration: none;
 }
 
 /* ---- 名字(NameEdit) ---- */
@@ -140,8 +154,7 @@
   cursor: text;
 }
 .cpanel .ins-name-row.big .ins-name {
-  font: 700 26px/1.25 var(--cp-serif);
-  letter-spacing: 0.04em;
+  font: 700 22px/1.3 var(--font-sans);
 }
 .nm-pen::after {
   content: '✎';
@@ -163,7 +176,7 @@
   cursor: pointer;
 }
 .cpanel .ins-reset:hover {
-  color: var(--accent);
+  text-decoration: underline;
 }
 .cpanel .ins-edit {
   display: flex;
@@ -175,18 +188,18 @@
   box-sizing: border-box;
   font: 500 14px var(--font-sans);
   color: var(--ink);
-  background: var(--btn);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-btn, 3px);
-  padding: 3px 8px;
+  background: var(--field);
+  border: 0;
+  border-radius: var(--r-btn);
+  padding: 4px 8px;
   outline: none;
 }
 .cpanel .ins-edit.big input {
-  font: 700 24px/1.3 var(--cp-serif);
-  padding: 2px 8px;
+  font: 700 20px/1.3 var(--font-sans);
+  padding: 3px 8px;
 }
 .cpanel .ins-edit input:focus {
-  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .cpanel .ins-preview {
   font-size: 13px;
@@ -201,7 +214,83 @@
   font-size: 13px;
 }
 
-/* ---- 内容(可滚动) ---- */
+/* ---- 名字下面一排图标按钮(第一个是主操作,蓝底;最后一个"更多"弹出菜单) ---- */
+.cp-acts {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+.cp-acts > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.cpanel .cp-act,
+.cpanel .cp-act > .pm-btn {
+  height: 54px;
+  padding: 0 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--btn);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cpanel .cp-act.pm {
+  padding: 0;
+  background: transparent;
+}
+.cpanel .cp-act > .pm-btn {
+  width: 100%;
+}
+.cpanel .cp-act span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cpanel .cp-act:hover:not(:disabled):not(.pm),
+.cpanel .cp-act > .pm-btn:hover,
+.cpanel .cp-act > .pm-btn.on {
+  background: var(--hover-bg);
+}
+/* "更多"的菜单开着:按钮描一圈浅蓝 */
+.cpanel .cp-act > .pm-btn.on {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.cpanel .cp-act.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.cpanel .cp-act.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.cpanel .cp-act:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cpanel .cp-act .pm-menu {
+  top: calc(100% + 6px);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.cpanel .pm-item {
+  color: var(--ink);
+}
+.cpanel .pm-item:hover:not(:disabled) {
+  color: var(--on-accent);
+}
+
+/* ---- 内容(可滚动):一节一节,每节一个小标题 + 一组圆角的行 ---- */
 .cp-body {
   flex: 1;
   min-height: 0;
@@ -209,6 +298,11 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
+  gap: 18px;
+  padding: 2px 0 20px;
+}
+.cp-head + .cp-body {
+  padding-top: 12px;
 }
 .cp-k {
   font-size: 12px;
@@ -217,52 +311,157 @@
 .cp-none {
   color: var(--ink-2);
 }
-
-/* 三格数字:州 / 人口 / 主体民族 */
-.cp-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  border-bottom: 1px solid var(--line);
+.cp-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px;
   flex: none;
 }
-.cp-stat {
-  padding: 11px 14px;
+.cp-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.cp-count {
+  font-weight: 400;
+  font-size: 12.5px;
+}
+.cp-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.cp-stat:first-child {
-  padding-left: 18px;
-}
-.cp-stat + .cp-stat {
-  border-left: 1px solid var(--line);
-}
-.cp-num {
-  font: 600 20px/1.3 var(--cp-serif);
-}
-.cp-num.small {
-  font-size: 17px;
-  padding-top: 2px;
-}
-.cp-folk {
-  font-size: 14px;
-  line-height: 1.35;
-  padding-top: 3px;
-  overflow-wrap: anywhere;
+  border-radius: 10px;
+  background: var(--btn);
+  overflow: hidden;
 }
 
-/* 朝代条 */
+/* 概况:两列(名目、数值),一行一条细线 */
+.cp-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  border-radius: 10px;
+  background: var(--btn);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.cp-grid > * {
+  min-height: 20px;
+  padding: 10px 12px;
+}
+.cp-grid > .cp-k {
+  padding-right: 4px;
+  font-size: 14px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.cp-grid > :nth-child(n + 3) {
+  border-top: 0.5px solid var(--line);
+}
+.cp-v {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px 4px;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.cp-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.cp-v.cp-links {
+  gap: 2px 10px;
+}
+.cp-links em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  margin-left: 3px;
+}
+.cp-now .ins-link {
+  font-weight: 700;
+}
+/* 疆域:小柱图 + 州数 */
+.cp-terr {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+.cp-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+.cp-spark i {
+  width: 5px;
+  border-radius: 1px;
+}
+
+/* 朝代:一朝一行 */
+.cpanel .cp-dyn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 20px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 0.5px solid var(--line);
+  background: transparent;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.cpanel .cp-dyn-row:last-child {
+  border-bottom: 0;
+}
+.cpanel .cp-dyn-row:hover {
+  background: var(--hover-bg);
+}
+.cp-dyn-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cp-dyn-row.on .cp-dyn-name {
+  font-weight: 600;
+}
+.cp-badge {
+  padding: 1px 5px;
+  border-radius: var(--r-tag);
+  background: var(--ok-soft, rgba(52, 199, 89, 0.16));
+  color: var(--ok);
+  font: 600 11px/1.4 var(--font-sans);
+  font-style: normal;
+}
+.cp-dyn-span {
+  flex: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 历任归属(分段色条)、兴衰(小柱图) */
 .cp-dyn {
-  padding: 14px 18px 12px;
+  padding: 0 14px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   flex: none;
 }
 .cp-dyn-bar {
   display: flex;
-  height: 24px;
+  height: 26px;
   gap: 2px;
   font-size: 12px;
 }
@@ -273,7 +472,7 @@
   min-width: 3px;
   padding: 0;
   border: 0;
-  border-radius: var(--r-tag, 2px);
+  border-radius: 6px;
   overflow: hidden;
   white-space: nowrap;
   color: var(--ink);
@@ -281,8 +480,9 @@
   cursor: pointer;
 }
 .cpanel .cp-seg.on {
-  color: #231c13;
-  font-weight: 700;
+  color: #fff;
+  font-weight: 600;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.35);
 }
 .cpanel .cp-seg:hover {
   filter: brightness(0.94);
@@ -290,127 +490,99 @@
 .cp-dyn-years {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  padding: 0 2px;
+  font-size: 11.5px;
   color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
 }
 
-/* 疆域 / 邻国 / 来历 / 结局 / 历任国都 */
-.cp-grid {
-  padding: 0 18px 12px;
-  display: grid;
-  grid-template-columns: 60px 1fr;
-  row-gap: 10px;
-  font-size: 14px;
-  align-items: center;
-  flex: none;
-}
-.cp-grid > .cp-k {
-  font-size: 13px;
-  align-self: start;
-  padding-top: 1px;
-}
-.cp-spark {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 26px;
-}
-.cp-spark i {
-  width: 10px;
-  border-radius: 1px;
-}
-.cp-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-}
-.cp-links em {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--ink-2);
-  margin-left: 3px;
-}
-.cp-now .ins-link {
-  font-weight: 700;
-}
-
-/* 相关事件 */
-.cp-events {
-  padding: 12px 18px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: none;
-}
-.cp-events-head {
+/* 大事:一条一行(年份、颜色小点、正文) */
+.cpanel .cp-ev {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-}
-.cpanel .cp-more {
-  font-size: 12px;
-}
-.cpanel .cp-ev {
-  display: grid;
-  grid-template-columns: 38px 30px 1fr;
-  gap: 6px;
-  padding: 0;
+  gap: 10px;
+  padding: 9px 12px;
   border: 0;
-  border-radius: var(--r-btn, 3px);
+  border-bottom: 0.5px solid var(--line);
   background: transparent;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.45;
   text-align: left;
   cursor: pointer;
 }
+.cpanel .cp-ev:last-child {
+  border-bottom: 0;
+}
 .cpanel .cp-ev:hover {
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--hover-bg);
 }
 .cp-ev-year {
+  flex: none;
+  width: 2.6em;
   color: var(--ink-2);
-}
-.cp-ev .tb-ev {
   font-size: 13px;
-  font-weight: 700;
-  color: var(--c, var(--accent));
+  font-variant-numeric: tabular-nums;
+}
+.cp-ev-text {
+  flex: 1;
+  min-width: 0;
+}
+.cp-ev-text::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 7px 2px 0;
+  border-radius: 50%;
+  background: var(--c, var(--ink-3));
+  vertical-align: middle;
+}
+.cp-group > .cp-none {
+  padding: 10px 12px;
+  font-size: 14px;
+}
+.cpanel .cp-more {
+  font-size: 13px;
+  font-weight: 500;
 }
 .cp-ai {
-  margin: 0 18px 12px;
+  margin: 0 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* 底部按钮 */
+/* 底部按钮(干预页、表单页:返回、确定) */
 .cp-foot {
-  padding: 10px;
-  border-top: 1px solid var(--line);
+  padding: 10px 14px 14px;
+  border-top: 0.5px solid var(--line);
   flex: none;
 }
 .cp-grid2 {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
+  gap: 8px;
 }
 .cpanel .cp-btn {
-  padding: 10px 0;
+  height: 40px;
+  padding: 0 8px;
   border: 0;
-  border-radius: var(--r-btn, 3px);
+  border-radius: 10px;
   background: var(--btn);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 14.5px;
+  font-weight: 500;
   text-align: center;
   cursor: pointer;
 }
 .cpanel .cp-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 13%, transparent);
+  background: var(--hover-bg);
 }
 .cpanel .cp-btn.primary {
   background: var(--accent);
   color: var(--on-accent, #fff);
 }
-.cpanel .cp-btn.primary:hover {
+.cpanel .cp-btn.primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 .cpanel .cp-btn.wide {
@@ -424,11 +596,13 @@
 
 /* ---- 干预页 ---- */
 .cp-from {
-  padding: 14px 18px;
+  margin: 0 14px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-bottom: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--btn);
   flex: none;
 }
 .cp-from-row {
@@ -437,15 +611,18 @@
   gap: 6px;
 }
 .cpanel .cp-step {
-  padding: 5px 9px;
+  height: 30px;
+  padding: 0 10px;
   border: 0;
-  border-radius: var(--r-btn, 3px);
-  background: var(--btn);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.12);
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 .cpanel .cp-step:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 13%, transparent);
+  background: var(--panel-solid);
 }
 .cpanel .cp-step:disabled {
   opacity: 0.4;
@@ -457,7 +634,8 @@
   justify-content: center;
   align-items: baseline;
   gap: 4px;
-  font: 600 20px var(--cp-serif);
+  font: 700 20px var(--font-sans);
+  font-variant-numeric: tabular-nums;
 }
 .cp-year input {
   min-width: 2ch;
@@ -477,13 +655,17 @@
   border-bottom-color: var(--accent);
 }
 .cp-note {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--ink-2);
   line-height: 1.6;
 }
 .cp-cmds {
+  margin: 0 14px;
   display: flex;
   flex-direction: column;
+  border-radius: 10px;
+  background: var(--btn);
+  overflow: hidden;
   flex: none;
 }
 .cpanel .cp-cmd {
@@ -491,15 +673,18 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 11px 18px;
+  padding: 10px 12px;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 0.5px solid var(--line);
   background: transparent;
   text-align: left;
   cursor: pointer;
 }
+.cpanel .cp-cmd:last-child {
+  border-bottom: 0;
+}
 .cpanel .cp-cmd:hover:not(:disabled) {
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--hover-bg);
 }
 .cpanel .cp-cmd.off {
   opacity: 0.4;
@@ -509,7 +694,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 .cp-cmd-name {
@@ -517,16 +702,16 @@
   font-weight: 500;
 }
 .cp-cmd-desc {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--ink-2);
 }
 .cp-cmd-go {
   font-size: 13px;
-  color: var(--ink-2);
+  color: var(--link);
   white-space: nowrap;
 }
 .cp-msg {
-  padding: 10px 18px;
+  padding: 4px 18px 10px;
   font-size: 13px;
   color: var(--err);
 }
@@ -539,14 +724,18 @@
   font-style: normal;
   color: var(--ink-2);
 }
-/* 三格里的族名(可改) */
+/* 概况里的族名(可改) */
 .cpanel .cp-stat .ins-name {
   font-size: 14px;
-  line-height: 1.35;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 .cpanel .cp-stat .ins-name-row {
   gap: 0 6px;
+  justify-content: flex-end;
+}
+.cpanel .cp-stat .ins-edit {
+  width: 100%;
 }
 .cpanel .cp-stat .ins-edit input {
   font-size: 13px;
@@ -566,19 +755,10 @@
 .cpanel .cp-seg.blank:hover {
   filter: none;
 }
-.cp-trend + .cp-owners {
-  padding-top: 4px;
-}
 
 /* 兴衰:人口小柱图 + 上面的记号(掠 / 毁 / 建 / 衰) */
 .cp-trend {
   gap: 4px;
-}
-.cp-trend-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
 }
 .cp-marks {
   position: relative;
@@ -626,9 +806,6 @@
 }
 
 /* 所在州、民族、国都、故址、州里的城 */
-.cp-grid-top {
-  padding-top: 14px;
-}
 .cp-em {
   font-style: normal;
   font-size: 12px;
@@ -644,6 +821,11 @@
   align-items: center;
   gap: 5px;
 }
+.cp-chip .cp-sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
 .cpanel .ins-latin {
   font-style: italic;
   font-family: var(--cp-serif);
@@ -658,11 +840,13 @@
 
 /* 州的干预页:国名 / 永久 */
 .cp-form {
-  padding: 14px 18px;
+  margin: 0 14px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-bottom: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--btn);
   flex: none;
 }
 .cp-form-title {
@@ -677,16 +861,16 @@
 .cpanel .cp-field input {
   flex: 1;
   min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-btn, 3px);
-  background: var(--field);
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: var(--surface);
   color: var(--ink);
   font: 500 14px var(--font-sans);
   outline: none;
 }
 .cpanel .cp-field input:focus {
-  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .cp-check {
   display: flex;
@@ -701,8 +885,10 @@
 }
 
 /* 这一州的干预(可撤销) */
-.cp-mine {
-  gap: 6px;
+.cp-mine .iv-mine {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--btn);
 }
 .cpanel .iv-mine {
   display: flex;
@@ -955,7 +1141,7 @@
   cursor: default;
 }
 .cpanel .ain-cand-name {
-  font: 600 15px var(--cp-serif);
+  font: 600 15px var(--font-sans);
 }
 .cpanel .ain-latin {
   font-style: italic;
@@ -1030,13 +1216,15 @@
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-panel, 4px);
+  border: 0;
+  border-radius: 10px;
   background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--ink);
-  font: 600 14px/1.25 var(--cp-serif);
+  font: 600 14px/1.25 var(--font-sans);
   white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-float);
   pointer-events: auto;
   cursor: pointer;
   will-change: transform;
@@ -1046,18 +1234,17 @@
 }
 .tp-plate.on,
 .tp-plate:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.tp-plate.self {
   background: var(--ink);
   color: var(--panel-solid);
 }
-.tp-plate.self {
-  background: var(--accent);
-  border-color: transparent;
-  color: var(--on-accent, #fff);
-}
 .tp-sw {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
   flex: none;
 }
 .tp-note {
@@ -1082,9 +1269,9 @@
   width: 24px;
   height: 24px;
   box-sizing: border-box;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--map-mark);
   border-radius: 50%;
-  box-shadow: 0 0 0 5px rgba(184, 67, 47, 0.22);
+  box-shadow: 0 0 0 5px rgba(212, 57, 43, 0.2);
 }
 /* 字默认写在圆环下面(地图自己的城名多半在城镇符号左右两边);压着地图上的字时 TargetPlates 换个地方(改 transform) */
 .tp-mark-text {
@@ -1093,7 +1280,7 @@
   top: 0;
   transform: translate(-50%, 15px);
   white-space: nowrap;
-  font: 600 14px/22px var(--cp-serif);
+  font: 600 13px/22px var(--font-sans);
   color: var(--ink);
   text-shadow: var(--halo);
 }

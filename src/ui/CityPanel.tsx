@@ -1,13 +1,14 @@
 /**
- * 城的面板(右侧,和国家面板同一套样子,零件见 panelParts.tsx),按时间轴当前那一年:
+ * 城的面板(和国家面板同一套样子,零件见 panelParts.tsx),按时间轴当前那一年:
  *
- *   顶部  颜色块(当年所属国)、"城 · 第 N 年"(毁了 = "故城")、关闭;城名(可改);"1045 年建城 · 属 大昌 · 设为中心"(毁了写毁于哪年)
- *   三格  级别(都城 / 大城 / 城 / 镇 / 村;故城)/ 人口 / 做过国都(次数或"未曾")
+ *   顶部  颜色块(当年所属国)、城名(可改)、"城，1045 年建城，属 大昌"(毁了 = "故城"、写毁于哪年)、关闭
+ *   按钮  迁都到这里(主操作:替所属国下"迁都"令,生效年份 = 当前年份,和国家干预页同一套流程)/ 设为中心 / 改名 /
+ *         更多(看所属国家、让 AI 讲名字由来)
+ *   概况  级别(都城 / 大城 / 城 / 镇 / 村;故城)、人口、做过国都(次数或"未曾")、所在州(可点)、建城时的民族、
+ *         做国都的年份段、故址(重建)
  *   兴衰  历年人口的小柱图(柱子按当时的主人上色,无主时灰),洗劫 / 毁城 / 重建 / 旧都衰落的年份在上面标一个字;点一处跳到那年
  *   历任归属 按时长分段的色条(每段一个国家的颜色),点一段跳到它开始的那年
- *   所在州(可点)、建城时的民族、做国都的年份段、故址(重建)
- *   相关事件 最近 5 条(可点)
- *   底部 2×2 迁都到这里(主色:替所属国下"迁都"令,生效年份 = 当前年份,和国家干预页同一套流程)/ 看所属国家 / 改名 / 名字由来
+ *   大事  最近 5 条(可点)
  */
 import { useMemo, useState } from 'react';
 import type { Civ, Settlement } from '../gen/civ/types';
@@ -22,14 +23,17 @@ import { nameAt } from './Interventions';
 import { endRun, startRun } from './panelStore';
 import { cityEntries, entriesUpTo, ownerSpans, ownersOf, popSeries, type OwnerSpan } from './panelData';
 import {
+  Act,
+  Acts,
   AiBox,
   AiSuggestLink,
-  CenterLink,
+  CenterAct,
   EventList,
-  Foot,
   Link,
+  MoreAct,
   OwnerBar,
   PanelHead,
+  Row,
   Spark,
   Stats,
   SubLine,
@@ -38,13 +42,15 @@ import {
   type DetailProps,
   useRevealAi,
 } from './panelParts';
+import { AiMenuItem, MenuItem } from './PopMenu';
+import { Icon } from './icons';
 
 /** 兴衰小柱图的柱数 */
 const BARS = 24;
 /** 柱子最高多少像素 */
 const BAR_H = 30;
 
-const popShort = (pop: number) => (pop > 0 ? populationLabel(pop).replace(/万人$/, '万') : '—');
+const popShort = (pop: number) => (pop > 0 ? populationLabel(pop) : '—');
 
 export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailProps) {
   const s = civ.settlements[id];
@@ -105,7 +111,7 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
 
   return (
     <div className="cp" data-settlement={id}>
-      <PanelHead color={stands && owner ? rgb(owner.color) : undefined} tag={ruined ? '故城' : '城'} year={year}>
+      <PanelHead color={stands && owner ? rgb(owner.color) : undefined}>
         <NameEdit
           k={settlementKey(civ, id)}
           kind="settlement"
@@ -121,99 +127,87 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
         <SubLine
           className="ins-status"
           parts={[
+            ruined ? '故城' : '城',
             `${Math.floor(s.founded)} 年${built ? '' : '才'}建城`,
             ruined ? `毁于 ${Math.floor(s.ended!)} 年` : owner ? <>属 {polityLink(owner.id, year)}</> : stands ? '部落地带' : null,
-            <CenterLink world={world} civ={civ} sel={{ kind: 'settlement', id }} year={year} />,
           ]}
         />
       </PanelHead>
+      <Acts>
+        <Act icon="flag" primary act="move-here" disabled={!!moveWhy} title={moveWhy ?? `${nameAt(moveOwner!, y)}迁都到这里,${y} 年起生效`} onClick={move}>
+          迁都到这里
+        </Act>
+        <CenterAct world={world} civ={civ} sel={{ kind: 'settlement', id }} year={year} />
+        <Act icon="rename" act="rename" onClick={() => setRenaming(true)}>
+          改名
+        </Act>
+        <MoreAct>
+          <MenuItem icon={<Icon name="flag" size={16} />} act="owner" disabled={!owner} onClick={() => owner && setSelection({ kind: 'polity', id: owner.id })}>
+            看所属国家
+          </MenuItem>
+          <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
+            让 AI 讲名字由来
+          </AiMenuItem>
+        </MoreAct>
+      </Acts>
+      {msg && <div className="cp-msg">{msg}</div>}
       <div className="cp-body">
         <Stats
           items={[
-            { k: '级别', v: level, size: 'small' },
-            { k: '人口', v: stands ? popShort(pop) : '—', size: 'small' },
-            { k: '做过国都', v: capTimes ? `${capTimes} 次` : '未曾', size: 'small' },
+            { k: '级别', v: level },
+            { k: '人口', v: stands ? popShort(pop) : '—' },
+            { k: '做过国都', v: capTimes ? `${capTimes} 次` : '未曾' },
           ]}
-        />
-        <Trend civ={civ} s={s} year={year} from={s.founded} to={last} spans={spans} />
-        <OwnerBar civ={civ} spans={spans} year={year} />
-        <div className="cp-grid">
-          <span className="cp-k">所在</span>
-          <span>
-            <Link to={{ kind: 'region', id: s.region }}>{regionLabel(civ, s.region)}</Link>
-            {s.port && ' · 港口'}
-          </span>
+        >
+          <Row k="所在">
+            <span>
+              <Link to={{ kind: 'region', id: s.region }}>{regionLabel(civ, s.region)}</Link>
+              {s.port && '，港口'}
+            </span>
+          </Row>
           {cu && (
-            <>
-              <span className="cp-k">民族</span>
-              <span>
-                {cultureLabel(cu)}
-                <em className="cp-em">建城时</em>
-              </span>
-            </>
+            <Row k="民族">
+              {cultureLabel(cu)}
+              <em className="cp-em">建城时</em>
+            </Row>
           )}
           {capSpans.length > 0 && (
-            <>
-              <span className="cp-k">国都</span>
-              <span className="cp-links">
-                {capSpans.map((c, i) => {
-                  const end = c.until ?? s.ended;
-                  const now = c.from <= year && (end === undefined || year < end);
-                  const P = civ.polities[c.polity];
-                  return (
-                    <span key={i} className={`${now ? 'cp-now' : ''}${c.from > year ? ' cp-later' : ''}`}>
-                      {P ? polityLink(P.id, Math.max(c.from, Math.min(year, Math.min(end ?? Infinity, P.ended ?? Infinity, civ.endYear + 1) - 1 / 512))) : '国都'}
-                      <em>
-                        {Math.floor(c.from)}–{end === undefined ? '今' : Math.floor(end)}
-                      </em>
-                    </span>
-                  );
-                })}
-              </span>
-            </>
+            <Row k="国都" className="cp-links">
+              {capSpans.map((c, i) => {
+                const end = c.until ?? s.ended;
+                const now = c.from <= year && (end === undefined || year < end);
+                const P = civ.polities[c.polity];
+                return (
+                  <span key={i} className={`${now ? 'cp-now' : ''}${c.from > year ? ' cp-later' : ''}`}>
+                    {P ? polityLink(P.id, Math.max(c.from, Math.min(year, Math.min(end ?? Infinity, P.ended ?? Infinity, civ.endYear + 1) - 1 / 512))) : '国都'}
+                    <em>
+                      {Math.floor(c.from)}–{end === undefined ? '今' : Math.floor(end)}
+                    </em>
+                  </span>
+                );
+              })}
+            </Row>
           )}
           {(old || rebuiltAs) && (
-            <>
-              <span className="cp-k">故址</span>
-              <span className="cp-links">
-                {old && (
-                  <span>
-                    在 <Link to={{ kind: 'settlement', id: old.id }}>{old.name}</Link> 故址上重建
-                  </span>
-                )}
-                {rebuiltAs && (
-                  <span className={rebuiltAs.founded > year ? 'cp-later' : ''}>
-                    {Math.floor(rebuiltAs.founded)} 年重建为 <Link to={{ kind: 'settlement', id: rebuiltAs.id }}>{rebuiltAs.name}</Link>
-                  </span>
-                )}
-              </span>
-            </>
+            <Row k="故址" className="cp-links">
+              {old && (
+                <span>
+                  在 <Link to={{ kind: 'settlement', id: old.id }}>{old.name}</Link> 故址上重建
+                </span>
+              )}
+              {rebuiltAs && (
+                <span className={rebuiltAs.founded > year ? 'cp-later' : ''}>
+                  {Math.floor(rebuiltAs.founded)} 年重建为 <Link to={{ kind: 'settlement', id: rebuiltAs.id }}>{rebuiltAs.name}</Link>
+                </span>
+              )}
+            </Row>
           )}
-        </div>
+        </Stats>
+        <Trend civ={civ} s={s} year={year} from={s.founded} to={last} spans={spans} />
+        <OwnerBar civ={civ} spans={spans} year={year} />
         <EventList upTo={upTo} />
-        {msg && <div className="cp-msg">{msg}</div>}
         <AiBox ai={ai} aiRef={aiRef} />
       </div>
-      <Foot>
-        <button
-          className="cp-btn primary"
-          data-act="move-here"
-          disabled={!!moveWhy}
-          title={moveWhy ?? `${nameAt(moveOwner!, y)}迁都到这里,${y} 年起生效`}
-          onClick={move}
-        >
-          迁都到这里
-        </button>
-        <button className="cp-btn" data-act="owner" disabled={!owner} onClick={() => owner && setSelection({ kind: 'polity', id: owner.id })}>
-          看所属国家
-        </button>
-        <button className="cp-btn" data-act="rename" onClick={() => setRenaming(true)}>
-          改名
-        </button>
-        <button className="cp-btn" data-ain="explain" disabled={ai.busy} onClick={ai.ask}>
-          名字由来
-        </button>
-      </Foot>
     </div>
   );
 }
@@ -269,10 +263,10 @@ function Trend({ civ, s, year, from, to, spans }: { civ: Civ; s: Settlement; yea
   const ownerAt = (y: number) => spans.find((sp) => y >= sp.from && y < sp.to)?.polity ?? -1;
   return (
     <div className="cp-dyn cp-trend">
-      <div className="cp-trend-head">
-        <span className="cp-k">兴衰</span>
-        <span className="cp-k">
-          最盛 {popShort(peak)} · {Math.round(peakYear)} 年
+      <div className="cp-sec-head cp-trend-head">
+        <span>兴衰</span>
+        <span className="cp-count">
+          最盛 {popShort(peak)}，{Math.round(peakYear)} 年
         </span>
       </div>
       {marks.length > 0 && (

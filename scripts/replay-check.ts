@@ -1,9 +1,9 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
- * 界面骨架(地图铺满、四角小字、图层与投影弹层、世界概览浮层、右侧详情面板)、回放、悬停、点选改名、存档读档分享、
- * 导出、干预、改地形、AI、东西相连、多种投影、地球仪;手机布局(390×844 触屏:底部抽屉、两行时间轴、双指捏合)。
- * 种子、参数、回放、改地形在世界概览的"创世"页,存档 / 导出 / AI 在概览头部(点左上角的世界名打开);
- * 某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
+ * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
+ * 存档读档分享、导出、干预、改地形、AI、东西相连、多种投影、地球仪;手机布局(390×844 触屏:底部抽屉、两行时间轴、双指捏合)。
+ * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;种子、参数、回放、改地形在世界概览的"创世"页
+ * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
 import { chromium, type Page } from 'playwright';
 import { startDevServer } from './lib/devserver';
@@ -11,12 +11,14 @@ const dev = await startDevServer();
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
 const errs: string[] = [];
+/** 宽屏(视口宽 ≥ 1100)左边浮着的侧栏卡片占掉的宽度(左边距 14 + 卡片 372 + 右边留空 14):看得见的地图从这里往右 */
+const SIDE_ROOM = 400;
 page.on('pageerror', (e) => errs.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 
 /**
- * 打开世界概览(点左上角的世界名),翻到某一页:countries 国家 / chronicle 编年史 / interventions 我的干预 /
- * genesis 创世(种子、新世界、参数、回放世界形成、改地形)。头部有存档、导出、AI、成书
+ * 打开世界概览(点侧栏顶上的世界名;窄屏是左上角的世界名),翻到某一页:countries 国家 / chronicle 编年史 /
+ * interventions 我的干预 / genesis 创世(种子、新世界、参数、回放世界形成、改地形)
  */
 const openOverview = async (p: Page = page, tab?: string) => {
   if (!(await p.locator('.ov-root:not([hidden])').count())) await p.click('[data-act=overview]');
@@ -27,6 +29,36 @@ const openOverview = async (p: Page = page, tab?: string) => {
 const closeOverview = async (p: Page = page) => {
   if (await p.locator('.ov-root:not([hidden])').count()) await p.click('.ov-x');
   await p.waitForTimeout(200);
+};
+/**
+ * 宽屏左边被侧栏卡片挡住一截,看得见的地图比整张世界窄(等距圆柱左右无限拖动):世界坐标 (wx, wy) 不在看得见的地方时
+ * 左右平移,把它挪到卡片右边那一块的正中;
+ * 返回它的屏幕坐标
+ */
+const centerOn = async (p: Page, wx: number, wy: number): Promise<[number, number] | null> => {
+  const at = (await p.evaluate(([x, y]) => (window as any).__wfWorldToClient(x, y), [wx, wy])) as [number, number] | null;
+  const vw = p.viewportSize()!.width;
+  if (!at || (at[0] > SIDE_ROOM + 60 && at[0] < vw - 60)) return at;
+  await p.evaluate((dx) => {
+    const v = (window as any).__wfView;
+    (window as any).__wfSetView({ k: v.k, x: v.x + dx, y: v.y });
+  }, SIDE_ROOM + (vw - SIDE_ROOM) / 2 - at[0]);
+  await p.waitForTimeout(250);
+  return (await p.evaluate(([x, y]) => (window as any).__wfWorldToClient(x, y), [wx, wy])) as [number, number] | null;
+};
+/** 详情面板藏起来了(在地图上选目标、正在推演):窄屏的抽屉整个藏起;宽屏侧栏里的面板留着、变淡不能点 */
+const insHidden = async (p: Page = page) =>
+  (await p.locator('.inspector.hidden').count()) > 0 || !(await p.locator('.inspector').isVisible().catch(() => false));
+/** AI 设置(宽屏在侧栏右上的"更多"里;窄屏在概览头部) */
+const openAi = async (p: Page = page) => {
+  await closeOverview(p);
+  await p.click('[data-act=world-more]');
+  await p.click('[data-act=ai-settings]');
+};
+/** 生成史书窗口(宽屏在侧栏右上的"更多"里) */
+const openBook = async (p: Page = page) => {
+  await p.click('[data-act=world-more]');
+  await p.click('[data-act=book]');
 };
 /** 图层与投影弹层 */
 const openLayers = async (p: Page = page) => {
@@ -69,9 +101,9 @@ const probe = (p: Page, x: number, y: number) =>
 /** 顶部提示条上某个来源的那条(save 存档 / export 导出 / progress 生成……) */
 const toastText = (p: Page, id: string, timeout = 3000) =>
   p.locator(`.toast[data-toast=${id}]`).innerText({ timeout }).then((t) => t.replace(/\n/g, ' '), () => '');
-// 界面骨架:地图铺满全屏;左上世界名 + 副标;右下"政区 · 等距圆柱";第一次打开有操作提示(拖一下就没了);
-// 悬停小卡片(国名 + 州数);右下 + − 缩放;弹层:缩略图、切到实景 → 深色主题、网址记下;叠加开关(地名……)、民族图例;
-// 世界概览:打开、四个页签、Esc / 点外面收起、国家表点一行 → 概览收起、选中这国;点国家 → 右侧面板(宽 340)、右下按钮左移
+// 界面骨架:地图铺满窗口,左边浮着侧栏卡片(世界名 + 副标、搜索框);右上图层分段按钮"政区"亮着;第一次打开有操作提示(拖一下就没了);
+// 悬停小卡片(国名 + 州数);右下 + − 缩放;弹层("更多图层"):缩略图、切到实景 → 深色主题、网址记下;叠加开关(地名……)、民族图例;
+// 世界概览:打开、四个页签、Esc / 点外面收起、国家表点一行 → 概览收起、选中这国;点国家 → 详情在侧栏里(世界首页换成面板)
 {
   await page.goto(`${dev.url}/?seed=7`);
   await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
@@ -79,11 +111,12 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   const vp = page.viewportSize()!;
   const stage = (await page.locator('main.stage').boundingBox())!;
   const mapBox = (await page.locator('.map-box').boundingBox())!;
-  const title = (await page.locator('.world-title').innerText()).replace(/\n/g, ' ');
-  const label0 = await page.locator('.lp-btn').innerText();
+  const side = await page.locator('aside.sidebar').boundingBox();
+  const sideRadius = await page.locator('aside.sidebar').evaluate((e) => getComputedStyle(e).borderTopLeftRadius);
+  const title = (await page.locator('.sb-title').innerText()).replace(/\n/g, ' ');
+  const label0 = await page.locator('.seg-btn.on').innerText();
   const theme0 = await page.locator('.app').getAttribute('data-theme');
   const hint0 = await page.locator('.first-hint').count();
-  const oldChrome = await page.locator('header:not(.ov-head), aside').count();
   // 右下 + −
   const k0 = (await page.evaluate(() => (window as any).__wfView)).k;
   await page.click('[data-act=zoom-in]');
@@ -115,7 +148,7 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   await page.waitForFunction(() => (window as any).__wf?.style === 'realistic', null, { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(600);
   const theme1 = await page.locator('.app').getAttribute('data-theme');
-  const label1 = await page.locator('.lp-btn').innerText();
+  const label1 = await page.locator('.seg-btn.on').innerText();
   const url1 = page.url();
   const popClosed = !(await page.locator('.lp-pop').count());
   await pickLayer(page, 'political');
@@ -165,46 +198,56 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   // 点国家:右侧面板,右下按钮左移
   type Pick = { kind: string; id: number; text: string; x: number; y: number };
   const pol = ((await page.evaluate('window.__wfPickables()')) as Pick[])
-    .filter((q) => q.kind === 'polity' && q.x > 200 && q.x < vp.width - 420 && q.y > 120 && q.y < vp.height - 140)
-    .sort((a, b) => Math.abs(a.x - vp.width / 2) - Math.abs(b.x - vp.width / 2))[0];
+    .filter((q) => q.kind === 'polity' && q.x > SIDE_ROOM + 60 && q.x < vp.width - 80 && q.y > 120 && q.y < vp.height - 140)
+    .sort((a, b) => Math.abs(a.x - (SIDE_ROOM + vp.width) / 2) - Math.abs(b.x - (SIDE_ROOM + vp.width) / 2))[0];
   let ins: { x: number; y: number; width: number; height: number } | null = null;
-  let shifted = 0;
+  let home = -1;
   if (pol) {
     await page.mouse.click(pol.x, pol.y);
-    ins = await page.locator('.inspector').boundingBox({ timeout: 3000 }).catch(() => null);
-    shifted = await page.locator('.map-controls.shifted').count();
+    ins = await page.locator('.sidebar .inspector').boundingBox({ timeout: 3000 }).catch(() => null);
+    home = await page.locator('.sidebar .sb-home').count();
     await page.keyboard.press('Escape');
   }
   console.log(
-    `界面骨架:舞台 ${stage.width}×${stage.height}(视口 ${vp.width}×${vp.height}),地图框 ${Math.round(mapBox.width)}×${Math.round(mapBox.height)};左上「${title}」;右下「${label0}」;` +
+    `界面骨架:侧栏 ${side ? `${side.width}×${side.height}` : '没有'},舞台 ${stage.width}×${stage.height} @ ${stage.x}(视口 ${vp.width}×${vp.height}),地图框 ${Math.round(mapBox.width)}×${Math.round(mapBox.height)};侧栏顶上「${title}」;图层「${label0}」;` +
       `主题 ${theme0};首次提示 ${hint0} → 拖动后 ${hint1};缩放按钮 ${k0} → ${k1.toFixed(2)} → ${k2.toFixed(2)};悬停「${card}」;` +
       `弹层「${pop.slice(0, 40)}…」缩略图 ${thumbs} 张;切实景 → 主题 ${theme1}、按钮「${label1}」、弹层收起 ${popClosed}、网址 ${url1.split('?')[1]};切回政区 → 主题 ${theme2};` +
       `叠加开关「${togs}」:点"州" ${regionsOn}、弹层不收 ${stillOpen};民族色块 ${cultureKeys} 个;` +
       `概览打开 ${ovOpen}、头部「${ovHead}」、页签「${ovTabs}」、国家 ${ovRows} 行;编年史「${pages.chronicle?.slice(0, 30)}…」;我的干预「${pages.interventions}」;` +
       `创世「${pages.genesis?.slice(0, 40)}…」;Esc 收起 ${escClosed}、点外面收起 ${scrimClosed};国家表点「${rowName}」→ 概览收起 ${rowClosed}、面板「${rowIns.slice(0, 30)}」;` +
-      `点「${pol?.text}」→ 面板 ${ins ? `${Math.round(ins.width)}×${Math.round(ins.height)} @ ${Math.round(ins.x)},${Math.round(ins.y)}` : '没出来'}、右下按钮左移 ${shifted}`,
+      `点「${pol?.text}」→ 侧栏里的面板 ${ins ? `${Math.round(ins.width)}×${Math.round(ins.height)} @ ${Math.round(ins.x)},${Math.round(ins.y)}` : '没出来'}、世界首页收起 ${home === 0}`,
   );
-  if (stage.width !== vp.width || stage.height !== vp.height) errs.push('界面骨架:地图没有铺满全屏');
-  if (!(mapBox.height >= vp.height - 1 && mapBox.width >= vp.width - 1)) errs.push('界面骨架:地图框没有盖满舞台');
-  if (oldChrome) errs.push('界面骨架:页面里还有 header / aside 元素(顶栏、侧边栏已经去掉,地图应铺满全屏)');
-  if (!/未命名世界/.test(title) || !/种子 7 · 现存 \d+ 国 · 未干预 · 查看概览/.test(title)) errs.push(`界面骨架:左上角的世界名 / 副标不对(${title})`);
-  if (label0 !== '政区 · 等距圆柱' || theme0 !== 'light') errs.push(`界面骨架:默认图层应为"政区 · 等距圆柱"、浅色(${label0},${theme0})`);
+  if (
+    !side ||
+    side.x !== 14 ||
+    side.y !== 14 ||
+    side.height !== vp.height - 28 ||
+    Math.abs(side.x + side.width + 14 - SIDE_ROOM) > 1 ||
+    sideRadius !== '14px' ||
+    stage.x !== 0 ||
+    stage.width !== vp.width ||
+    stage.height !== vp.height
+  )
+    errs.push(`界面骨架:应是地图铺满窗口 + 左边浮着圆角的侧栏卡片(卡片 ${JSON.stringify(side)}、圆角 ${sideRadius};舞台 ${JSON.stringify(stage)})`);
+  if (!(mapBox.height >= stage.height - 1 && mapBox.width >= stage.width - 1)) errs.push('界面骨架:地图框没有盖满舞台');
+  if (!/未命名世界/.test(title) || !/种子 7，现存 \d+ 国/.test(title)) errs.push(`界面骨架:侧栏顶上的世界名 / 副标不对(${title})`);
+  if (label0 !== '政区' || theme0 !== 'light') errs.push(`界面骨架:默认图层应为"政区"、浅色(${label0},${theme0})`);
   if (hint0 !== 1 || hint1 !== 0) errs.push('界面骨架:第一次打开的操作提示没出现 / 拖动后没消失');
   if (!(k1 > 1.4 && Math.abs(k2 - 1) < 0.01)) errs.push(`界面骨架:右下的 + − 没有缩放(${k0} → ${k1} → ${k2})`);
   if (!/\d+ 州/.test(card)) errs.push(`界面骨架:国家图层上悬停没有"国名 N 州"(${card})`);
   if (!pop.includes('图层') || !pop.includes('投影') || !pop.includes('中央经线') || !pop.includes('经纬网')) errs.push('界面骨架:图层与投影弹层内容不全');
   if (thumbs < 6) errs.push(`界面骨架:弹层里的缩略图没做出来(${thumbs} 张)`);
-  if (theme1 !== 'dark' || label1 !== '实景 · 等距圆柱' || !popClosed || !/[?&]layer=realistic/.test(url1)) errs.push(`界面骨架:切到实景不对(主题 ${theme1},按钮 ${label1},网址 ${url1})`);
+  if (theme1 !== 'dark' || label1 !== '实景' || !popClosed || !/[?&]layer=realistic/.test(url1)) errs.push(`界面骨架:切到实景不对(主题 ${theme1},按钮 ${label1},网址 ${url1})`);
   if (theme2 !== 'light') errs.push('界面骨架:切回政区后没换回浅色主题');
   if (!['地名', '宜居度', '州', '城址', '道路'].every((w) => togs.includes(w)) || !regionsOn || !stillOpen) errs.push(`图层弹层:叠加开关不全 / 点了没反应(${togs})`);
   if (cultureKeys < 2) errs.push(`图层弹层:选"民族"时没有列出民族色块(${cultureKeys})`);
-  if (!ovOpen || !['存档', '导出', '成书', 'AI', '国家 现存 / 共', '民族', '城镇', '种子 7', '当前'].every((w) => ovHead.includes(w))) errs.push(`世界概览:打不开 / 头部不全(${ovHead})`);
+  if (!ovOpen || !['现存', '历来', '民族', '城镇', '种子 7', '当前'].every((w) => ovHead.includes(w))) errs.push(`世界概览:打不开 / 头部不全(${ovHead})`);
   if (!['国家', '编年史', '我的干预 0', '创世'].every((w) => ovTabs.includes(w)) || ovRows < 3) errs.push(`世界概览:页签不全 / 国家表没有列出国家(${ovTabs};${ovRows} 行)`);
   if (!/大事 \d+/.test(pages.chronicle ?? '') || !(pages.interventions ?? '').includes('还没有干预')) errs.push('世界概览:编年史页 / 我的干预页(空)不对');
   if (!['新世界', '世界参数', '回放世界形成', '改地形', '地块', '板块', '河流'].every((w) => (pages.genesis ?? '').includes(w))) errs.push(`世界概览:创世页功能不全(${pages.genesis})`);
   if (!escClosed || !scrimClosed) errs.push('世界概览:Esc / 点外面收不起');
   if (!rowClosed || !rowIns.includes(rowName)) errs.push(`世界概览:国家表点一行没有收起概览、选中这国(${rowName};${rowIns.slice(0, 40)})`);
-  if (!ins || Math.abs(ins.width - 340) > 2 || Math.abs(ins.x + ins.width - (vp.width - 20)) > 2 || !shifted) errs.push('界面骨架:点国家后右侧面板的位置不对 / 右下按钮没有左移');
+  if (!ins || !side || ins.x < side.x - 1 || ins.x + ins.width > side.x + side.width + 1 || home !== 0) errs.push('界面骨架:点国家后面板没有出现在侧栏里 / 世界首页没收起');
   await page.evaluate(() => localStorage.clear());
 }
 
@@ -431,11 +474,21 @@ for (const style of ['realistic', 'fantasy']) {
     page
       .waitForFunction(() => [...document.querySelectorAll('.ev-pin')].find((e) => (e as HTMLElement).style.visibility === 'visible')?.textContent ?? '', null, { timeout })
       .then((h) => h.jsonValue() as Promise<string>, () => '');
+  // 宽屏左边被侧栏卡片挡住一截,只露出大半个世界:先算出 2640 年以后第一件大事的事发地,打开后把地图挪过去(播放经过它时标签才在地图里)
+  const { DEFAULT_PARAMS: DP, generateWorld: genW } = await import('../src/gen/world');
+  const { generateCiv: genC } = await import('../src/gen/civ');
+  const { buildChronicle: buildC, filterChronicle: filterC } = await import('../src/gen/civ/chronicle');
+  const { entryAnchor } = await import('../src/ui/timelineLayout');
+  const wT = genW({ ...DP, seed: 7 });
+  const cT = genC(wT);
+  const evNext = filterC(buildC(cT), { major: true }).find((e) => e.year >= 2640 && entryAnchor(wT, cT, e));
+  const evAt = evNext ? entryAnchor(wT, cT, evNext) : null;
   await page.goto(`${dev.url}/?seed=7&style=fantasy&play=1`);
   await page.waitForFunction(() => (window as any).__wfCiv?.ready, null, { timeout: 60000 });
   const s0 = await tlState();
+  if (evAt) await centerOn(page, evAt[0], evAt[1]);
   const pin = await visiblePin(15000);
-  const recent = await page.locator('.recent-ev .recent-row').count();
+  const recent = await page.locator('.sidebar .sb-row.ev').count();
   const a = await tlState();
   await page.waitForTimeout(1000);
   const b = await tlState();
@@ -449,11 +502,11 @@ for (const style of ['realistic', 'fantasy']) {
   await page.click('.timebar button.tb-play');
   await page.waitForTimeout(150);
   const again = await tlState();
-  // 点左下倒数第二条最近事件
-  const rows = page.locator('.recent-ev .recent-row');
+  // 点侧栏"最近大事"的第二条(新的在上)
+  const rows = page.locator('.sidebar .sb-row.ev');
   const nRows = await rows.count();
-  const row = rows.nth(Math.max(0, nRows - 2));
-  const rowYear = Number((await row.locator('.recent-year').innerText().catch(() => '')).trim());
+  const row = rows.nth(Math.min(1, nRows - 1));
+  const rowYear = Number((await row.locator('.sb-year').innerText().catch(() => '')).trim());
   const h0 = await page.evaluate(() => (window as any).__wfHighlight?.stamp ?? 0);
   await row.click();
   await page.waitForFunction((s) => (window as any).__wfHighlight?.stamp > s, h0, { timeout: 5000 }).catch(() => {});
@@ -479,7 +532,7 @@ for (const style of ['realistic', 'fantasy']) {
   );
   if (!s0.playing || !(s0.year >= 2600 && s0.year <= 2660)) errs.push(`时间轴:打开网页没有从第 2600 年起自动播放(第 ${s0.year} 年${s0.playing ? '' : ',没在放'})`);
   if (!pin) errs.push('时间轴:播放经过大事时地图上没有出事件标签');
-  if (!(recent >= 1 && recent <= 4)) errs.push(`时间轴:左下最近事件应有 1–4 条(${recent})`);
+  if (!(recent >= 1 && recent <= 3)) errs.push(`时间轴:侧栏的最近大事应有 1–3 条(${recent})`);
   if (!(rate1 >= 12 && rate1 <= 30)) errs.push(`时间轴:1× 应每秒约 20 年(${rate1})`);
   if (!(rate4 >= 50 && rate4 <= 110)) errs.push(`时间轴:4× 应每秒约 80 年(${rate4})`);
   if (!stopped) errs.push('时间轴:放到第 3000 年没有停下');
@@ -595,7 +648,7 @@ for (const style of ['realistic', 'fantasy']) {
   {
     const year = (await page.locator('.timebar .tb-year').innerText().catch(() => '')).match(/\d+/)?.[0];
     const grab = async (job: string) => {
-      await openOverview();
+      await closeOverview();
       await page.click('.export-btn');
       await page.click('.export-scale button:nth-child(1)');
       const [dl] = await Promise.all([
@@ -724,7 +777,7 @@ for (const style of ['realistic', 'fantasy']) {
     hoverNew = await page.locator('.hover-card').innerText().catch(() => '');
     // 导出的编年史里也是改过的名字
     try {
-      await openOverview();
+      await closeOverview();
       await page.click('.export-btn');
       const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('.export-item[data-job=md]')]);
       const file = await dl.path();
@@ -798,7 +851,7 @@ for (const style of ['realistic', 'fantasy']) {
     kept = await labelsHave('饕餮城', 10000);
     restoredNote = await toastText(page, 'save');
     // "我的世界"里有这个世界;存成文件
-    await openOverview();
+    await closeOverview();
     await page.click('.save-btn');
     listed = await page.locator('.save-row').count();
     try {
@@ -809,7 +862,7 @@ for (const style of ['realistic', 'fantasy']) {
       const save = JSON.parse(text);
       fileOk = save.app === '文明与地图' && save.seed === 7 && Object.values(save.edits?.names ?? {}).includes('饕餮城') && /^[0-9a-f]{12}$/.test(save.check);
       // 换一个世界(种子 2024),再从文件打开
-      await page.click('.ov-tab[data-tab=genesis]');
+      await openOverview(page, 'genesis');
       await page.fill('.ov-seed input', '2024');
       await page.press('.ov-seed input', 'Enter');
       await page.waitForFunction(() => location.search.includes('seed=2024') && (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
@@ -956,7 +1009,7 @@ for (const style of ['realistic', 'fantasy']) {
       .waitForFunction(() => (window as any).__wfLabels?.texts?.includes('饕餮城'), null, { timeout: 5000 })
       .then(() => true, () => false);
     await p2.keyboard.press('Escape');
-    await openOverview(p2);
+    await closeOverview(p2);
     await p2.click('.save-btn');
     note = await p2.locator('.save-menu').innerText().catch(() => '');
   }
@@ -1012,7 +1065,7 @@ for (const style of ['realistic', 'fantasy']) {
   let used = false;
   let manualOk = false;
   if (city && (await rename(a, city.id, '梼杌城'))) {
-    await openOverview(a);
+    await closeOverview(a);
     await a.click('.save-btn');
     await a.click('[data-act=share-link]');
     share = await a.waitForFunction(() => (window as any).__wfShare, null, { timeout: 10000 }).then((h) => h.jsonValue(), () => null);
@@ -1048,7 +1101,7 @@ for (const style of ['realistic', 'fantasy']) {
       Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: function () { return Promise.reject(new DOMException('denied', 'NotAllowedError')); } });
       document.execCommand = function () { return false; };
     `);
-    await openOverview(a);
+    await closeOverview(a);
     await a.click('.save-btn');
     await a.click('[data-act=share-link]');
     const ta = await a.locator('.save-menu [data-testid=share-manual] input').inputValue({ timeout: 10000 }).catch(() => '');
@@ -1091,11 +1144,11 @@ for (const style of ['realistic', 'fantasy']) {
   const boot = await sp.evaluate(() => ({
     booting: !!document.querySelector('.app.booting'),
     toast: document.querySelector('.toast[data-toast=progress]')?.textContent ?? '',
-    corner: getComputedStyle(document.querySelector('.corner-tl')!).visibility,
+    corner: getComputedStyle((document.querySelector('.map-bar') ?? document.querySelector('.corner-tl'))!).visibility,
     world: !!(window as any).__wf?.ready,
   }));
   await sp.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
-  const after = await sp.evaluate(() => ({ booting: !!document.querySelector('.app.booting'), corner: getComputedStyle(document.querySelector('.corner-tl')!).visibility }));
+  const after = await sp.evaluate(() => ({ booting: !!document.querySelector('.app.booting'), corner: getComputedStyle((document.querySelector('.map-bar') ?? document.querySelector('.corner-tl'))!).visibility }));
   // 坏文件
   const fs = await import('node:fs');
   const os = await import('node:os');
@@ -1131,7 +1184,7 @@ for (const style of ['realistic', 'fantasy']) {
     await fp.keyboard.press('Enter');
     fullNote = await toastText(fp, 'storage', 5000);
     await fp.keyboard.press('Escape');
-    await openOverview(fp);
+    await closeOverview(fp);
     await fp.click('.save-btn');
     fullMenu = await fp.locator('.save-menu .save-cur').innerText().catch(() => '');
   }
@@ -1209,7 +1262,7 @@ for (const style of ['realistic', 'fantasy']) {
         // 上一下选中后地图还在飞过去:停稳了再换算坐标
         await page.keyboard.press('Escape');
         await page.waitForTimeout(700);
-        const at = (await page.evaluate(([x, y]) => (window as any).__wfWorldToClient(x, y), [w7.mesh.x[far], w7.mesh.y[far]])) as [number, number] | null;
+        const at = await centerOn(page, w7.mesh.x[far], w7.mesh.y[far]);
         if (!at) continue;
         await page.mouse.click(at[0], at[1]);
         const id = await page
@@ -1230,7 +1283,7 @@ for (const style of ['realistic', 'fantasy']) {
     for (const r of best.regs.slice(0, 12)) {
       await page.keyboard.press('Escape');
       await page.waitForTimeout(700);
-      const at = (await page.evaluate(([x, y]) => (window as any).__wfWorldToClient(x, y), seatAt(r))) as [number, number] | null;
+      const at = await centerOn(page, ...seatAt(r));
       if (!at) continue;
       await page.mouse.click(at[0], at[1]);
       const id = await page
@@ -1251,13 +1304,15 @@ for (const style of ['realistic', 'fantasy']) {
   let ivToast = '';
   let insChron = '';
   let events = '';
+  /** 面板大事里干预那一条(类型只用圆点颜色表示,类型名在悬停提示里) */
+  let ivEvent = '';
   if (name) {
     // 国家面板"相关事件"旁的"全部 ›" = 打开概览的编年史页、只看这国;收起概览再下干预
     await page.click('.inspector [data-act=chronicle]');
     insChron = await page.locator('.ov-root:not([hidden]) .chron-pick select').evaluate((el: HTMLSelectElement) => el.selectedOptions[0]?.text ?? '').catch(() => '');
     await closeOverview();
     const prev = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
-    await page.click('.inspector .cp-btn[data-act=intervene]');
+    await page.click('.inspector [data-act=intervene]');
     await page.click('.inspector .cp-cmd[data-cmd=protect]');
     await page.waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev, { timeout: 20000 }).catch(() => null);
     resim = await page.evaluate(() => (window as any).__wfResim ?? null);
@@ -1272,6 +1327,7 @@ for (const style of ['realistic', 'fantasy']) {
     // 还活着:没有"结局"一行,小字是"N 年立国"
     aliveAfter = again ? (again.includes('结局') ? `还是亡了(${again.replace(/\n/g, ' ').slice(0, 80)})` : '至今还在') : '';
     events = await page.locator('.inspector .cp-events').innerText().catch(() => '');
+    ivEvent = await page.locator('.inspector .cp-events .cp-ev[data-ev=order][title=干预]').innerText().catch(() => '');
     await page.keyboard.press('Escape');
     await openOverview(page, 'chronicle');
     chron = await page.locator('.chronicle').innerText().catch(() => '');
@@ -1282,13 +1338,13 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(
     `干预:「${name}」原本第 ${fellAt} 年亡 → 点"保护" → 重推 ${resim ? `${resim.paintedMs.toFixed(0)} ms(线程里 ${resim.workerMs.toFixed(0)} ms)` : '没完成'};` +
       `面板「${aliveAfter}」;时间轴 ${tl}${playing ? '(在放)' : '(停着)'}、「令」${orders} 枚;提示条「${ivToast}」;概览里干预 ${listed} 条;` +
-      `面板的"全部 ›"打开概览、只看「${insChron}」;面板相关事件里有干预 ${/干预/.test(events)};编年史里有干预 ${/干预\s+[^\n]*自此不亡/.test(chron)}`,
+      `面板的"全部 ›"打开概览、只看「${insChron}」;面板相关事件里有干预 ${ivEvent.includes('自此不亡')};编年史里有干预 ${/干预\s+[^\n]*自此不亡/.test(chron)}`,
   );
   if (!name) errs.push('干预:没在地图上点到一个后来会亡的国家');
   else {
     if (!resim) errs.push('干预:点"保护"后没有重推');
     if (!aliveAfter.includes('至今')) errs.push(`干预:加了"保护"以后「${name}」还是亡了(${aliveAfter})`);
-    if (!/干预/.test(events) || !events.includes('自此不亡')) errs.push(`干预:国家面板的相关事件里没有这条干预(${events.replace(/\n/g, ' ')})`);
+    if (!ivEvent.includes('自此不亡')) errs.push(`干预:国家面板的相关事件里没有这条干预(${events.replace(/\n/g, ' ')})`);
     if (!/干预\s+[^\n]*自此不亡/.test(chron)) errs.push('干预:编年史里没有记这条干预');
     if (!insChron || insChron === '全部国家') errs.push(`干预:面板里点"全部 ›"没有打开概览的编年史页、只看这国(${insChron})`);
     const ty = Number(tl.match(/\d+/)?.[0] ?? NaN);
@@ -1376,7 +1432,7 @@ for (const style of ['realistic', 'fantasy']) {
     mark = await page.locator('.tp-mark .tp-ring').isVisible().catch(() => false);
     near = await page.locator('.inspector .cp-grid .cp-links').first().locator('.ins-link').allInnerTexts();
     // 干预页
-    await page.click('.inspector .cp-btn[data-act=intervene]');
+    await page.click('.inspector [data-act=intervene]');
     cmds = await page.locator('.inspector .cp-cmd').count();
     cmdText = (await page.locator('.inspector .cp-from').innerText().catch(() => '')).replace(/\n/g, ' ');
     // 宣战:只有相邻的国家浮出名牌;Esc 回到干预页
@@ -1394,7 +1450,7 @@ for (const style of ['realistic', 'fantasy']) {
     dim = await page.locator('.tp-dim').count();
     allyPlates = await plates();
     pickToast = await toastText(page, 'pick');
-    hiddenWhilePicking = !(await page.locator('.inspector').isVisible().catch(() => false));
+    hiddenWhilePicking = (await insHidden(page));
     const tgt = allyPlates.filter((p) => !p.self).sort((a, b) => Math.abs(a.x - vp.width / 2) - Math.abs(b.x - vp.width / 2))[0];
     if (tgt) {
       // 悬停在这国的国土上(名牌四周绕几圈找):悬停卡片写"点击选择",名牌反色
@@ -1433,7 +1489,7 @@ for (const style of ['realistic', 'fantasy']) {
   );
   if (!pol) errs.push('国家面板:没找到能点的国家');
   else {
-    if (!/国家 · 第 \d+ 年/.test(info) || !['州', '人口', '主体民族', '朝代', '疆域', '邻国', '相关事件', '干预历史', '改名', '名字由来', '写国史'].every((w) => info.includes(w)))
+    if (!/ \/ 国家，/.test(info) || !['国都', '疆域', '州', '人口', '主体民族', '邻国', '大事', '干预历史', '设为中心', '改名', '更多'].every((w) => info.includes(w)))
       errs.push(`国家面板:信息页内容不全(${info.slice(0, 200)})`);
     if (!moved) errs.push(`国家面板:点国家后地图没有飞过去(${flown})`);
     if (!mark) errs.push('国家面板:选中国家后国都没有圆环');
@@ -1496,7 +1552,9 @@ for (const style of ['realistic', 'fantasy']) {
       `海里点火山 → 重新生成 ${t ? `${t.paintedMs.toFixed(0)} ms(线程里 ${t.workerMs.toFixed(0)} ms)` : '没完成'};` +
       `之前「${before.split(' / ')[1] ?? ''}」→ 之后「${after.split(' / ')[1] ?? ''}」;工具条「${count}」;提示条在 ${tBox ? Math.round(tBox.y) : '-'}`,
   );
-  if (!['火山', '山脉', '湖', '撤销', '完成'].every((w) => panel.includes(w)) || !barBox || barBox.y > 40) errs.push(`改地形:进入后顶部没有工具条(${panel})`);
+  // 宽屏:工具条在卡片右边那一块的顶上(右上那排按钮下面),不压在侧栏卡片上
+  const sideR = await page.evaluate(() => document.querySelector('.sidebar')?.getBoundingClientRect().right ?? 0);
+  if (!['火山', '山脉', '湖', '撤销', '完成'].every((w) => panel.includes(w)) || !barBox || barBox.y > 80 || barBox.x < sideR) errs.push(`改地形:进入后顶部没有工具条(${panel})`);
   if (tBox && barBox && tBox.y < barBox.y + barBox.height) errs.push('改地形:提示条压在工具条上');
   // 工具条只有一行(用法在各工具的悬停提示里,不另写一行说明)
   if (barBox && barBox.height > 56) errs.push(`改地形:工具条不止一行(高 ${Math.round(barBox.height)})`);
@@ -1519,7 +1577,7 @@ for (const style of ['realistic', 'fantasy']) {
     if (!again.includes('海拔')) errs.push('改地形:刷新页面后地形修改没有自动恢复');
     if (regenAfterReload) errs.push('改地形:刷新后先生成原样再按地形修改重新生成了一遍(应该直接带着修改生成)');
     // 分享链接:另一个浏览器(什么都没存)打开,那里是陆地;也是直接带着地形修改生成
-    await openOverview();
+    await closeOverview();
     await page.click('.save-btn');
     await page.click('[data-act=share-link]');
     const link = await page.waitForFunction(() => (window as any).__wfShare?.url, null, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<string>, () => '');
@@ -1586,7 +1644,7 @@ for (const style of ['realistic', 'fantasy']) {
       await page.keyboard.press('Escape');
       await page.waitForTimeout(700);
       const at = (await page.evaluate(([x, y]) => (window as any).__wfWorldToClient(x, y), [wx, wy])) as [number, number] | null;
-      if (!at || at[0] < 40 || at[0] > page.viewportSize()!.width - 420 || at[1] < 100 || at[1] > page.viewportSize()!.height - 120) continue;
+      if (!at || at[0] < SIDE_ROOM + 40 || at[0] > page.viewportSize()!.width - 80 || at[1] < 100 || at[1] > page.viewportSize()!.height - 120) continue;
       const [x, y] = at;
       await page.mouse.move(x, y);
       await page.waitForTimeout(150);
@@ -1594,12 +1652,16 @@ for (const style of ['realistic', 'fantasy']) {
       const hv = await probe(page, x, y);
       await page.mouse.click(x, y);
       await page.waitForTimeout(100);
-      // 面板顶部:标题"州 · 第 N 年"、关闭、州名(可能带"恢复默认"),下一行"属 某国 · …"(州名以外的"第 N 州"只看顶部)
+      // 面板顶部:州名(可能带"恢复默认"),下一行"州，属 某国，…"(州名以外的"第 N 州"只看顶部这两行)
+      await page.locator('.inspector .cp-head').waitFor({ timeout: 2000 }).catch(() => {});
       const t = await page
-        .locator('.inspector .cp-head')
-        .innerText({ timeout: 2000 })
+        .evaluate(() => {
+          const h = document.querySelector('.inspector .cp-head') as HTMLElement | null;
+          const sub = document.querySelector('.inspector .cp-sub') as HTMLElement | null;
+          return h ? `${h.innerText}\n${sub?.innerText ?? ''}` : '';
+        })
         .catch(() => '');
-      const m = /^州 · 第 \d+ 年\s*\n\s*✕\s*\n\s*(.+?)\s*\n(?:\s*恢复默认\s*\n)?\s*属(.+?)(?: · |\n|$)/.exec(t.trim());
+      const m = /^(.+?)\s*\n(?:\s*恢复默认\s*\n)?\s*州，属(.+?)(?:，|\n|$)/.exec(t.trim());
       const inHover = /第 (\d+) 州/.exec(hv)?.[1];
       const inPanel = [...t.matchAll(/第 (\d+) 州/g)].at(-1)?.[1];
       if (m && inHover && inHover === inPanel && (await page.locator('.inspector [data-act=found]').count())) {
@@ -1613,7 +1675,7 @@ for (const style of ['realistic', 'fantasy']) {
   let listed = '';
   let chron = '';
   if (spot) {
-    // 州面板底部"在这里立国" → 干预页(生效年份 + 国名)→ "立国"
+    // 州面板的"在这里立国" → 干预页(生效年份 + 国名)→ "立国"
     await page.click('.inspector [data-act=found]');
     await page.fill('.inspector .cp-field input', '饕餮');
     const prev = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
@@ -1672,7 +1734,7 @@ for (const style of ['realistic', 'fantasy']) {
   await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
   await page.waitForTimeout(300);
   const vp = page.viewportSize()!;
-  const free = (x: number, y: number) => x > 60 && x < vp.width - 420 && y > 110 && y < vp.height - 150;
+  const free = (x: number, y: number) => x > SIDE_ROOM + 60 && x < vp.width - 80 && y > 110 && y < vp.height - 150;
   const panel = () =>
     page
       .locator('.inspector')
@@ -1689,15 +1751,17 @@ for (const style of ['realistic', 'fantasy']) {
     await page.waitForTimeout(300);
     return true;
   };
-  // 1. 城(挑一座属某国、不是国都的:"看所属国家""迁都到这里"都能点)
+  // 1. 城(挑一座属某国、不是国都的:"迁都到这里"、"更多"里的"看所属国家"都能点)
   let cityInfo = '';
   let ownerInfo = '';
   let moveCity = -1;
   const marks = (await picks()).filter((q) => q.kind === 'mark' && free(q.x, q.y)).slice(0, 12);
   for (const m of marks) {
     if (!(await clickPick('mark', m.id))) continue;
-    if (!(await page.locator('.inspector .cp[data-settlement]').count()) || !(await page.locator('.inspector [data-act=owner]').isEnabled())) continue;
+    if (!(await page.locator('.inspector .cp[data-settlement]').count())) continue;
     if (!(await page.locator('.inspector [data-act=move-here]').isEnabled())) continue;
+    await page.click('.inspector [data-act=more]');
+    if (!(await page.locator('.inspector [data-act=owner]').isEnabled())) continue;
     moveCity = m.id;
     cityInfo = await panel();
     await page.click('.inspector [data-act=owner]');
@@ -1756,7 +1820,7 @@ for (const style of ['realistic', 'fantasy']) {
     dim = await page.locator('.tp-dim').count();
     cedePlates = (await page.evaluate('window.__wfPlates()')) as Plate[];
     pickToast = await toastText(page, 'pick');
-    hidden = !(await page.locator('.inspector').isVisible().catch(() => false));
+    hidden = (await insHidden(page));
     const tgt = cedePlates.filter((p) => !p.self).sort((a, b) => Math.abs(a.x - vp.width / 2) - Math.abs(b.x - vp.width / 2))[0];
     if (tgt) {
       const prev = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
@@ -1782,7 +1846,7 @@ for (const style of ['realistic', 'fantasy']) {
     const prev = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
     await page.click('.inspector [data-act=move-here]');
     await page.waitForTimeout(100);
-    moveHidden = !(await page.locator('.inspector').isVisible().catch(() => false));
+    moveHidden = (await insHidden(page));
     await page.waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev, { timeout: 20000 }).catch(() => null);
     await page.waitForTimeout(300);
     moveToast = await toastText(page, 'resim-done');
@@ -1798,12 +1862,12 @@ for (const style of ['realistic', 'fantasy']) {
       ` → 点名牌「${doneToast}」,这一州的干预「${mineAfter}」→ 撤销「${undoToast}」,列表没了 ${mineGone};` +
       `迁都到这里 → 面板收起 ${moveHidden}、「${moveToast}」→ 撤销「${moveUndo}」`,
   );
-  if (!/^城 · 第 \d+ 年/.test(cityInfo) || !['级别', '人口', '做过国都', '兴衰', '迁都到这里', '看所属国家', '改名', '名字由来'].every((w) => cityInfo.includes(w)))
+  if (!/ \/ 城，\d+ 年建城/.test(cityInfo) || !['级别', '人口', '做过国都', '兴衰', '迁都到这里', '看所属国家', '改名', '名字由来'].every((w) => cityInfo.includes(w)))
     errs.push(`城面板:内容不全(${cityInfo.slice(0, 200)})`);
-  if (!/^国家 · 第 \d+ 年/.test(ownerInfo)) errs.push(`城面板:"看所属国家"没有切到国家面板(${ownerInfo.slice(0, 60)})`);
-  if (!/^(山脉|河流|湖泊|岛屿|荒漠|海|大洋|海湾) · 第 \d+ 年/.test(placeInfo) || !['改名', '名字由来', '起名'].every((w) => placeInfo.includes(w)))
+  if (!/ \/ 国家，/.test(ownerInfo)) errs.push(`城面板:"看所属国家"没有切到国家面板(${ownerInfo.slice(0, 60)})`);
+  if (!/ \/ (山脉|河流|湖泊|岛屿|荒漠|海|大洋|海湾)(，| \/ |$)/.test(placeInfo) || !['设为中心', '改名', '更多'].every((w) => placeInfo.includes(w)))
     errs.push(`地理实体面板:没出来 / 内容不全(${placeInfo.slice(0, 120)})`);
-  if (!/^州 · 第 \d+ 年/.test(regionInfo) || !['主体民族', '宜居度', '在这里立国', '划给…', '改名', '名字由来'].every((w) => regionInfo.includes(w)))
+  if (!/ \/ 州，/.test(regionInfo) || !['主体民族', '宜居度', '在这里立国', '划给…', '改名', '更多'].every((w) => regionInfo.includes(w)))
     errs.push(`州面板:没出来 / 内容不全(${regionInfo.slice(0, 160)})`);
   if (!/生效年份.*该年之前的历史不变.*永久.*选择国家/.test(cedePage)) errs.push(`州面板:"划给…"的干预页不对(${cedePage.slice(0, 160)})`);
   if (!dim || !cedePlates.length) errs.push(`州面板:"划给…"选国家时没有压暗 / 名牌(压暗 ${dim},名牌 ${cedePlates.length})`);
@@ -1818,7 +1882,7 @@ for (const style of ['realistic', 'fantasy']) {
   await page.evaluate(() => localStorage.clear());
 }
 
-// 成书(不联网):右上"成书" → 生成史书窗口(写什么 / 文体 / 篇幅,切选项);没设置 AI 时点"开始生成" →
+// 成书(不联网):侧栏右上"更多"里的"把历史写成史书" → 生成史书窗口(写什么 / 文体 / 篇幅,切选项);没设置 AI 时点"开始生成" →
 // 窗口关上、提示条"还没有设置 AI · 去设置"(打开 AI 设置);窗口里的"AI 设置"打开设置,Esc 只关设置。
 // 测试用假 AI(放慢):开始生成 → 右上"正在撰写《世界通史》"+ 进度条 → "已完成 · 打开" → 阅读页(书名、正文)→
 // 读过就收起;刷新后"已写的史书"里还在,点开能读,删除(点两次)
@@ -1828,7 +1892,7 @@ for (const style of ['realistic', 'fantasy']) {
   hp.on('console', (m) => m.type() === 'error' && errs.push(`[成书] ${m.text()}`));
   await hp.goto(`${dev.url}/?seed=7&style=fantasy`);
   await hp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await hp.click('[data-act=book]');
+  await openBook(hp);
   const opened = await hp.waitForSelector('.bk-dialog', { timeout: 5000 }).then(() => true, () => false);
   const labels = (await hp.locator('.bk-k').allInnerTexts().catch(() => [] as string[])).join(' / ');
   const scopes = await hp.locator('[data-scope]').count();
@@ -1849,21 +1913,17 @@ for (const style of ['realistic', 'fantasy']) {
   await hp.click('.toast[data-toast=book] .toast-act').catch(() => null);
   const settings = await hp.waitForSelector('.ai-dialog', { timeout: 5000 }).then(() => true, () => false);
   await hp.keyboard.press('Escape');
-  // 世界概览头部的"成书"、编年史页的"写成史书"也打开同一个窗口(概览收起)
-  await openOverview(hp);
-  await hp.click('[data-act=ov-book]').catch(() => null);
-  const fromOverview = await hp.waitForSelector('.bk-dialog', { timeout: 3000 }).then(() => true, () => false);
-  await hp.keyboard.press('Escape');
+  // 编年史页的"写成史书"也打开同一个窗口(概览收起)
   await openOverview(hp, 'chronicle');
   await hp.click('.chron-ai').catch(() => null);
   const fromChronicle = await hp.waitForSelector('.bk-dialog', { timeout: 3000 }).then(() => true, () => false);
   await hp.keyboard.press('Escape');
-  if (!fromOverview || !fromChronicle) errs.push(`成书:概览头部的"成书"(${fromOverview})/ 编年史的"写成史书"(${fromChronicle})没打开生成史书窗口`);
+  if (!fromChronicle) errs.push('成书:编年史的"写成史书"没打开生成史书窗口');
   console.log(
     `成书(没设置 AI):窗口 ${opened ? '打开' : '没打开'}(${labels};写什么 ${scopes} 项);切到编年体 ${styleOn}、短篇 ${lengthOn};「${hint}」;` +
       `窗口里的 AI 设置 ${aiFromDialog}、Esc 只关设置 ${aiClosedOnly};开始生成 → 提示「${noAi}」、窗口关上 ${dialogClosed};点"去设置"打开设置 ${settings}`,
   );
-  if (!opened) errs.push('成书:点右上"成书"没有打开生成史书窗口');
+  if (!opened) errs.push('成书:点"把历史写成史书"没有打开生成史书窗口');
   else {
     if (labels !== '写什么 / 文体 / 篇幅') errs.push(`成书:窗口里的三行选项不对(${labels})`);
     if (scopes !== 1) errs.push(`成书:没选中国家时"写什么"应该只有"整个世界"(${scopes} 项)`);
@@ -1877,7 +1937,7 @@ for (const style of ['realistic', 'fantasy']) {
 
   await hp.goto(`${dev.url}/?seed=7&style=fantasy&ai=mock&mockms=150`);
   await hp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await hp.click('[data-act=book]');
+  await openBook(hp);
   await hp.waitForSelector('.bk-dialog', { timeout: 5000 }).catch(() => null);
   await hp.click('[data-length=k3]').catch(() => null);
   const t0 = Date.now();
@@ -1896,7 +1956,7 @@ for (const style of ['realistic', 'fantasy']) {
   const chipGone = !(await hp.locator('.book-chip').count());
   await hp.reload();
   await hp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await hp.click('[data-act=book]');
+  await openBook(hp);
   await hp.waitForSelector('.bk-dialog', { timeout: 5000 }).catch(() => null);
   const kept = await hp.locator('.bk-lib-row').count();
   await hp.click('.bk-lib-row >> nth=0').catch(() => null);
@@ -1905,7 +1965,7 @@ for (const style of ['realistic', 'fantasy']) {
   await hp.click('[data-act=book-delete]').catch(() => null);
   await hp.waitForTimeout(200);
   const deleted = !(await hp.locator('.bk-reader').count());
-  await hp.click('[data-act=book]');
+  await openBook(hp);
   const left = await hp.locator('.bk-lib-row').count();
   // 写的时候点右上的进度:边写边看,可以停止(写到一半的不存),再点"重试"接着写完
   await hp.click('[data-act=book-start]').catch(() => null);
@@ -1940,75 +2000,75 @@ for (const style of ['realistic', 'fantasy']) {
   await hp.close();
 }
 
-// 搜索:右上"搜索" → 框里先列出最大的几个国家 → 输入名字出结果 → 点一条:框关上、选中它(右侧出面板);
-// 选中国家后"成书"的"写什么"多出这一国;Esc / 点框外面关上
+// 搜索:侧栏顶上的搜索框 → 输入名字,下面换成结果 → 点一条:结果收起、选中它(侧栏里换成面板);Esc 清空;
+// 选中国家后"成书"的"写什么"多出这一国;国家面板"更多"里的"让 AI 写国史"默认写这一国
 {
   const sp = await browser.newPage({ viewport: { width: 1400, height: 820 } });
   sp.on('pageerror', (e) => errs.push(`[搜索] ${e.message}`));
   sp.on('console', (m) => m.type() === 'error' && errs.push(`[搜索] ${m.text()}`));
   await sp.goto(`${dev.url}/?seed=7&style=fantasy`);
   await sp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await sp.click('[data-act=search]');
-  const shown = await sp.waitForSelector('.search-box', { timeout: 5000 }).then(() => true, () => false);
-  const placeholder = await sp.locator('.search-input').getAttribute('placeholder').catch(() => '');
-  const first = await sp.locator('.search-row >> nth=0').innerText().catch(() => '');
-  const initial = await sp.locator('.search-row').count();
-  await sp.keyboard.press('Escape');
-  const escClosed = !(await sp.locator('.search-box').count());
-  // 按名字搜第一个国家
+  const placeholder = await sp.locator('.sidebar .search-input').getAttribute('placeholder').catch(() => '');
+  // 侧栏首页"国家"里的第一个(最大的)
+  const first = await sp.locator('.sb-home .sb-row >> nth=0').innerText().catch(() => '');
   const name = first.split('\n')[0];
   await sp.click('[data-act=search]');
-  await sp.fill('.search-input', name);
+  await sp.keyboard.type(name.slice(0, 2));
+  await sp.waitForTimeout(150);
+  const partial = await sp.locator('.search-row').count();
+  await sp.keyboard.press('Escape');
+  const escClosed = !(await sp.locator('.search-row').count()) && (await sp.locator('.sb-home').count()) === 1;
+  // 按名字搜第一个国家
+  await sp.fill('.sidebar .search-input', name);
   await sp.waitForTimeout(150);
   const rows = (await sp.locator('.search-row .search-name').allInnerTexts().catch(() => [] as string[])) as string[];
   await sp.click('.search-row >> nth=0').catch(() => null);
   await sp.waitForTimeout(300);
-  const pickClosed = !(await sp.locator('.search-box').count());
+  const pickClosed = !(await sp.locator('.search-row').count()) && (await sp.locator('.sidebar .search-input').inputValue()) === '';
   const selected = await sp.evaluate(() => document.querySelector('.app')?.classList.contains('panel-open') ?? false);
-  await sp.click('[data-act=book]');
+  await openBook(sp);
   await sp.waitForSelector('.bk-dialog', { timeout: 5000 }).catch(() => null);
   const scopes = (await sp.locator('[data-scope]').allInnerTexts().catch(() => [] as string[])).join(' / ');
   const worldFirst = await sp.locator('[data-scope=world].on').count();
   await sp.keyboard.press('Escape');
-  // 国家面板里的"写国史":打开成书窗口,默认写这一国
-  await sp.click('.app button:has-text("国史")', { timeout: 3000 }).catch(() => null);
+  // 国家面板"更多"里的"让 AI 写国史":打开成书窗口,默认写这一国
+  await sp.click('.inspector [data-act=more]', { timeout: 3000 }).catch(() => null);
+  await sp.click('.inspector [data-act=book]', { timeout: 3000 }).catch(() => null);
   const polityDefault = await sp.locator('.bk-dialog [data-scope=polity].on').innerText({ timeout: 3000 }).catch(() => '');
   await sp.keyboard.press('Escape');
-  // 点框外面关上
-  await sp.click('[data-act=search]');
-  await sp.mouse.click(700, 450);
-  await sp.waitForTimeout(150);
-  const outsideClosed = !(await sp.locator('.search-box').count());
   console.log(
-    `搜索:框 ${shown ? '出来' : '没出来'}(占位「${placeholder}」),先列 ${initial} 个国家,第一个「${first.replace(/\n/g, ' ')}」;Esc 关上 ${escClosed};` +
-      `搜「${name}」→ ${rows.join('、')};点第一条:框关上 ${pickClosed}、选中 ${selected};成书的写什么:${scopes}(默认整个世界 ${worldFirst});` +
-      `面板里写国史 → 默认「${polityDefault}」;点外面关上 ${outsideClosed}`,
+    `搜索:占位「${placeholder}」;打两个字「${name.slice(0, 2)}」→ ${partial} 条;Esc 清空 ${escClosed};` +
+      `搜「${name}」→ ${rows.join('、')};点第一条:结果收起 ${pickClosed}、选中 ${selected};成书的写什么:${scopes}(默认整个世界 ${worldFirst});` +
+      `面板里写国史 → 默认「${polityDefault}」`,
   );
-  if (!shown) errs.push('搜索:点右上"搜索"没有出来搜索框');
-  else {
-    if (placeholder !== '国家、城市或民族') errs.push(`搜索:占位文字不对(${placeholder})`);
-    if (initial < 3 || initial > 8 || !/\d+ 州/.test(first)) errs.push(`搜索:空着时应该列出最大的几个国家(${initial} 个,${first})`);
-    if (!escClosed || !outsideClosed) errs.push('搜索:Esc / 点外面没关上搜索框');
-    if (!rows.length || !rows.some((r) => r.includes(name))) errs.push(`搜索:输入名字没搜到(${rows.join('、')})`);
-    if (!pickClosed || !selected) errs.push('搜索:点一条没关框 / 没选中');
-    if (!scopes.includes('整个世界') || !scopes.includes(name) || !worldFirst) errs.push(`搜索:选中国家后成书的"写什么"没有这一国 / 默认不是整个世界(${scopes})`);
-    if (polityDefault !== name) errs.push(`成书:国家面板里的"写国史"没有默认写这一国(${polityDefault})`);
-  }
+  if (placeholder !== '搜索国家、城市、民族、山河') errs.push(`搜索:占位文字不对(${placeholder})`);
+  if (!name || !(partial >= 1)) errs.push(`搜索:打两个字没有结果(${name},${partial} 条)`);
+  if (!escClosed) errs.push('搜索:Esc 没清空搜索、回到世界首页');
+  if (!rows.length || !rows.some((r) => r.includes(name))) errs.push(`搜索:输入名字没搜到(${rows.join('、')})`);
+  if (!pickClosed || !selected) errs.push('搜索:点一条没收起结果 / 没选中');
+  if (!scopes.includes('整个世界') || !scopes.includes(name) || !worldFirst) errs.push(`搜索:选中国家后成书的"写什么"没有这一国 / 默认不是整个世界(${scopes})`);
+  if (polityDefault !== name) errs.push(`成书:国家面板里的"让 AI 写国史"没有默认写这一国(${polityDefault})`);
   await sp.close();
 }
 
-// AI 改写(阶段 5「对话式编辑」,不联网):右上"改写" → 框里一行说明 + 三句按这个世界写的例子;没设置 AI 时"发送"点不了,
+// AI 改写(阶段 5「对话式编辑」,不联网):侧栏"更多"里的"用一句话改写世界" → 框里一行说明 + 三句按这个世界写的例子;没设置 AI 时"发送"点不了,
 // 底部一行提示 +"设置 AI"(打开设置;Esc 只关设置)。测试用假 AI(时间轴在 2000 年):说一句(不提地形)→ 列出一条"保护"提议(2000 年起、至 2300 年)→
-// "执行 1 条":框收起、后台重推,提示条"已按你说的改写"(带撤销)、左上"已干预 1 处" → 提示条上点撤销 → 重推回"未干预";
+// "执行 1 条":框收起、后台重推,提示条"已按你说的改写"(带撤销)、侧栏顶上"干预了 1 处" → 提示条上点撤销 → 重推回没有干预;
 // 再打开框,那一轮写"已撤销";点框外面关上
 {
   const rp = await browser.newPage({ viewport: { width: 1400, height: 820 } });
   rp.on('pageerror', (e) => errs.push(`[改写] ${e.message}`));
   rp.on('console', (m) => m.type() === 'error' && errs.push(`[改写] ${m.text()}`));
+  /** 历史推完了:侧栏顶上的小字写出现存几国(这个网址默认是地形图层,地图上没有国名,不能按国名等) */
+  const historyReady = () => /现存/.test(document.querySelector('.sb-sub')?.textContent ?? '');
+  /** 侧栏"更多" → "用一句话改写世界"(历史推完才能点) */
+  const openRewrite = async () => {
+    await rp.click('[data-act=world-more]');
+    await rp.click('.pm-menu [data-act=rewrite]:not([disabled])', { timeout: 10000 }).catch(() => rp.keyboard.press('Escape'));
+  };
   await rp.goto(`${dev.url}/?seed=7&style=fantasy`);
-  await rp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await rp.locator('[data-act=rewrite]:not([disabled])').waitFor({ timeout: 60000 });
-  await rp.click('[data-act=rewrite]');
+  await rp.waitForFunction(historyReady, null, { timeout: 60000 });
+  await openRewrite();
   const shown = await rp.waitForSelector('.rw-box', { timeout: 5000 }).then(() => true, () => false);
   const hint = await rp.locator('.rw-hint').innerText().catch(() => '');
   const examples = (await rp.locator('.rw-example').allInnerTexts().catch(() => [] as string[])) as string[];
@@ -2026,7 +2086,7 @@ for (const style of ['realistic', 'fantasy']) {
     `改写(没设置 AI):框 ${shown ? '出来' : '没出来'}「${hint.slice(0, 24)}…」,例子 ${examples.join(' / ')};「${unset.replace(/\n/g, ' ')}」,发送点不了 ${sendOff};` +
       `"设置 AI"打开设置 ${aiOpened}、Esc 只关设置 ${boxKept};再 Esc 关上 ${escClosed}`,
   );
-  if (!shown) errs.push('改写:点右上"改写"没有出来框');
+  if (!shown) errs.push('改写:点侧栏"更多"里的"用一句话改写世界"没有出来框');
   else {
     if (!hint.includes('点了执行才改')) errs.push(`改写:框里没有说明(${hint})`);
     if (examples.length !== 3) errs.push(`改写:空的时候应该有三句例子(${examples.join(' / ')})`);
@@ -2035,10 +2095,10 @@ for (const style of ['realistic', 'fantasy']) {
   }
 
   await rp.goto(`${dev.url}/?seed=7&style=fantasy&ai=mock&civYear=2000`);
-  await rp.locator('[data-act=rewrite]:not([disabled])').waitFor({ timeout: 60000 });
+  await rp.waitForFunction(historyReady, null, { timeout: 60000 });
   await rp.waitForTimeout(300);
-  const sub0 = await rp.locator('.wt-sub').innerText().catch(() => '');
-  await rp.click('[data-act=rewrite]');
+  const sub0 = await rp.locator('.sb-sub').innerText().catch(() => '');
+  await openRewrite();
   await rp.fill('.rw-input textarea', '让最大的国家多撑三百年');
   await rp.click('[data-act=rw-send]');
   await rp.waitForSelector('.rw-turn .rw-ans', { timeout: 10000 }).catch(() => null);
@@ -2055,15 +2115,15 @@ for (const style of ['realistic', 'fantasy']) {
     .waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev, { timeout: 20000 })
     .then(() => true, () => false);
   const done = await toastText(rp, 'resim-done', 5000);
-  const sub1 = await rp.locator('.wt-sub').innerText().catch(() => '');
+  const sub1 = await rp.locator('.sb-sub').innerText().catch(() => '');
   const prevU = await rp.evaluate(() => (window as any).__wfResim?.seq ?? 0);
   await rp.click('.toast[data-toast=resim-done] [data-act=rw-undo]').catch(() => null);
   const undone = await rp
     .waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prevU, { timeout: 20000 })
     .then(() => true, () => false);
   const undoToast = await toastText(rp, 'resim-done', 5000);
-  const sub2 = await rp.locator('.wt-sub').innerText().catch(() => '');
-  await rp.click('[data-act=rewrite]');
+  const sub2 = await rp.locator('.sb-sub').innerText().catch(() => '');
+  await openRewrite();
   const turnState = await rp.locator('.rw-turn .rw-done').innerText({ timeout: 3000 }).catch(() => '');
   await rp.mouse.click(700, 450);
   await rp.waitForTimeout(150);
@@ -2077,8 +2137,8 @@ for (const style of ['realistic', 'fantasy']) {
   if (checked !== 1 || go !== '执行 1 条' || cannot !== 1) errs.push(`改写:提议默认全勾、按钮写条数、做不到的一句(勾 ${checked},「${go}」,做不到 ${cannot})`);
   if (!boxGone || !resimmed) errs.push(`改写:点"执行"后框没收起 / 没有重推(${boxGone}、${resimmed})`);
   if (!/已按你说的改写 · 从 \d+ 年重新推演.*撤销/.test(done)) errs.push(`改写:执行后提示条不对(${done})`);
-  if (!sub0.includes('未干预') || !sub1.includes('已干预 1 处')) errs.push(`改写:执行后左上应从"未干预"变成"已干预 1 处"(${sub0} → ${sub1})`);
-  if (!undone || !undoToast.includes('已撤销改写') || !sub2.includes('未干预')) errs.push(`改写:提示条上的撤销不对(重推 ${undone},「${undoToast}」,左上「${sub2}」)`);
+  if (!sub0 || sub0.includes('干预') || !sub1.includes('干预了 1 处')) errs.push(`改写:执行后侧栏顶上应从没有干预变成"干预了 1 处"(${sub0} → ${sub1})`);
+  if (!undone || !undoToast.includes('已撤销改写') || !sub2 || sub2.includes('干预')) errs.push(`改写:提示条上的撤销不对(重推 ${undone},「${undoToast}」,侧栏顶上「${sub2}」)`);
   if (turnState !== '已撤销') errs.push(`改写:撤销后再打开,那一轮应写"已撤销"(${turnState})`);
   if (!outsideClosed) errs.push('改写:点框外面没关上');
   await rp.evaluate(() => localStorage.clear());
@@ -2092,8 +2152,7 @@ for (const style of ['realistic', 'fantasy']) {
   page.on('request', onReq);
   await page.goto(`${dev.url}/?seed=7&ai=mock`);
   await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await openOverview();
-  await page.click('.ai-btn');
+  await openAi();
   await page.waitForSelector('.ai-dialog', { timeout: 10000 });
   const official = await page.locator('[data-ai=official]').innerText();
   const mockOn = await page.locator('[data-ai=mock]').getAttribute('aria-checked');
@@ -2108,8 +2167,7 @@ for (const style of ['realistic', 'fantasy']) {
   // 刷新后记录还在(存在浏览器的 IndexedDB 里)
   await page.reload();
   await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await openOverview();
-  await page.click('.ai-btn');
+  await openAi();
   await page.click('[data-tab=log]');
   await page.waitForFunction(() => document.querySelectorAll('.ai-log-row').length > 0, null, { timeout: 5000 }).catch(() => {});
   const kept = await page.locator('.ai-log-row').count();
@@ -2152,6 +2210,7 @@ for (const style of ['realistic', 'fantasy']) {
     const mark = city && ps.find((m) => m.kind === 'mark' && m.id === city.id);
     if (mark) {
       await page.mouse.click(mark.x, mark.y);
+      await page.click('.inspector [data-act=more]');
       await page.click('.inspector [data-ain=explain]');
       notSet = await page
         .waitForSelector('.inspector .ain-err', { timeout: 5000 })
@@ -2193,6 +2252,7 @@ for (const style of ['realistic', 'fantasy']) {
   let stale = '';
   if (city && mark) {
     await page.mouse.click(mark.x, mark.y);
+    await page.click('.inspector [data-act=more]');
     await page.click('.inspector [data-ain=explain]');
     await page.waitForSelector('.inspector .ain-note:not(.writing) .ain-text', { timeout: 10000 }).catch(() => null);
     note = await page.locator('.inspector .ain-note .ain-text').innerText().catch(() => '');
@@ -2239,7 +2299,9 @@ for (const style of ['realistic', 'fantasy']) {
   };
   const v0 = await view();
   const box = (await page.locator('.map-box').boundingBox())!;
-  const sx = box.x + box.width * 0.3;
+  // 从卡片右边那一块里起手(左边浮着侧栏卡片,按在卡片上拖不动地图)
+  const side = await page.locator('.sidebar').boundingBox();
+  const sx = Math.max(box.x + box.width * 0.3, (side ? side.x + side.width : 0) + 40);
   const sy = box.y + box.height * 0.5;
   // 1. 拖动时每帧耗时:按住以后在页面里连发 60 次移动,每次量"事件 → 地图层变换、文字层重排、视窗装饰重画"做完
   await page.mouse.move(sx, sy);
@@ -2333,7 +2395,7 @@ for (const style of ['realistic', 'fantasy']) {
       if (pairs >= 6) break;
       const got: string[] = [];
       for (const side of [1, -1]) {
-        const X = Math.round(stage.x + stage.width / 2 + side * 300);
+        const X = Math.round(SIDE_ROOM + (stage.x + stage.width - SIDE_ROOM) / 2 + side * 280);
         const d = X - stage.x - vv.sw / 2;
         // 上一下选中后地图飞走了(国家:缩放到看全疆域):先放回原来的视图
         await page.evaluate((v) => (window as any).__wfSetView({ k: v.k, x: v.x, y: v.y }), vv);
@@ -2452,7 +2514,7 @@ for (const style of ['realistic', 'fantasy']) {
       const cv = document.querySelector('.map-box canvas') as HTMLCanvasElement;
       return { w: cv.width, h: cv.height, px: Array.from(cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data) };
     });
-    await openOverview();
+    await closeOverview();
     await page.click('.export-btn');
     await page.click('.export-scale button:nth-child(1)');
     const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('.export-item[data-job=map]')]);
@@ -2494,9 +2556,9 @@ for (const style of ['realistic', 'fantasy']) {
     .then(() => true, () => false);
   const switchMs = Date.now() - t0;
   const lab = await page.evaluate(() => (window as any).__wfLabels);
-  const lpLabel = await page.locator('.lp-btn').innerText();
+  const projNow = await page.locator('.lp-pop .lp-proj.on').getAttribute('data-proj').catch(() => '');
   await page.keyboard.press('Escape');
-  if (lpLabel !== '政区 · 罗宾森') errs.push(`投影:切到罗宾森后右下按钮不是"政区 · 罗宾森"(${lpLabel})`);
+  if (projNow !== 'robinson') errs.push(`投影:切到罗宾森后图层弹层里选中的投影不是罗宾森(${projNow})`);
   console.log(`切到罗宾森:${switched ? `${switchMs} ms 画完` : '没画完'};文字 ${lab?.drawn} 条、国名 ${lab?.polities} 个、城镇符号 ${lab?.marks} 个`);
   if (!switched) errs.push('投影:切到罗宾森以后地图没有按投影重画');
   if (!(lab?.polities > 2 && lab?.marks > 5)) errs.push('投影:罗宾森里国名、城镇符号没画出来');
@@ -2504,8 +2566,10 @@ for (const style of ['realistic', 'fantasy']) {
   const pk = await page.evaluate(() => {
     const all = (window as any).__wfPickables() as { kind: string; id: number; text: string; x: number; y: number }[];
     const names = all.filter((p) => p.kind === 'settlement' && p.text);
+    // 在侧栏卡片右边那一块里的
+    const sideW = document.querySelector('.sidebar')?.getBoundingClientRect().right ?? 0;
     for (const n of names) {
-      const m = all.find((p) => p.kind === 'mark' && p.id === n.id);
+      const m = all.find((p) => p.kind === 'mark' && p.id === n.id && p.x > sideW + 20 && p.x < innerWidth - 20);
       if (m) return { name: n.text, x: m.x, y: m.y };
     }
     return null;
@@ -2621,7 +2685,7 @@ for (const style of ['realistic', 'fantasy']) {
   const REDRAW_LIMIT = process.env.CI ? 1800 : 900;
   if (worstRedraw > REDRAW_LIMIT) errs.push(`投影:换中心 / 换投影重画太慢(${worstRedraw.toFixed(0)} ms,上限 ${REDRAW_LIMIT} ms)`);
   // 7. 导出罗宾森图片:尺寸对,四角在外轮廓外(底色),正中有图(和底色不同、颜色有变化)
-  await openOverview();
+  await closeOverview();
   await page.click('.export-btn');
   await page.click('.export-scale button:nth-child(1)');
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('.export-item[data-job=map]')]);
@@ -2722,9 +2786,9 @@ for (const style of ['realistic', 'fantasy']) {
   console.log('地球仪悬停:', hov.replace(/\n/g, ' / ') || '(无)');
   if (!hov.trim()) errs.push('地球仪:悬停小卡片没有出现');
 
-  // 单击一座城(正面中间一带、详情面板盖不到的地方)→ 详情是这座城
+  // 单击一座城(正面中间一带、侧栏卡片挡不到的地方)→ 详情是这座城
   type GMark = { id: number; name: string; x: number; y: number; d: number };
-  const marks = ((await gp.evaluate('window.__wfGlobeMarks()')) as GMark[]).filter((m) => m.name && m.d > 0.5 && m.x > gb.x + 380 && m.x < gb.x + gb.width - 380 && m.y > gb.y + 120 && m.y < gb.y + gb.height - 160);
+  const marks = ((await gp.evaluate('window.__wfGlobeMarks()')) as GMark[]).filter((m) => m.name && m.d > 0.5 && m.x > SIDE_ROOM + 40 && m.x < gb.x + gb.width - 120 && m.y > gb.y + 120 && m.y < gb.y + gb.height - 160);
   let picked = '';
   let panel = '';
   for (const m of marks.slice(0, 6)) {
@@ -2735,13 +2799,13 @@ for (const style of ['realistic', 'fantasy']) {
       break;
     }
     await gp.keyboard.press('Escape');
-    // 面板开过一下,球心会往左挪再挪回来:等它回到原位再点下一个
+    // 等转到这座城的飞行停下再点下一个
     await gp.waitForTimeout(700);
   }
   console.log(`地球仪单击城:候选 ${marks.length} 个,点到「${picked || '—'}」,详情「${panel.replace(/\n/g, ' ')}」`);
   if (!picked) errs.push('地球仪:单击城镇符号没有打开这座城的详情');
   await gp.keyboard.press('Escape');
-  // 面板关上,球心挪回原位(约 0.6 秒)
+  // 等球停稳(约 0.6 秒)
   await gp.waitForTimeout(700);
 
   // 时间轴拖到早年:文明层贴图重新上传,球上画面变了;拖动时每帧(文明底图 + 上传 + 画一帧)耗时
@@ -2794,7 +2858,7 @@ for (const style of ['realistic', 'fantasy']) {
   // 球上没有按钮(回正靠双击、经纬网在图层弹层里、导出在导出菜单里);导出菜单里多一项"导出地球仪这一面"
   const globeBtns = await gp.locator('.globe button').count();
   if (globeBtns) errs.push(`地球仪:球上还有按钮(${globeBtns} 个)`);
-  await openOverview(gp);
+  await closeOverview(gp);
   await gp.click('.export-btn');
   const globeItem = await gp.locator('.export-item[data-job=globe]').innerText().catch(() => '');
   const [dl] = await Promise.all([gp.waitForEvent('download', { timeout: 30000 }).catch(() => null), gp.click('.export-item[data-job=globe]')]);
@@ -2859,8 +2923,9 @@ for (const style of ['realistic', 'fantasy']) {
     const back = await gp.evaluate(() => (window as any).__wfView);
     const pk = await gp.evaluate(() => {
       const all = (window as any).__wfPickables() as { kind: string; id: number; text: string; x: number; y: number }[];
+      const sideW = document.querySelector('.sidebar')?.getBoundingClientRect().right ?? 0;
       for (const n of all.filter((p) => p.kind === 'settlement' && p.text)) {
-        const m = all.find((p) => p.kind === 'mark' && p.id === n.id);
+        const m = all.find((p) => p.kind === 'mark' && p.id === n.id && p.x > sideW + 20 && p.x < innerWidth - 20);
         if (m) return { name: n.text, x: m.x, y: m.y };
       }
       return null;
@@ -2933,7 +2998,7 @@ for (const style of ['realistic', 'fantasy']) {
   }
 
   // 地球仪按投影重画:手绘的山丘等符号每帧正立着画(贴图里不带)、写实风换上不打光 + 坡度的贴图(后台画好换上);
-  // 国家面板打开时球心左移、关上挪回来;事件标签钉在球上的事发地,转到背面就藏起来
+  // 宽屏左边浮着侧栏卡片:球心一直往右挪卡片宽的一半(选中国家、关掉面板都不变);事件标签钉在球上的事发地,转到背面就藏起来
   {
     const pp = await gBrowser.newPage({ viewport: { width: 1400, height: 820 } });
     pp.on('pageerror', (e) => errs.push(`地球仪按投影重画:${e.message}`));
@@ -2947,7 +3012,7 @@ for (const style of ['realistic', 'fantasy']) {
     await pickLayer(pp, 'realistic');
     const relit = await pp.waitForFunction(() => (window as any).__wfGlobe?.style === 'realistic' && (window as any).__wfGlobe?.relief, null, { timeout: 60000 }).then(() => true, () => false);
     const r1 = await P();
-    // 面板:选中球上的一个名字 → 球心左移;Esc 关掉 → 挪回来
+    // 面板:选中球上的一个名字 → 球心不挪(面板在侧栏里);Esc 关掉 → 还在原处(都在卡片右边那一块的正中)
     const name = r1.texts[0];
     await pp.evaluate((n) => (window as any).__wfGlobeSelectName(n), name);
     await pp.waitForTimeout(900);
@@ -2961,8 +3026,8 @@ for (const style of ['realistic', 'fantasy']) {
     );
     if (f1.tex !== 'globe' || !(f1.glyphs > 50)) errs.push('地球仪:手绘风的山丘等符号没有在球上正立着画');
     if (!relit || r1.tex !== 'globe') errs.push('地球仪:写实风没有换上重新打光的贴图');
-    if (!(s1 < -170) || s2 !== 0) errs.push(`地球仪:国家面板打开时球心没有左移、关上没有挪回来(${s1} → ${s2})`);
-    // 事件标签:点左下的最近事件(球转到事发地,那一条的标签停约 5 秒)→ 标签在球上(在球的圆盘里),转到对面就藏起来
+    if (Math.abs(s1 - SIDE_ROOM / 2) > 1 || Math.abs(s2 - SIDE_ROOM / 2) > 1) errs.push(`地球仪:球心应往右挪侧栏卡片宽的一半(${SIDE_ROOM / 2}),选中、关掉都不变(${s1} → ${s2})`);
+    // 事件标签:点侧栏里的最近大事(球转到事发地,那一条的标签停约 5 秒)→ 标签在球上(在球的圆盘里),转到对面就藏起来
     // (不靠播放:CI 上软件渲染一帧几百毫秒,放到下一件大事要很久)
     await pp.goto(`${dev.url}/?seed=7&style=fantasy&view=globe`);
     await pp.waitForFunction(() => (window as any).__wfGlobe?.ready, null, { timeout: 60000 });
@@ -2973,7 +3038,7 @@ for (const style of ['realistic', 'fantasy']) {
         const r = el.querySelector('.ev-ring')!.getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: el.textContent ?? '' };
       });
-    const recentRows = pp.locator('.recent-ev .recent-row');
+    const recentRows = pp.locator('.sidebar .sb-row.ev');
     if (await recentRows.count()) await recentRows.last().click();
     const seen = await pp.waitForFunction(() => [...document.querySelectorAll('.ev-pin')].some((e) => (e as HTMLElement).style.visibility === 'visible'), null, { timeout: 20000 }).then(() => true, () => false);
     // 等球转到事发地(约 0.65 秒)再量位置
@@ -3187,7 +3252,7 @@ for (const style of ['realistic', 'fantasy']) {
       `图层抽屉 ${JSON.stringify(lp)} → 实景 ${dark}、收起 ${lpClosed};概览「${ovRowText}」→ 收起 ${ovClosed};搜索框 ${JSON.stringify(sb)} → 「${hitName}」`,
   );
   if (!row || Math.abs(row.y + row.height - VH) > 1 || row.width !== VW || !track || track.height < 32) errs.push(`手机:时间轴没有固定在最底部、全宽 / 轨道太矮(${JSON.stringify(row)},轨道 ${track?.height})`);
-  if (!/^种子 7 · \d+ 国 · 概览 ›$/.test(sub)) errs.push(`手机:副标不对(${sub})`);
+  if (!/^种子 7，\d+ 国 概览 ›$/.test(sub)) errs.push(`手机:副标不对(${sub})`);
   if (!hint0.includes('双指缩放') || hint1 !== 0) errs.push(`手机:操作提示不对 / 捏合后没消失(${hint0})`);
   if (zoomBtns) errs.push('手机:右下还有地球仪 / 缩放按钮');
   if (recentRows > 1) errs.push(`手机:最近事件应只有 1 条(${recentRows})`);
@@ -3200,7 +3265,7 @@ for (const style of ['realistic', 'fantasy']) {
     const halfTop = 0.55 * VH - 92;
     if (!sheet0 || Math.abs(sheet0.y - halfTop) > 8 || Math.abs(sheet0.y + sheet0.height - (VH - 92)) > 2 || sheet0.width !== VW)
       errs.push(`手机:点国家后底部抽屉的位置不对(${JSON.stringify(sheet0)},半高上边应在 ${halfTop})`);
-    if (!/国家 · 第 \d+ 年/.test(info) || !info.includes('干预历史')) errs.push(`手机:抽屉里不是国家面板(${info.slice(0, 80)})`);
+    if (!/ \/ 国家，/.test(info) || !info.includes('干预历史')) errs.push(`手机:抽屉里不是国家面板(${info.slice(0, 80)})`);
     if (!ring || !sheet0 || !(ring.y > 60 && ring.y + ring.height < sheet0.y)) errs.push(`手机:选中的国家没有落在抽屉上方(国都圆环 ${JSON.stringify(ring)})`);
     if (hover) errs.push('手机:点了以后出了悬停卡片');
     if (!full || !sheet1 || Math.abs(sheet1.y - 0.12 * VH) > 8) errs.push(`手机:往上拖没有展开(${JSON.stringify(sheet1)})`);
@@ -3255,7 +3320,16 @@ for (const style of ['realistic', 'fantasy']) {
   await openOverview();
   const desk = await aboutLinks(page);
   checkLinks('链接:', desk, 1400, 820);
-  await page.click('.ai-btn');
+  // 版本号:概览底部、侧栏"更多"菜单底部,都是 package.json 里的版本
+  const pkgVer = JSON.parse((await import('node:fs')).readFileSync('package.json', 'utf8')).version as string;
+  const ovVer = await page.locator('.ov-about [data-version]').innerText().catch(() => '');
+  await closeOverview();
+  await page.click('[data-act=world-more]');
+  const menuVer = await page.locator('.pm-menu [data-version]').innerText().catch(() => '');
+  await page.keyboard.press('Escape');
+  console.log(`版本号:概览「${ovVer}」、更多菜单「${menuVer}」(package.json ${pkgVer})`);
+  if (ovVer !== `版本 ${pkgVer}` || menuVer !== `版本 ${pkgVer}`) errs.push(`版本号:界面上的版本号和 package.json 不一致(概览「${ovVer}」,菜单「${menuVer}」,应为 ${pkgVer})`);
+  await openAi();
   await page.waitForSelector('.ai-dialog', { timeout: 10000 });
   const aiPriv = await page.locator('.ai-foot a[data-link=privacy]').evaluate((a) => [a.getAttribute('href'), a.getAttribute('target'), a.textContent]).catch(() => null);
   await page.keyboard.press('Escape');

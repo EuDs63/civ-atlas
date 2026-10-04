@@ -21,6 +21,7 @@ import { getPolityPick, nameAt, setPickHover, setPolityPick, usePickHover, usePo
 import { endRun, getPanel, requestFly, usePanel } from './panelStore';
 import { clearToast, showToast } from './toastStore';
 import { isCoarse } from './device';
+import { sideRoom } from './flyTo';
 import type { WorldToClient } from './EventPins';
 import type { LabelPick } from './mapPick';
 import './countryPanel.css';
@@ -219,6 +220,8 @@ export function TargetLayer({ civ, world, toClient, resim, generating, labelAt }
     const tick = () => {
       const vw = window.innerWidth;
       const vh = window.innerHeight;
+      // 宽屏左边浮着侧栏卡片(压在名牌上面):名牌摆在卡片右边,对象在卡片底下的也挪出来,能看见、能点
+      const left = sideRoom(vw);
       const placed: [number, number, number, number][] = [];
       const hov = hoverRef.current;
       // 鼠标下的那一个先摆(不会被别的挤走)
@@ -232,10 +235,10 @@ export function TargetLayer({ civ, world, toClient, resim, generating, labelAt }
         if (!size || !size[0]) sizes.set(p.key, (size = [el.offsetWidth, el.offsetHeight]));
         const [w, h] = size;
         let spot: [number, number] | null = null;
-        // 对象在屏幕里才摆;名牌整个留在屏幕里(贴边的往里挪)
+        // 对象在屏幕里才摆;名牌整个留在屏幕里、侧栏卡片右边(贴边的往里挪)
         if (at && at[0] >= 0 && at[0] <= vw && at[1] >= 0 && at[1] <= vh) {
           for (const dy of [0, -1, 1, -2, 2]) {
-            const cx = Math.min(vw - w / 2 - 6, Math.max(w / 2 + 6, at[0]));
+            const cx = Math.min(vw - w / 2 - 6, Math.max(left + w / 2 + 6, at[0]));
             const cy = Math.min(vh - h / 2 - 6, Math.max(h / 2 + 6, at[1] + dy * (h + 4)));
             const r: [number, number, number, number] = [cx - w / 2 - 2, cy - h / 2 - 2, cx + w / 2 + 2, cy + h / 2 + 2];
             if (placed.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) continue;

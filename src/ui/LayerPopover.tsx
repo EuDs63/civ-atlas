@@ -4,7 +4,7 @@
  *         + 一行叠加开关(地名、宜居度、州、城址、道路;CivPanel.tsx 的 CivToggles);
  *         选中"民族"时下面是紧凑的民族色块列表(CultureLegend)
  *   投影:ProjectionSection(六种投影、中央经线滑条、经纬网)
- * 点图层就换(弹层收起);点叠加开关不收起;点外面、Esc 收起。
+ * 点图层就换(弹层收起);点叠加开关不收起;点外面(包括旁边的按钮)、Esc 收起。
  * 窄屏(手机):按钮只放缩略图,弹层是从底部升起的抽屉(右上 ✕ 收起);"地球仪 / 平面地图"就在投影里。
  *
  * 缩略图是当前世界真实画出来的小图:App 给 baseCanvas(画风键)取整张底图(画过的直接从缓存拿,没画过的画一张放进缓存),
@@ -148,9 +148,16 @@ export interface LayerPopoverProps {
   thumbs: Partial<Record<MapLayer, string>>;
   requestThumbs: (ids: MapLayer[]) => void;
   disabled?: boolean;
+  /**
+   * 按钮的样子:thumb = 小缩略图 + "政区 · 等距圆柱"(窄屏底部那一行);
+   * seg = 一段文字"更多图层"(宽屏右上的分段按钮最后一段;当前图层不在前几段里时写当前图层名)
+   */
+  trigger?: 'thumb' | 'seg';
+  /** trigger = seg 时:当前图层在不在前几段里(在 = 这一段不亮) */
+  inSeg?: boolean;
 }
 
-export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs, disabled }: LayerPopoverProps) {
+export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs, disabled, trigger = 'thumb', inSeg = true }: LayerPopoverProps) {
   const [open, setOpen] = useState(false);
   const proj = useProjection();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -163,10 +170,10 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('pointerdown', onDown, true);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('pointerdown', onDown, true);
       document.removeEventListener('keydown', onKey);
     };
   }, [open, requestThumbs]);
@@ -177,13 +184,29 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
   };
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   return (
-    <div className="lp" ref={rootRef} onPointerDown={stop} onDoubleClick={stop}>
-      <button className={`lp-btn map-btn${open ? ' on' : ''}`} data-act="layers" disabled={disabled} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <Thumb src={thumbs[layer]} small />
-        <span className="lp-label">
-          {cur.name} · {projectionName(proj)}
-        </span>
-      </button>
+    <div className={`lp${trigger === 'seg' ? ' lp-seg' : ''}`} ref={rootRef} onPointerDown={stop} onDoubleClick={stop}>
+      {trigger === 'seg' ? (
+        <button
+          className={`seg-btn lp-btn${open ? ' open' : ''}${inSeg ? '' : ' on'}`}
+          data-act="layers"
+          disabled={disabled}
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          title="全部图层、地图上显示什么、投影"
+        >
+          {inSeg ? '更多图层' : cur.name}
+          <svg className="seg-caret" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      ) : (
+        <button className={`lp-btn map-btn${open ? ' on' : ''}`} data-act="layers" disabled={disabled} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <Thumb src={thumbs[layer]} small />
+          <span className="lp-label">
+            {cur.name}，{projectionName(proj)}
+          </span>
+        </button>
+      )}
       {open && (
         <div className="lp-pop" role="dialog" aria-label="图层与投影">
           {/* 窄屏是底部抽屉:顶上一条拖动条的样子 + 关闭(宽屏不显示) */}

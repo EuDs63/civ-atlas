@@ -17,7 +17,7 @@ export interface SearchHit {
   id: number;
   /** 显示的名字 */
   name: string;
-  /** 右侧小字:"12 州" / "国都 竹影城" / "城 · 属大澜王朝" / "民族" / "山脉" */
+  /** 右侧小字:"12 州" / "国都 竹影城" / "城，属大澜王朝" / "民族" / "山脉" */
   sub: string;
   /** 颜色块 */
   color: string;
@@ -172,13 +172,13 @@ export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARC
     const ruined = s.ended !== undefined && s.ended <= year;
     const isCap = !!op && built && !ruined && capitalAt(op, year) === s.id;
     const sub = !built
-      ? `城 · ${Math.floor(s.founded)} 年建`
+      ? `城，${Math.floor(s.founded)} 年建`
       : ruined
-        ? '城 · 已成废墟'
+        ? '城，已成废墟'
         : isCap
-          ? `国都 · ${polityNameAt(op!, year)}`
+          ? `国都，${polityNameAt(op!, year)}`
           : op
-            ? `城 · 属${polityNameAt(op, year)}`
+            ? `城，属${polityNameAt(op, year)}`
             : '城';
     const cu = civ.cultures[s.culture];
     out.push({

@@ -38,7 +38,7 @@ export interface GlobeLabelInput {
   surface?: LabelView['surface'];
   /** 不许压字的地方(按钮、时间轴;CSS 像素) */
   reserved?: readonly Box[];
-  /** 球心横向挪了多少(CSS 像素;国家面板打开时往左,见 globe.ts 的 globeFrame) */
+  /** 球心横向挪了多少(CSS 像素;宽屏左边有侧栏卡片时往右,见 globe.ts 的 globeFrame) */
   shift?: number;
 }
 

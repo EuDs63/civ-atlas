@@ -4,10 +4,13 @@
  * app 根元素(.app)上的 data-theme="light|dark" 随图层切换:高程、实景、降水用深色,其余浅色(见 ui/mapLayers.ts)。
  * <html> 上同步一份,挂在 body 下的弹窗(AI 设置)也跟着换。
  *
+ * 样子照常见的地图应用:系统字体、浅灰毛玻璃面板、白色分组行、蓝色主按钮。
+ *
  * 约定的变量名(后面的界面直接用,不要改名):
- *   --ink 主文字 / --ink-2 次要文字 / --panel 面板底(半透明)/ --panel-solid 面板实色
+ *   --ink 主文字 / --ink-2 次要文字 / --ink-3 更淡的字 / --panel 面板底(半透明)/ --panel-solid 面板实色 / --surface 分组行的底
  *   --line 分隔线 / --line-strong 强线 / --btn 次按钮底 / --link 可点的名字
- *   --accent 主色(干预、战争、当前选中)/ --accent-hover 主色悬停 / --void 投影外空白
+ *   --accent 主色(主按钮、开关、当前选中)/ --accent-hover 主色悬停 / --accent-soft 主色的浅底 / --void 投影外空白
+ *   --map-mark 地图上的标记(选中国家国都的圆环)
  *   --ev-war 战争 / --ev-dynasty 改朝 / --ev-found 立国 / --ev-empire 称帝 / --ev-assim 同化
  *   --halo 地图上文字的描边(text-shadow 的值)
  * 另有几项辅助值(--vignette 上下渐变遮罩、--hover-bg 文字按钮悬停底、阴影、字体)。
@@ -15,70 +18,81 @@
 :root,
 [data-theme='light'] {
   color-scheme: light;
-  --ink: #231c13;
-  --ink-2: #65594a;
-  --panel: rgba(247, 242, 231, 0.95);
-  --panel-solid: #f6f1e6;
-  --line: rgba(35, 28, 19, 0.15);
-  --line-strong: rgba(35, 28, 19, 0.4);
-  --btn: rgba(35, 28, 19, 0.07);
-  --link: #2f5d7c;
-  --accent: #b8432f;
-  --accent-hover: #a03a28;
+  --ink: #1d1d1f;
+  --ink-2: #6e6e73;
+  --ink-3: #aeaeb2;
+  --panel: rgba(248, 248, 250, 0.82);
+  --panel-solid: #f5f5f7;
+  --surface: #ffffff;
+  --line: rgba(60, 60, 67, 0.16);
+  --line-strong: rgba(60, 60, 67, 0.36);
+  --btn: rgba(118, 118, 128, 0.12);
+  --link: #0a6cdc;
+  --accent: #007aff;
+  --accent-hover: #0066d6;
+  --accent-soft: rgba(0, 122, 255, 0.12);
   --void: #e7e0cc;
-  --ev-war: #b8432f;
-  --ev-dynasty: #2f5d7c;
-  --ev-found: #3f7a57;
-  --ev-empire: #8a6a25;
-  --ev-assim: #7a6390;
+  --ev-war: #e0443a;
+  --ev-dynasty: #3478d4;
+  --ev-found: #2e9a58;
+  --ev-empire: #c4870f;
+  --ev-assim: #8d5bcc;
+  --map-mark: #d4392b;
   --halo: 0 0 2px rgba(247, 242, 231, 1), 0 0 8px rgba(247, 242, 231, 0.9);
 
   --vignette: rgba(240, 234, 220, 0.78);
-  --hover-bg: rgba(128, 128, 128, 0.16);
-  --field: rgba(255, 255, 255, 0.6);
-  --ok: #3f7a57;
-  --warn: #8a6a25;
-  --err: #b8432f;
+  --hover-bg: rgba(118, 118, 128, 0.12);
+  --field: rgba(118, 118, 128, 0.12);
+  --ok: #2e9a58;
+  --warn: #b97c0c;
+  --err: #e0443a;
 }
 [data-theme='dark'] {
   color-scheme: dark;
-  --ink: #f4efe5;
-  --ink-2: #c2b8a7;
-  --panel: rgba(24, 21, 18, 0.9);
-  --panel-solid: #1d1a16;
-  --line: rgba(255, 255, 255, 0.12);
-  --line-strong: rgba(255, 255, 255, 0.38);
-  --btn: rgba(255, 255, 255, 0.1);
-  --link: #9cc3dc;
-  --accent: #b8432f;
-  --accent-hover: #a03a28;
+  --ink: #f5f5f7;
+  --ink-2: #a1a1a6;
+  --ink-3: #6e6e73;
+  --panel: rgba(30, 30, 32, 0.82);
+  --panel-solid: #1c1c1e;
+  --surface: #2c2c2e;
+  --line: rgba(255, 255, 255, 0.14);
+  --line-strong: rgba(255, 255, 255, 0.34);
+  --btn: rgba(118, 118, 128, 0.26);
+  --link: #4aa3ff;
+  --accent: #0a84ff;
+  --accent-hover: #2e95ff;
+  --accent-soft: rgba(10, 132, 255, 0.2);
   --void: #141518;
-  --ev-war: #f0917c;
-  --ev-dynasty: #9cc3dc;
-  --ev-found: #8fcca5;
-  --ev-empire: #e0c07a;
-  --ev-assim: #c4a8dc;
+  --ev-war: #ff6b61;
+  --ev-dynasty: #6aa8ff;
+  --ev-found: #4fcf83;
+  --ev-empire: #f0b33e;
+  --ev-assim: #c39af5;
+  --map-mark: #ff5a4c;
   --halo: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.6);
 
   --vignette: rgba(8, 8, 8, 0.55);
-  --hover-bg: rgba(128, 128, 128, 0.16);
-  --field: rgba(0, 0, 0, 0.25);
-  --ok: #8fcca5;
-  --warn: #e0c07a;
-  --err: #f0917c;
+  --hover-bg: rgba(118, 118, 128, 0.24);
+  --field: rgba(118, 118, 128, 0.24);
+  --ok: #4fcf83;
+  --warn: #f0b33e;
+  --err: #ff6b61;
 }
 :root {
-  /* 国名、年份、数字:思源宋体(地图字体的子集,缺字回落系统宋体);其余界面文字:系统黑体 */
-  --font-serif: 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
-  --font-sans: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --shadow-panel: 0 14px 36px rgba(0, 0, 0, 0.22);
-  --shadow-float: 0 20px 50px rgba(0, 0, 0, 0.3);
-  --shadow-label: 0 6px 18px rgba(0, 0, 0, 0.18);
-  --shadow-toast: 0 10px 28px rgba(0, 0, 0, 0.22);
-  --r-panel: 4px;
-  --r-btn: 3px;
-  --r-tag: 2px;
+  /* 界面一律用系统字体(和常见的地图应用一样);地图上的地名另有字体,不受这里影响。
+     --font-serif 留着这个名字是为了旧样式不用一处处改,值也是系统字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-serif: var(--font-sans);
+  --shadow-panel: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.16);
+  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 16px 44px rgba(0, 0, 0, 0.22);
+  --shadow-label: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 4px 14px rgba(0, 0, 0, 0.14);
+  --shadow-toast: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.18);
+  --r-panel: 12px;
+  --r-btn: 8px;
+  --r-tag: 5px;
   --on-accent: #fff;
+  /* 毛玻璃:浮在地图上的按钮、时间轴、面板 */
+  --glass-blur: blur(20px) saturate(1.6);
 }
 /* 旧组件用的变量名换算到新主题上(存档、导出、AI 设置、详情面板、编年史、改地形面板) */
 :root,

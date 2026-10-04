@@ -1,17 +1,17 @@
 /**
- * 国家面板:点国家从右侧出来(宽 340,上 72、下 84),两页 —— 信息页(这里)和干预页(CommandPage.tsx)。
+ * 国家面板(宽屏在左边侧栏里,窄屏是底部抽屉),两页 —— 信息页(这里)和干预页(CommandPage.tsx)。
  *
  * 信息页(按时间轴当前那一年;没立国 = 立国那年的样子,已亡 = 亡国前的样子):
- *   顶部  颜色块、"国家 · 第 N 年"、关闭;国名(宋体大字,可改,输入时预览国号变迁);"1045 年立国 · 国都 竹影城 · 设为中心"
- *   三格  州 / 人口(境内城镇)/ 主体民族
- *   朝代条 按时长分段,当前那一朝实色;点一段 = 时间轴跳到它开始的那年
- *   疆域小柱图(历年州数,和概览"国家"表同一份)、邻国(可点)、来历 / 结局 / 历任国都(有才写)
- *   相关事件 到当前年份为止最近 5 条(可点:跳到那一年,地图上闪出事发地);"全部 ›"打开概览的编年史页、只看这国
- *   名字由来(AI 释名,点底部按钮才出;先"生成中…"再出结果;没设置 AI 时一行提示 + "设置 AI")、AI 起名(改名时的入口)
- *   底部 2×2 干预历史(主色)/ 改名 / 名字由来 / 写国史(窄屏:点"干预历史"时底部抽屉展开)
+ *   顶部  颜色块、国名(可改,输入时预览国号变迁)、"国家，1045 年立国"、关闭
+ *   按钮  干预历史(主操作;窄屏点了底部抽屉展开)/ 设为中心 / 改名 / 更多(在编年史中查看、让 AI 写国史、让 AI 讲名字由来)
+ *   概况  国都、疆域(历年州数的小柱图,和概览"国家"表同一份)、人口(境内城镇)、主体民族、邻国(可点),
+ *         来历 / 结局 / 历任国都(有才写)
+ *   朝代  改朝换代过才有:一朝一行(新的在上),当前那一朝标"当前";点一行 = 时间轴跳到它开始的那年
+ *   大事  到当前年份为止最近 5 条(可点:跳到那一年,地图上闪出事发地);"全部 N 件"打开概览的编年史页、只看这国
+ *   名字由来(AI 释名,点了才出;先"生成中…"再出结果;没设置 AI 时一行提示 + "设置 AI")、AI 起名(改名时的入口)
  *
- * 顶部、三格、色条、小柱图、事件列表、底部按钮这些零件在 panelParts.tsx,城 / 地理实体 / 州的面板(CityPanel、PlacePanel、
- * RegionPanel)用的是同一套。
+ * 顶部、按钮、概况、小柱图、大事这些零件在 panelParts.tsx,城 / 地理实体 / 州的面板(CityPanel、PlacePanel、RegionPanel)
+ * 用的是同一套。
  */
 import { useMemo, useState, type RefObject } from 'react';
 import type { Civ, Polity } from '../gen/civ/types';
@@ -32,7 +32,9 @@ import { setPanelTab, setSheet, usePanel } from './panelStore';
 import { shownYearOf } from './flyTo';
 import { SPARK_N, polityHistory } from './WorldOverviewCountries';
 import { openOverview } from './overviewStore';
-import { AiBox, AiSuggestLink, CenterLink, EventList, Foot, Link, PanelHead, SegBar, Spark, Stats, rgb, rgba, useRevealAi } from './panelParts';
+import { Act, Acts, AiBox, AiSuggestLink, CenterAct, EventList, Link, MoreAct, PanelHead, Row, Spark, Stats, SubLine, rgb, useRevealAi } from './panelParts';
+import { AiMenuItem, MenuItem, MenuSep } from './PopMenu';
+import { Icon } from './icons';
 import './countryPanel.css';
 
 // ---------------------------------------------------------------------------
@@ -91,12 +93,11 @@ interface Shared {
   aiRef: RefObject<HTMLDivElement>;
 }
 
-/** 顶部:颜色块、国家 · 第 N 年、关闭;国名(可改);立国 · 国都 · 设为中心 */
-function CountryHead({ civ, raw, world, id, year, names, shared }: CountryPanelProps & { shared: Shared }) {
+/** 顶部:颜色块、国名(可改)、"国家，1045 年立国"、关闭 */
+function CountryHead({ civ, raw, id, year, names, shared }: CountryPanelProps & { shared: Shared }) {
   const p = civ.polities[id];
   const alive = polityAlive(p, year);
   const shownYear = shownYearOf(p, year, civ.endYear);
-  const cap = civ.settlements[capitalAt(p, shownYear)];
   const d = p.dynasties;
   // 东方改朝换代过的:标题上的国号是当朝的,改的是当朝的国号(第一朝 = 国名词根)
   const di = p.eastern && d && d.length >= 2 ? dynastyIndexAt(p, shownYear) : 0;
@@ -104,7 +105,7 @@ function CountryHead({ civ, raw, world, id, year, names, shared }: CountryPanelP
   const withDynasty = (i: number, v: string): Polity => (i === 0 ? withRoot(p, v) : { ...p, dynasties: d!.map((y, j) => (j === i ? { ...y, name: v } : y)) });
   const extra = <AiSuggestLink ai={ai} />;
   return (
-    <PanelHead color={rgb(p.color)} tag="国家" year={year}>
+    <PanelHead color={rgb(p.color)}>
       {di > 0 ? (
         <NameEdit
           k={dynastyKey(civ, id, di)}
@@ -138,24 +139,17 @@ function CountryHead({ civ, raw, world, id, year, names, shared }: CountryPanelP
           preview={(v) => polityTitleChain(withRoot(p, v))}
         />
       )}
-      <div className="cp-sub">
-        {p.ended !== undefined && year >= p.ended
-          ? `${Math.floor(p.founded)}–${Math.floor(p.ended)} 年`
-          : `${Math.floor(p.founded)} 年${alive ? '' : '才'}立国`}
-        {cap && (
-          <>
-            {' · 国都 '}
-            <Link to={{ kind: 'settlement', id: cap.id }}>{cap.name}</Link>
-          </>
-        )}
-        {' · '}
-        <CenterLink world={world} civ={civ} sel={{ kind: 'polity', id }} year={shownYear} />
-      </div>
+      <SubLine
+        parts={[
+          '国家',
+          p.ended !== undefined && year >= p.ended ? `${Math.floor(p.founded)}–${Math.floor(p.ended)} 年` : `${Math.floor(p.founded)} 年${alive ? '' : '才'}立国`,
+        ]}
+      />
     </PanelHead>
   );
 }
 
-function InfoPage({ civ, id, year, p, shared }: CountryPanelProps & { p: Polity; shared: Shared }) {
+function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: Polity; shared: Shared }) {
   const { ai } = shared;
   const shownYear = shownYearOf(p, year, civ.endYear);
   const alive = polityAlive(p, year);
@@ -197,50 +191,51 @@ function InfoPage({ civ, id, year, p, shared }: CountryPanelProps & { p: Polity;
   }, [civ, id]);
   const other = (q: number, y: number) => (civ.polities[q] ? <Link to={{ kind: 'polity', id: q }}>{polityName(civ.polities[q], y)}</Link> : null);
   const capitals = p.capitals?.length ? p.capitals : [{ year: p.founded, settlement: p.capital }];
-  const popText = pop > 0 ? populationLabel(pop).replace(/万人$/, '万') : '—';
+  const popText = pop > 0 ? populationLabel(pop) : '—';
+  const cap = civ.settlements[capitalAt(p, shownYear)];
   return (
     <>
+      <Acts>
+        <Act icon="intervene" primary act="intervene" onClick={() => (setPanelTab('cmd'), setSheet('full'))}>
+          干预历史
+        </Act>
+        <CenterAct world={world} civ={civ} sel={{ kind: 'polity', id }} year={shownYear} />
+        <Act icon="rename" act="rename" onClick={() => shared.setRenaming(true)}>
+          改名
+        </Act>
+        <MoreAct>
+          <MenuItem icon={<Icon name="scroll" size={16} />} act="chronicle" disabled={!related.length} onClick={() => openOverview('chronicle', { polity: id })}>
+            在编年史中查看
+          </MenuItem>
+          <MenuSep />
+          <AiMenuItem icon={<Icon name="book" size={16} />} act="book" onClick={() => openHistoryBook({ polity: id })}>
+            让 AI 写国史
+          </AiMenuItem>
+          <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
+            让 AI 讲名字由来
+          </AiMenuItem>
+        </MoreAct>
+      </Acts>
       <div className="cp-body">
-        <Stats
-          items={[
-            { k: '州', v: n },
-            { k: '人口', v: popText, size: 'small' },
-            {
-              k: '主体民族',
-              v: (
-                <>
-                  {top ? cultureLabel(top) : '—'}
-                  {share !== null && ` ${share}%`}
-                </>
-              ),
-              size: 'text',
-            },
-          ]}
-        />
-        <SegBar
-          label="朝代"
-          segs={segs.map((s, i) => ({
-            name: s.name,
-            frac: Math.max(0, s.to - s.from) / span,
-            background: i === cur ? rgb(p.color) : rgba(p.color, 0.25),
-            on: i === cur,
-            title: `${s.name} · ${Math.floor(s.from)}–${Math.floor(s.to)}`,
-            onClick: () => setCivTime({ year: Math.ceil(s.from), playing: false, story: false }),
-          }))}
-          years={[p.founded, last]}
-        />
-        <div className="cp-grid">
-          <span className="cp-k">疆域</span>
-          <Spark
-            title={`历年州数(最多时 ${maxN} 州)`}
-            bars={spark.map((s) => ({
-              h: Math.max(1, Math.round((s.n / maxN) * 26)),
-              background: rgb(p.color),
-              opacity: s.n ? (s.year <= year ? 1 : 0.35) : 0.2,
-            }))}
-          />
-          <span className="cp-k">邻国</span>
-          <span className="cp-links">
+        <Stats items={[]}>
+          <Row k="国都">{cap ? <Link to={{ kind: 'settlement', id: cap.id }}>{cap.name}</Link> : <span className="cp-none">无</span>}</Row>
+          <Row k="疆域" className="cp-terr">
+            <Spark
+              title={`历年州数(最多时 ${maxN} 州)`}
+              bars={spark.map((s) => ({
+                h: Math.max(1, Math.round((s.n / maxN) * 16)),
+                background: rgb(p.color),
+                opacity: s.n ? (s.year <= year ? 1 : 0.35) : 0.2,
+              }))}
+            />
+            <span data-stat="州">{n} 个州</span>
+          </Row>
+          <Row k="人口">{popText}</Row>
+          <Row k="主体民族">
+            {top ? cultureLabel(top) : '—'}
+            {share !== null && <em className="cp-num-note">{share}%</em>}
+          </Row>
+          <Row k="邻国" className="cp-links">
             {near.length ? (
               near
                 .map((q) => civ.polities[q])
@@ -253,73 +248,76 @@ function InfoPage({ civ, id, year, p, shared }: CountryPanelProps & { p: Polity;
             ) : (
               <span className="cp-none">无</span>
             )}
-          </span>
+          </Row>
           {(p.restores !== undefined && civ.polities[p.restores]) || (p.parent !== undefined && civ.polities[p.parent]) ? (
-            <>
-              <span className="cp-k">来历</span>
-              <span>
-                {p.restores !== undefined && civ.polities[p.restores] ? (
-                  <>复{other(p.restores, civ.polities[p.restores].ended ?? p.founded)}之国</>
-                ) : (
-                  <>叛{other(p.parent!, p.founded)}自立</>
-                )}
-              </span>
-            </>
+            <Row k="来历">
+              {p.restores !== undefined && civ.polities[p.restores] ? (
+                <>复{other(p.restores, civ.polities[p.restores].ended ?? p.founded)}之国</>
+              ) : (
+                <>叛{other(p.parent!, p.founded)}自立</>
+              )}
+            </Row>
           ) : null}
           {p.ended !== undefined && (
-            <>
-              <span className="cp-k">结局</span>
-              <span>
-                {Math.floor(p.ended)} 年{end?.how === 'fall' && end.by >= 0 ? <>亡于{other(end.by, p.ended)}</> : end?.how === 'merge' ? <>并入{other(end.by, p.ended)}</> : '亡'}
-              </span>
-            </>
+            <Row k="结局">
+              {Math.floor(p.ended)} 年{end?.how === 'fall' && end.by >= 0 ? <>亡于{other(end.by, p.ended)}</> : end?.how === 'merge' ? <>并入{other(end.by, p.ended)}</> : '亡'}
+            </Row>
           )}
           {capitals.length > 1 && (
-            <>
-              <span className="cp-k">历任国都</span>
-              <span className="cp-links">
-                {capitals.map((c, i) => {
-                  const s = civ.settlements[c.settlement];
-                  if (!s) return null;
-                  const now = alive && capitalAt(p, year) === s.id;
-                  return (
-                    <span key={i} className={now ? 'cp-now' : ''}>
-                      <Link to={{ kind: 'settlement', id: s.id }}>{s.name}</Link>
-                      <em>{Math.floor(c.year)}</em>
-                    </span>
-                  );
-                })}
-              </span>
-            </>
+            <Row k="历任国都" className="cp-links">
+              {capitals.map((c, i) => {
+                const s = civ.settlements[c.settlement];
+                if (!s) return null;
+                const now = alive && capitalAt(p, year) === s.id;
+                return (
+                  <span key={i} className={now ? 'cp-now' : ''}>
+                    <Link to={{ kind: 'settlement', id: s.id }}>{s.name}</Link>
+                    <em>{Math.floor(c.year)}</em>
+                  </span>
+                );
+              })}
+            </Row>
           )}
-        </div>
+        </Stats>
+        {segs.length > 1 && (
+          <section className="cp-sec cp-dyns">
+            <div className="cp-sec-head">朝代</div>
+            <div className="cp-group">
+              {segs
+                .map((s, i) => (
+                  <button
+                    key={i}
+                    className={`cp-dyn-row${i === cur ? ' on' : ''}`}
+                    title={`跳到 ${Math.ceil(s.from)} 年`}
+                    onClick={() => setCivTime({ year: Math.ceil(s.from), playing: false, story: false })}
+                  >
+                    <span className="cp-dyn-name">
+                      {s.name}
+                      {i === cur && <em className="cp-badge">当前</em>}
+                    </span>
+                    <span className="cp-dyn-span">
+                      {Math.floor(s.from)}
+                      {i === segs.length - 1 && p.ended === undefined ? ' 年起' : `–${Math.floor(s.to)}`}
+                    </span>
+                  </button>
+                ))
+                .reverse()}
+            </div>
+          </section>
+        )}
         <EventList
           upTo={upTo}
           empty={year < p.founded ? '尚未立国' : '还没有'}
           more={
             related.length > 0 && (
               <button className="ins-link cp-more" data-act="chronicle" onClick={() => openOverview('chronicle', { polity: id })}>
-                全部 ›
+                全部 {related.length} 件
               </button>
             )
           }
         />
         <AiBox ai={ai} aiRef={shared.aiRef} />
       </div>
-      <Foot>
-        <button className="cp-btn primary" data-act="intervene" onClick={() => (setPanelTab('cmd'), setSheet('full'))}>
-          干预历史
-        </button>
-        <button className="cp-btn" data-act="rename" onClick={() => shared.setRenaming(true)}>
-          改名
-        </button>
-        <button className="cp-btn" data-ain="explain" disabled={ai.busy} onClick={ai.ask}>
-          名字由来
-        </button>
-        <button className="cp-btn" data-act="book" onClick={() => openHistoryBook({ polity: id })}>
-          写国史
-        </button>
-      </Foot>
     </>
   );
 }

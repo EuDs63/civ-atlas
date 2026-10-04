@@ -1,0 +1,110 @@
+/**
+ * 界面上的线条小图标(24×24 画布,1.9 粗的圆头线,颜色跟着文字走)。
+ * 只放界面按钮用得到的几种;地图上的符号不在这里。
+ */
+import type { ReactNode } from 'react';
+
+const PATHS = {
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M16 16l4.5 4.5" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  save: <path d="M6 4h12v16l-6-4-6 4z" />,
+  export: <path d="M12 4v11M7 9l5-5 5 5M5 15v4h14v-4" />,
+  book: <path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z" />,
+  more: (
+    <>
+      <circle cx="6" cy="12" r="1.2" />
+      <circle cx="12" cy="12" r="1.2" />
+      <circle cx="18" cy="12" r="1.2" />
+    </>
+  ),
+  intervene: (
+    <>
+      <path d="M4 20l5-5M14 4l6 6-8.5 8.5-6-6z" />
+      <path d="M11 7l6 6" />
+    </>
+  ),
+  center: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="2.5" />
+    </>
+  ),
+  rename: <path d="M4 20h4L19 9l-4-4L4 16z" />,
+  layers: (
+    <>
+      <path d="M12 4l8 4-8 4-8-4z" />
+      <path d="M4 12l8 4 8-4M4 16l8 4 8-4" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17M12 3.5c2.6 2.4 2.6 14.6 0 17M12 3.5c-2.6 2.4-2.6 14.6 0 17" />
+    </>
+  ),
+  map: <path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2zM9 4v14M15 6v14" />,
+  terrain: <path d="M3 19l6-10 4 6 3-4 5 8z" />,
+  replay: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M10 8.5l5 3.5-5 3.5z" />
+    </>
+  ),
+  sliders: (
+    <>
+      <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="10" cy="17" r="2" />
+    </>
+  ),
+  close: <path d="M6 6l12 12M18 6L6 18" />,
+  chevron: <path d="M9 6l6 6-6 6" />,
+  flag: <path d="M6 21V4M6 4h11l-2 4 2 4H6" />,
+  city: <path d="M4 20V10l5-3v13M9 20V5l6 3v12M15 20v-8l5 2v6M3 20h18" />,
+  sparkle: <path d="M12 4l1.8 4.6L18.5 10l-4.7 1.6L12 16l-1.8-4.4L5.5 10l4.7-1.4z" />,
+  scroll: (
+    <>
+      <path d="M6 4h10l3 3v13H6z" />
+      <path d="M9 10h7M9 14h7" />
+    </>
+  ),
+  history: (
+    <>
+      <path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" />
+      <path d="M4 4v4.5h4.5M12 8v4l3 2" />
+    </>
+  ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 11v5M12 8h.01" />
+    </>
+  ),
+} satisfies Record<string, ReactNode>;
+
+export type IconName = keyof typeof PATHS;
+
+export function Icon({ name, size = 18, className }: { name: IconName; size?: number; className?: string }) {
+  return (
+    <svg
+      className={`icon${className ? ` ${className}` : ''}`}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {PATHS[name]}
+    </svg>
+  );
+}

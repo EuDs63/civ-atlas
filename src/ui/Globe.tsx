@@ -42,7 +42,6 @@ import {
   GLOBE_DEFAULT_LAT,
   GLOBE_K_MAX,
   GLOBE_K_MIN,
-  GLOBE_PANEL_SHIFT,
   GlobeGL,
   clampView,
   dragView,
@@ -159,8 +158,8 @@ export interface GlobeApi {
   /** 刚才那一下按下以后拖动过(拖过就不算单击) */
   dragged(): boolean;
   /**
-   * 转到某经纬度(度;纬度不给 = 不变),约 0.6 秒。转到的地方落在球心 —— 国家面板打开时球心在"去掉面板后的可见区域"正中
-   * (球心左移和转动同时进行,见 GlobeProps.panelOpen)
+   * 转到某经纬度(度;纬度不给 = 不变),约 0.6 秒。转到的地方落在球心 —— 宽屏上球心在侧栏卡片右边那一块的正中
+   * (见 GlobeProps.leftRoom)
    */
   flyTo(lon: number, lat?: number): void;
   /** 视图中心的经度(度) */
@@ -195,8 +194,8 @@ export interface GlobeProps {
   apiRef: MutableRefObject<GlobeApi | null>;
   /** 悬停在球上的主图像素(离开 = null) */
   onHover: (p: [number, number] | null) => void;
-  /** 右侧的国家面板开着:球心往左挪半个面板宽(约 0.6 秒过渡),球不被面板盖住 */
-  panelOpen?: boolean;
+  /** 左边被侧栏卡片挡住多宽(CSS 像素;没有 = 0):球心往右挪一半,落在剩下那一块的正中(宽度变了约 0.6 秒过渡) */
+  leftRoom?: number;
 }
 
 /** 调试 / 冒烟检查用 */
@@ -265,10 +264,8 @@ interface GlobeDebug {
 const SETTLE_MS = 150;
 /** 转动时手绘符号也只画第一级(全图就有的),停下来再补全 */
 const GLYPH_QUICK = false;
-/** 国家面板打开 / 关上时球心挪过去用多久(毫秒;和转到选中的国家一样长) */
+/** 左边挡住的宽度变了,球心挪过去用多久(毫秒;和转到选中的国家一样长) */
 const SHIFT_MS = 600;
-/** 舞台比这宽,国家面板才在右侧(再窄是底部抽屉,和 app.css 的窄屏断点一致) */
-const PANEL_SIDE_MIN_W = 760;
 /** 按下到松开移动不超过这么多(屏幕像素)算单击 */
 const CLICK_SLOP = 5;
 /** 点选符号的容差(CSS 像素) */
@@ -564,10 +561,9 @@ function civParamsOf(p: { world: World; raster: Raster; civ: Civ | null; geo?: C
  * "一个世界单位是几个 CSS 像素"(矢量线的线宽按它):平面主图同样缩放时的比例 ——
  * 缩到 1 倍以下跟着变细,放大到 1 倍以上不再变(线宽固定,放大后照样是细线)
  */
-function lineUnit(view: GlobeView, w: number, h: number, W: number): number {
-  // (半径和球心挪没挪无关)
-  const kEq = equivalentZoom(globeFrame(view, w, h).R, REF_MAP_CSS);
-  const kEq1 = equivalentZoom(globeFrame({ ...view, k: 1 }, w, h).R, REF_MAP_CSS);
+function lineUnit(view: GlobeView, w: number, h: number, W: number, shift: number): number {
+  const kEq = equivalentZoom(globeFrame(view, w, h, shift).R, REF_MAP_CSS);
+  const kEq1 = equivalentZoom(globeFrame({ ...view, k: 1 }, w, h, shift).R, REF_MAP_CSS);
   return (REF_MAP_CSS / W) * Math.min(kEq, kEq1);
 }
 
@@ -589,7 +585,7 @@ const sameKey = (a: readonly unknown[] | null, b: readonly unknown[]) => !!a && 
 
 // ---------------------------------------------------------------------------
 
-export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, startLon, apiRef, onHover, panelOpen = false }: GlobeProps) {
+export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, startLon, apiRef, onHover, leftRoom = 0 }: GlobeProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const glRef = useRef<HTMLCanvasElement>(null);
   const ovRef = useRef<HTMLCanvasElement>(null);
@@ -667,7 +663,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     placed: { marks: [], labels: [], verts: 0, glyphMs: 0 } as GlobePlaced,
     debug: { upload: {} as Record<string, number> },
     /**
-     * 球心横向挪了多少(CSS 像素;国家面板打开时往左 GLOBE_PANEL_SHIFT)、正在往哪挪(约 0.6 秒,和转动一样的缓动)
+     * 球心横向挪了多少(CSS 像素;宽屏往右挪侧栏卡片宽的一半)、正在往哪挪(约 0.6 秒,和转动一样的缓动)
      */
     shift: 0,
     shiftAnim: null as { from: number; to: number; t0: number; dur: number } | null,
@@ -683,11 +679,11 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   }).current;
 
   // 最新的 props(帧回调里读)
-  const props = useRef({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, panelOpen, hl });
-  props.current = { world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, panelOpen, hl };
+  const props = useRef({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, hl });
+  props.current = { world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, hl };
 
-  /** 国家面板开着、而且在右侧(窄屏上是底部抽屉) */
-  const panelSide = () => !!props.current.panelOpen && s.size.w > PANEL_SIDE_MIN_W;
+  /** 左边被侧栏卡片挡住的宽度(画布太窄就不让) */
+  const leftOf = () => (s.size.w > 2 * props.current.leftRoom ? props.current.leftRoom : 0);
   /** 这一帧的球(w、h 是什么像素单位,unit = 一个 CSS 像素是几个那种像素:球心挪的量跟着换算) */
   const frameOf = (view: GlobeView, w: number, h: number, unit = 1) => globeFrame(view, w, h, s.shift * unit);
 
@@ -912,7 +908,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     if (!gl || !p.terrain || s.hd.world !== p.world) return;
     const key = hdKey(p);
     const { w, h, dpr } = s.size;
-    const f = globeFrame(s.view, w, h);
+    const f = frameOf(s.view, w, h);
     const want = wantHdTexture({
       k: s.view.k,
       texel: (2 * Math.PI * f.R * dpr) / p.terrain.width,
@@ -950,8 +946,8 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     const L = s.selTex.lines;
     if (!L) return [];
     const look = selectionLook(props.current.style);
-    const kEq = equivalentZoom(globeFrame(s.view, w, h).R, REF_MAP_CSS);
-    const kEq1 = equivalentZoom(globeFrame({ ...s.view, k: 1 }, w, h).R, REF_MAP_CSS);
+    const kEq = equivalentZoom(frameOf(s.view, w, h).R, REF_MAP_CSS);
+    const kEq1 = equivalentZoom(frameOf({ ...s.view, k: 1 }, w, h).R, REF_MAP_CSS);
     const thin = 1 / Math.sqrt(Math.max(1, Math.min(kEq, kEq1)));
     if (L.kind === 'band') return [{ sets: [L.set], color: look.band, width: L.width * thin, blur: 8 * thin }];
     return [
@@ -1010,7 +1006,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       cpuDecor: !s.gl,
       graticule: p.graticule,
       lines: civLineStrokes(cp).concat(selStrokes(w, h)),
-      unit: lineUnit(s.view, w, h, p.world.width),
+      unit: lineUnit(s.view, w, h, p.world.width, s.shift),
       lineAlpha: 1 - s.replayMix,
       hl: s.hlA > 0.001 && (s.hlTex.strokes.length || s.hlTex.ring) ? { strokes: s.hlTex.strokes, ring: s.hlTex.ring, alpha: s.hlA } : null,
       placement: pl,
@@ -1039,15 +1035,15 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       const decay = Math.exp(-dt / 320);
       s.inertia.vx *= decay;
       s.inertia.vy *= decay;
-      const R = globeFrame(s.view, s.size.w, s.size.h).R;
+      const R = frameOf(s.view, s.size.w, s.size.h).R;
       s.view = dragView(s.view, R, s.inertia.vx * dt, s.inertia.vy * dt);
       if (Math.hypot(s.inertia.vx, s.inertia.vy) > 0.01) more = true;
       else s.inertia = null;
     }
     const p = props.current;
-    // 国家面板打开 / 关上:球心往左挪半个面板宽 / 挪回来(和转到选中的国家同样的时长、缓动,两样一起动);
-    // 窄屏上面板是底部抽屉,不挪
-    const shiftTo = panelSide() ? GLOBE_PANEL_SHIFT : 0;
+    // 宽屏:球心往右挪侧栏卡片宽的一半,落在卡片右边那一块的正中;卡片宽度变了(窗口拉宽拉窄)就挪过去,
+    // 和转到选中的国家同样的时长、缓动。窄屏不挪
+    const shiftTo = leftOf() / 2;
     if (!s.frames) {
       // 打开地球仪时面板已经开着:直接在挪好的位置上画第一帧
       s.shift = shiftTo;
@@ -1136,8 +1132,6 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       s.avoid = measureAvoid(root.closest('.app')).map((b) => [b[0] - rr.left, b[1] - rr.top, b[2] - rr.left, b[3] - rr.top]);
     }
     const reserved: Box[] = [...s.avoid];
-    // 国家面板(右侧,宽 360)盖住的地方也不放字
-    if (panelSide()) reserved.push([w + 2 * GLOBE_PANEL_SHIFT - 4, 0, w, h]);
     // 在动(转动、拖时间轴、文明回放):文字只排大字;停下 SETTLE_MS 以后再排全部
     const ct = getCivTime();
     const moving = busy || s.benchDrag || ct.playing || ct.scrubbing;
@@ -1274,7 +1268,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   }, []);
 
   // 贴图来源、开关变了:下一帧上传、重画
-  useEffect(invalidate, [terrain, terrainKey, replay, raster, graticule, style, civ, geo, sel, show, panelOpen, hl]);
+  useEffect(invalidate, [terrain, terrainKey, replay, raster, graticule, style, civ, geo, sel, show, leftRoom, hl]);
   useEffect(() => subscribeCivFeed(invalidate), []);
   // 时间轴一动:文明贴图、国界道路的矢量线换成那一年的
   useEffect(() => subscribeCivTime(invalidate), []);
@@ -1289,9 +1283,8 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     const { w, h } = s.size;
     const f = frameOf(s.view, w, h);
     const [x, y, d] = lonLatToScreen(s.view, f, lon, lat);
-    // 国家面板开着:右边被面板盖住的那一截不算看得见
-    const right = w - 60 + (panelSide() ? 2 * GLOBE_PANEL_SHIFT : 0);
-    if (d > 0.55 && x > 60 && x < right && y > 60 && y < h - 90) return;
+    // 左边被侧栏卡片挡住的那一截不算看得见
+    if (d > 0.55 && x > 60 + leftOf() && x < w - 60 && y > 60 && y < h - 90) return;
     s.inertia = null;
     s.fly = { from: s.view, to: clampView({ lon, lat: lat * 0.85, k: s.view.k }), t0: performance.now(), dur: 650 };
     invalidate();
@@ -1494,7 +1487,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       const dy = y - dr.y;
       if (Math.abs(x - dr.x0) + Math.abs(y - dr.y0) > CLICK_SLOP) s.moved = true;
       if (!s.moved) return;
-      const R = globeFrame(s.view, s.size.w, s.size.h).R;
+      const R = frameOf(s.view, s.size.w, s.size.h).R;
       s.view = dragView(s.view, R, dx, dy);
       const dt = Math.max(1, now - dr.t);
       // 速度(像素 / 毫秒)做一点平滑,松手时的惯性按它

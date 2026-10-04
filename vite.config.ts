@@ -1,9 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { fakeAiMiddleware } from './scripts/lib/fakeAiServer';
 
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
+
 export default defineConfig({
   base: './',
+  // 界面上显示的版本号(src/ui/version.ts)
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   plugins: [
     react(),
     // 开发时的假"我们的 AI"服务器(接口约定见 src/ai/providers/official.ts 文件头):网址加 aiServer=fake 使用;正式构建里没有

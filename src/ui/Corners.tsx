@@ -1,12 +1,13 @@
 /**
- * 地图四角的小字和按钮(界面骨架):地图铺满全屏,常驻界面只有这些。
+ * 浮在地图上的按钮(宽屏的主体界面在左边的侧栏里,见 Sidebar.tsx):
  *
- *   左上 WorldTitle   世界名(宋体)+ 一行副标"种子 7 · 现存 12 国 · 未干预 · 查看概览 ›",点一下打开概览
- *                     (窄屏:世界名 20px,副标缩成"种子 7 · 12 国 · 概览 ›")
- *   右上 TopActions   "搜索""改写""成书";写史书时前面是"正在撰写《某某通史》"+ 细进度条,写完变成"《某某通史》已完成 · 打开"
- *                     (窄屏:进度缩成按钮下面的一条小进度条;搜索框、改写框全宽展开在顶栏下方)。
+ *   右上 MapBar       图层分段按钮(政区 / 民族 / 地形 / 实景 / 更多图层)、导出、编年史;写史书时最前面是写作进度
+ *   右下 MapControls  "地球 / 平面"切换、放大、缩小(触屏不放 + −,窄屏整个不放)
+ *   窄屏(手机)还用这两样:
+ *   左上 WorldTitle   世界名 + 一行副标"种子 7，12 国",点一下打开概览
+ *   右上 TopActions   "搜索""改写""成书";写史书时进度缩成按钮下面的一条小进度条;搜索框、改写框全宽展开在顶栏下方。
  *                     改写 = 用一句话让 AI 改世界(Rewrite.tsx;没长出文明的世界也能用,只能改地形),和搜索框同一时间只开一个
- *   右下 MapControls  "地球仪 / 平面地图"切换、放大、缩小;右侧详情面板打开时整体左移(触屏不放 + −,窄屏整个不放)
+ *                     (宽屏的改写在侧栏"更多"里,见 Sidebar.tsx)
  *   底部 FirstHint    第一次打开时的一行操作提示,第一次拖动 / 缩放 / 点击之后不再出现(触屏换成"双指缩放"的说法)
  *   跟随鼠标 HoverCard 悬停小卡片(内容见 hoverInfo.ts)
  * 地图上的文字按钮不加底、只带描边(--halo),悬停出现浅灰底。
@@ -24,6 +25,11 @@ import { SearchBox } from './Search';
 import { RewriteBox } from './Rewrite';
 import type { HoverInfo } from './hoverInfo';
 import { useNarrow } from './device';
+import { Icon } from './icons';
+import { LayerPopover, type LayerPopoverProps } from './LayerPopover';
+import { ExportMenu, type ExportMenuProps } from './ExportMenu';
+import { openOverview } from './overviewStore';
+import { layerDef, type MapLayer } from './mapLayers';
 import './book.css';
 
 export function WorldTitle({ seed, civ, onOpen }: { seed: number | null; civ: Civ | null; onOpen: () => void }) {
@@ -38,12 +44,12 @@ export function WorldTitle({ seed, civ, onOpen }: { seed: number | null; civ: Ci
   // 窄屏放不下一整行:只留种子、国家数(干预数在概览里)
   const parts = narrow
     ? [seed !== null ? `种子 ${seed}` : '正在生成', civ ? (civ.viable ? `${alive} 国` : '没有文明') : null].filter(Boolean)
-    : [seed !== null ? `种子 ${seed}` : '正在生成', civ ? (civ.viable ? `现存 ${alive} 国` : '没有文明') : null, n ? `已干预 ${n} 处` : '未干预'].filter(Boolean);
+    : [seed !== null ? `种子 ${seed}` : '正在生成', civ ? (civ.viable ? `现存 ${alive} 国` : '没有文明') : null, n ? `干预了 ${n} 处` : null].filter(Boolean);
   return (
     <button className="world-title" data-act="overview" onClick={onOpen} onPointerDown={(e) => e.stopPropagation()}>
       <span className="wt-name">{title || '未命名世界'}</span>
       <span className="wt-sub">
-        {parts.join(' · ')} · <span className="wt-more">{narrow ? '概览 ›' : '查看概览 ›'}</span>
+        {parts.join('，')} <span className="wt-more">{narrow ? '概览 ›' : '查看概览 ›'}</span>
       </span>
     </button>
   );
@@ -94,6 +100,41 @@ export function TopActions({ canWrite, civ, world, busy = false }: { canWrite: b
   );
 }
 
+/** 右上图层分段按钮里直接列出的几个图层(其余的在"更多图层"里) */
+const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'realistic'];
+
+/** 宽屏右上:写作进度、图层分段按钮、导出、编年史 */
+export function MapBar({ layers, exp, civ }: { layers: LayerPopoverProps; exp: ExportMenuProps; civ: Civ | null }) {
+  const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
+  const inSeg = SEG_LAYERS.includes(layers.layer);
+  return (
+    <div className="map-bar" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
+      <BookChip />
+      <div className="glass seg-bar" role="radiogroup" aria-label="图层">
+        {SEG_LAYERS.map((id) => (
+          <button
+            key={id}
+            className={`seg-btn${layers.layer === id ? ' on' : ''}`}
+            role="radio"
+            aria-checked={layers.layer === id}
+            data-layer={id}
+            disabled={layers.disabled}
+            onClick={() => layers.onLayer(id)}
+          >
+            {layerDef(id).name}
+          </button>
+        ))}
+        <LayerPopover {...layers} trigger="seg" inSeg={inSeg} />
+      </div>
+      <ExportMenu {...exp} icon={<Icon name="export" size={16} />} />
+      <button className="glass mb-btn" data-act="chronicle" disabled={!civ || !civ.viable} onClick={() => openOverview('chronicle', { polity: null })} title="按年份看全部大事">
+        <Icon name="book" size={16} />
+        <span className="mb-label">编年史</span>
+      </button>
+    </div>
+  );
+}
+
 /** 右上的写作进度:"正在撰写《某某通史》"+ 80px 细进度条;写完"《某某通史》已完成 · 打开",点开读过就收起 */
 function BookChip() {
   const { job } = useBook();
@@ -137,18 +178,19 @@ export function MapControls({
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   return (
     <div className={`map-controls${shifted ? ' shifted' : ''}`} onPointerDown={stop} onDoubleClick={stop}>
-      <button className="mc-btn mc-globe globe-toggle" data-act="globe" onClick={onToggleGlobe} title={globeOn ? '回到平面地图' : '显示成可以转动的地球仪'}>
-        {globeOn ? '平面地图' : '地球仪'}
+      <button className="glass mc-btn mc-globe globe-toggle" data-act="globe" onClick={onToggleGlobe} title={globeOn ? '回到平面地图' : '显示成可以转动的地球仪'}>
+        <Icon name={globeOn ? 'map' : 'globe'} size={18} />
+        <span>{globeOn ? '平面' : '地球'}</span>
       </button>
       {zoom && (
-        <>
+        <div className="glass mc-zooms">
           <button className="mc-btn mc-zoom" data-act="zoom-in" onClick={() => onZoom(1.5)} title="放大" aria-label="放大">
             +
           </button>
           <button className="mc-btn mc-zoom" data-act="zoom-out" onClick={() => onZoom(1 / 1.5)} title="缩小" aria-label="缩小">
             −
           </button>
-        </>
+        </div>
       )}
     </div>
   );
@@ -173,7 +215,7 @@ export function markHintSeen() {
 
 export function FirstHint({ show, touch }: { show: boolean; touch?: boolean }) {
   if (!show) return null;
-  return <div className="first-hint">{touch ? '拖动地图 · 双指缩放 · 点国家看详情' : '拖动地图 · 滚轮缩放 · 点击国家查看详情'}</div>;
+  return <div className="first-hint">{touch ? '拖动地图，双指缩放，点国家看它的历史' : '拖动地图，滚轮缩放，点一个国家看它的历史'}</div>;
 }
 
 /** 悬停小卡片:跟着鼠标,靠右 / 靠下时翻到另一边 */

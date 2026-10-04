@@ -1,11 +1,11 @@
 /**
  * 地理实体(山脉、河流、湖泊、岛屿、荒漠、海 / 大洋 / 海湾)的面板(和国家面板同一套样子,零件见 panelParts.tsx):
  *
- *   顶部  "山脉 · 第 N 年"、关闭;名字(可改);一行"拉丁原形 Aldor Mountains · 按某族语感 · 设为中心"(东方风只写按哪族语感)
- *   数字  按种类挑拿得到的(panelData.ts 的 placeFacts):山脉 最高峰 / 长度 / 跨州;河 长度 / 流经州 / 源头海拔;
- *         湖 面积 / 湖面海拔;岛 面积 / 最高峰;荒漠 面积 / 年降水;海 离岸最远 / 最深处
- *   当年在哪些国家境内(海:沿岸有哪些国家;色块 + 国名,可点;河按流经的先后,其余按占的多少)
- *   底部  改名 / 名字由来 / 起名(AI 按当地语感起几个,点一个就改名)
+ *   顶部  名字(可改);一行"山脉，拉丁原形 Aldor Mountains，按某族语感"(东方风只写按哪族语感)、关闭
+ *   按钮  设为中心 / 改名 / 更多(让 AI 讲名字由来、让 AI 起名:按当地语感起几个,点一个就改名)
+ *   概况  按种类挑拿得到的数(panelData.ts 的 placeFacts):山脉 最高峰 / 长度 / 跨州;河 长度 / 流经州 / 源头海拔;
+ *         湖 面积 / 湖面海拔;岛 面积 / 最高峰;荒漠 面积 / 年降水;海 离岸最远 / 最深处;
+ *         当年在哪些国家境内(海:沿岸有哪些国家;色块 + 国名,可点;河按流经的先后,其余按占的多少)
  */
 import { useMemo, useState } from 'react';
 import type { Place } from '../gen/civ/types';
@@ -14,7 +14,9 @@ import { polityName } from '../gen/civ/growth';
 import { placeKeyOf } from '../gen/edits';
 import { NameEdit } from './NameEdit';
 import { areaText, kmText, metersText, ownersOf, placeFacts } from './panelData';
-import { AiBox, CenterLink, Foot, Link, PanelHead, Stats, SubLine, rgb, type DetailProps, type Stat, useRevealAi } from './panelParts';
+import { Act, Acts, AiBox, CenterAct, Link, MoreAct, PanelHead, Row, Stats, SubLine, rgb, type DetailProps, type Stat, useRevealAi } from './panelParts';
+import { AiMenuItem, MenuItem } from './PopMenu';
+import { Icon } from './icons';
 
 const PLACE_KIND: Record<Place['kind'], string> = {
   sea: '海',
@@ -74,9 +76,10 @@ export function PlacePanel({ civ, raw, raster, world, id, year, names }: DetailP
     if (p.kind === 'desert') num('年降水', f.rain, '毫米', (x) => `${Math.round(x)}`);
   }
 
+  const where = f.regions.length > 0 && (p.kind !== 'sea' || pols.length > 0);
   return (
     <div className="cp" data-place={id}>
-      <PanelHead tag={kind} year={year}>
+      <PanelHead>
         <NameEdit
           k={key}
           kind="place"
@@ -91,48 +94,51 @@ export function PlacePanel({ civ, raw, raster, world, id, year, names }: DetailP
         <SubLine
           className="ins-status"
           parts={[
+            kind,
             p.latin && (
               <>
                 拉丁原形 <span className="ins-latin">{p.latin}</span>
               </>
             ),
             namer ? `按${cultureLabel(namer)}语感` : p.kind === 'sea' ? null : '按通行语感',
-            <CenterLink world={world} civ={civ} sel={{ kind: 'place', id }} year={year} />,
           ]}
         />
       </PanelHead>
+      <Acts>
+        <CenterAct world={world} civ={civ} sel={{ kind: 'place', id }} year={year} />
+        <Act icon="rename" act="rename" onClick={() => setRenaming(true)}>
+          改名
+        </Act>
+        <MoreAct>
+          <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
+            让 AI 讲名字由来
+          </AiMenuItem>
+          <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="suggest" disabled={ai.busy} onClick={ai.suggestNow}>
+            让 AI 起名
+          </AiMenuItem>
+        </MoreAct>
+      </Acts>
       <div className="cp-body">
-        {stats.length > 0 && <Stats items={stats} />}
-        {f.regions.length > 0 && (p.kind !== 'sea' || pols.length > 0) && (
-          <div className="cp-grid cp-grid-top">
-            <span className="cp-k">{p.kind === 'river' ? '流经' : p.kind === 'sea' ? '沿岸' : '所在'}</span>
-            <span className="cp-links cp-chips">
-              {pols.length
-                ? pols.map((q) => (
-                    <span key={q.id} className="cp-chip">
-                      <i className="cp-sw" style={{ background: rgb(q.color) }} />
-                      <Link to={{ kind: 'polity', id: q.id }}>{polityName(q, year)}</Link>
-                    </span>
-                  ))
-                : peopled
-                  ? '部落地带'
-                  : '无人居住'}
-            </span>
-          </div>
+        {(stats.length > 0 || where) && (
+          <Stats items={stats}>
+            {where && (
+              <Row k={p.kind === 'river' ? '流经' : p.kind === 'sea' ? '沿岸' : '所在'} className="cp-links cp-chips">
+                {pols.length
+                  ? pols.map((q) => (
+                      <span key={q.id} className="cp-chip">
+                        <i className="cp-sw" style={{ background: rgb(q.color) }} />
+                        <Link to={{ kind: 'polity', id: q.id }}>{polityName(q, year)}</Link>
+                      </span>
+                    ))
+                  : peopled
+                    ? '部落地带'
+                    : '无人居住'}
+              </Row>
+            )}
+          </Stats>
         )}
         <AiBox ai={ai} aiRef={aiRef} />
       </div>
-      <Foot cols={3}>
-        <button className="cp-btn" data-act="rename" onClick={() => setRenaming(true)}>
-          改名
-        </button>
-        <button className="cp-btn" data-ain="explain" disabled={ai.busy} onClick={ai.ask}>
-          名字由来
-        </button>
-        <button className="cp-btn" data-ain="suggest" disabled={ai.busy} onClick={ai.suggestNow}>
-          起名
-        </button>
-      </Foot>
     </div>
   );
 }

@@ -1,0 +1,432 @@
+/*
+ * 左边的侧栏(Sidebar.tsx)和弹出的小菜单(PopMenu.tsx)。
+ * 宽屏:侧栏是浮在地图左边的一张圆角卡片,宽 --side-w(位置、宽度在 desktop.css 里按屏幕宽度定)。
+ * 顶上一块浅灰(世界名、按钮、搜索框),下面是白底,内容排成一组组圆角的行(和常见的地图应用一样)。
+ */
+.sidebar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--side-w);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border-right: 0.5px solid var(--line-strong);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  cursor: default;
+}
+.sidebar button {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---- 顶上:世界名、按钮、搜索框 ---- */
+.sb-head {
+  flex: none;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sb-world {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+}
+.sb-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: -4px 0 -4px -6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.sb-title:hover {
+  background: var(--hover-bg);
+}
+.sb-title > * {
+  max-width: 100%;
+}
+.sb-name {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-sub {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-acts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 小药丸按钮:存档、新世界、更多(存档的按钮在 SaveMenu 里,长一样) */
+.sb-pill,
+.sb-acts .save-btn,
+.sb-pill > .pm-btn {
+  height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--btn);
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.sb-pill.pm {
+  padding: 0;
+  background: transparent;
+}
+.sb-more > .pm-btn {
+  padding: 0 7px;
+}
+.sb-pill:not(.pm):hover:not(:disabled),
+.sb-acts .save-btn:hover,
+.sb-acts .save-btn.on,
+.sb-pill > .pm-btn:hover,
+.sb-pill > .pm-btn.on {
+  background: var(--hover-bg);
+  filter: brightness(0.94);
+}
+.sb-pill:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sb-world {
+  position: relative;
+}
+/* 存档菜单:铺满侧栏宽,挂在世界名下面 */
+.sb-acts .save {
+  position: static;
+}
+.sb-acts .save-menu {
+  left: 0;
+  right: 0;
+  width: auto;
+  max-width: none;
+  top: calc(100% + 8px);
+}
+
+.sb-more-wrap {
+  display: contents;
+}
+/* "用一句话改写世界"的框:浮在侧栏卡片右边、和卡片顶对齐;面板里"更多"的菜单也弹到卡片右边(.pm-side,
+   位置由 PopMenu 按按钮算好)。这时侧栏压在地图按钮上面 */
+.sidebar:has(.sb-rewrite),
+.sidebar:has(.pm-side) {
+  z-index: 8;
+}
+.sb-rewrite {
+  position: absolute;
+  top: -14px;
+  left: calc(100% + 28px);
+}
+.sb-rewrite .rw-box {
+  position: static;
+  max-width: calc(100vw - var(--side-room) - 14px);
+  border: 0;
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-float);
+  font-size: 13.5px;
+}
+.sb-rewrite .rw-unset .rw-link {
+  flex: none;
+  white-space: nowrap;
+}
+
+.sb-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--ink-2);
+}
+.sb-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+}
+.sb-search input::placeholder {
+  color: var(--ink-2);
+}
+.sb-search:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.sb-clear {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: var(--ink-3);
+  color: var(--panel-solid) !important;
+}
+
+/* ---- 下面:白底,一组组圆角的行 ---- */
+.sb-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-top: 0.5px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+.sb-home,
+.sb-body > .sb-sec {
+  padding: 14px 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.sb-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sb-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.sb-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--link) !important;
+  font-size: 13px;
+  font-weight: 500;
+}
+.sb-link:hover {
+  text-decoration: underline;
+}
+.sb-group {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: var(--btn);
+  overflow: hidden;
+}
+.sb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 0.5px solid var(--line);
+  background: transparent;
+  text-align: left;
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+.sb-row:last-child {
+  border-bottom: 0;
+}
+.sb-row:hover:not(:disabled),
+.sb-row.on {
+  background: var(--hover-bg);
+}
+.sb-row:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sb-sw {
+  width: 12px;
+  height: 12px;
+  border-radius: 3.5px;
+  flex: none;
+}
+.sb-ico {
+  color: var(--accent);
+  flex: none;
+}
+.sb-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sb-row-main b {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-row-main small {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-row-side {
+  flex: none;
+  font-size: 13px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sb-chev {
+  flex: none;
+  color: var(--ink-3);
+  margin-right: -4px;
+}
+.sb-row.ev {
+  align-items: baseline;
+  font-size: 14px;
+}
+.sb-year {
+  flex: none;
+  width: 3em;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.sb-ev-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sb-empty {
+  padding: 28px 18px;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+/* ---- 弹出的小菜单(PopMenu) ---- */
+.pm {
+  position: relative;
+}
+.pm-btn {
+  font: inherit;
+}
+.pm-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 210px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  animation: pm-in 0.12s ease-out;
+}
+.pm-left {
+  left: 0;
+}
+.pm-right {
+  right: 0;
+}
+@keyframes pm-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.pm-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pm-item .icon {
+  color: var(--ink-2);
+}
+.pm-item:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.pm-item:hover:not(:disabled) .icon,
+.pm-item:hover:not(:disabled) .pm-note {
+  color: inherit;
+  opacity: 0.85;
+}
+.pm-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.pm-text {
+  flex: 1;
+}
+.pm-note {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-left: 12px;
+}
+.pm-item:not(:has(.icon)) {
+  padding-left: 36px;
+}
+.pm-sep {
+  border: 0;
+  border-top: 0.5px solid var(--line);
+  margin: 4px 8px;
+}
+/* 菜单最底下一行灰色小字(版本号) */
+.pm-foot {
+  padding: 4px 9px 2px 36px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  user-select: text;
+}

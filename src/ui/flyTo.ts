@@ -1,7 +1,7 @@
 /**
  * 选中 → 地图飞过去(国家面板):算"飞到哪、放多大",App 按它逐帧改视图(0.6 秒,ease-out 三次方)。纯计算,不碰 DOM。
  *
- * - 国家:平移缩放到能看全当年的疆域,右边让出面板(窄屏:目标落在底部抽屉上方看得见的地方);城 / 州 / 地理实体:平移过去,缩放不变或适度放大。
+ * - 国家:平移缩放到能看全当年的疆域(窄屏:目标落在底部抽屉上方看得见的地方);城 / 州 / 地理实体:平移过去,缩放不变或适度放大。
  * - 'home'(选目标、下令之后):缩回整张图,中心经线不变。
  * - 等距圆柱按平移量飞;弯边投影(罗宾森……)转中央经线 + 上下平移;地球仪直接用它自己的 flyTo(经纬度)。
  */
@@ -20,11 +20,9 @@ import { sheetGeometry } from './gestures';
 export const FLY_MS = 600;
 export const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 
-/** 右侧面板占的宽度(340 + 右边距 20);窄屏(面板是底部抽屉)时不让 */
-export const PANEL_ROOM = 360;
-/** 看全疆域时上下留出的地方:世界名 / 提示条、时间轴 */
-const TOP_ROOM = 84;
-const BOTTOM_ROOM = 100;
+/** 看全疆域时上下留出的地方:右上的图层按钮 / 提示条、时间轴(宽屏左边让出侧栏卡片,见 sideRoom) */
+const TOP_ROOM = 64;
+const BOTTOM_ROOM = 104;
 /** 四周再留一点 */
 const MARGIN = 28;
 
@@ -141,6 +139,15 @@ export interface FlyGoal {
 export const NARROW_ROW_H = 92;
 export const NARROW_TOP_ROOM = 72;
 
+/**
+ * 宽屏左边浮着的侧栏卡片占掉的宽度:左边距 + 卡片 + 右边留空(和 desktop.css 的 --side-room 一致);
+ * 窄屏没有侧栏 = 0。sw = 舞台宽(铺满窗口,和视口一样宽)
+ */
+export function sideRoom(sw: number): number {
+  if (sw <= NARROW_MAX) return 0;
+  return 14 + (sw >= 1100 ? 372 : 340) + 14;
+}
+
 /** 面板开着时"看得见的地方"(舞台坐标):左、上、右、下 */
 export function freeArea(b: StageBox, panel: boolean): [number, number, number, number] {
   const narrow = b.sw <= NARROW_MAX;
@@ -149,8 +156,8 @@ export function freeArea(b: StageBox, panel: boolean): [number, number, number, 
     const [top, bottom] = panel ? sheetGeometry(b.sh, NARROW_ROW_H, NARROW_TOP_ROOM).free : [NARROW_TOP_ROOM, b.sh - NARROW_ROW_H - 24];
     return [0, top, b.sw, Math.max(top + 80, bottom)];
   }
-  const room = panel ? PANEL_ROOM : 0;
-  return [0, TOP_ROOM, b.sw - room, Math.max(TOP_ROOM + 80, b.sh - BOTTOM_ROOM)];
+  // 宽屏:地图铺满窗口,左边被侧栏卡片挡住的那一截不算
+  return [sideRoom(b.sw), TOP_ROOM, b.sw, Math.max(TOP_ROOM + 80, b.sh - BOTTOM_ROOM)];
 }
 
 /**

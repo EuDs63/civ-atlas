@@ -12,7 +12,7 @@
  * 读档结果、自动恢复、版本不同、存储满了之类的提示(saveStore 的 notify)显示在顶部的提示条上;
  * 打开分享链接时本地存过不同修改的"用链接里的 / 保留本地"也是提示条上的两个按钮(App 显示)。
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DEFAULT_PARAMS, type WorldParams } from '../gen/world';
 import { SHARE_WARN_LENGTH, TITLE_MAX, editCount, encodeShare, hasShareData, saveFileName, saveText, type SaveFile } from '../gen/savefile';
 import { GENERATOR_VERSION } from '../gen/edits';
@@ -39,6 +39,8 @@ export interface SaveMenuProps {
   onOpenText: (text: string, fileName?: string) => void;
   /** 打开"我的世界"里的一个 */
   onOpenStored: (id: string) => void;
+  /** 按钮上文字前面的小图标 */
+  icon?: ReactNode;
 }
 
 /** 调试 / 冒烟测试用:最近一次"存成文件" */
@@ -260,7 +262,7 @@ function WorldRow({ w, isCurrent, onOpen }: { w: StoredWorld; isCurrent: boolean
   );
 }
 
-export function SaveMenu({ ready, onOpenText, onOpenStored }: SaveMenuProps) {
+export function SaveMenu({ ready, onOpenText, onOpenStored, icon }: SaveMenuProps) {
   const [open, setOpen] = useState(false);
   const [naming, setNaming] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -274,17 +276,17 @@ export function SaveMenu({ ready, onOpenText, onOpenStored }: SaveMenuProps) {
   const keep = persistent();
   const full = storageIsFull();
 
-  // 点菜单外面就收起
+  // 点菜单外面就收起(在捕获阶段听:地图上的按钮条拦了冒泡,点旁边的按钮照样收起)
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('pointerdown', onDown, true);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('pointerdown', onDown, true);
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
@@ -354,6 +356,7 @@ export function SaveMenu({ ready, onOpenText, onOpenStored }: SaveMenuProps) {
   return (
     <div className="save" ref={rootRef}>
       <button className={`save-btn${open ? ' on' : ''}`} onClick={() => setOpen((o) => !o)} title="我的世界:自动存在浏览器里;也能存成文件、从文件打开">
+        {icon}
         存档
       </button>
       <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} data-testid="save-file-input" />

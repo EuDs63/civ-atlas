@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { isDoubleTap, pinchStep, sheetGeometry, sheetSnap } from '../src/ui/gestures';
-import { NARROW_ROW_H, NARROW_TOP_ROOM, PANEL_ROOM, freeArea } from '../src/ui/flyTo';
+import { NARROW_ROW_H, NARROW_TOP_ROOM, freeArea, sideRoom } from '../src/ui/flyTo';
 import { clampCurved, clampSphere, type StageBox } from '../src/ui/mapWrap';
 import { reserveCanvasBoxes } from '../src/render/civ/labels';
 import { sameBoxes } from '../src/ui/uiAvoid';
@@ -62,9 +62,12 @@ describe('底部抽屉', () => {
 describe('地图飞过去、抽屉开着时的平移范围', () => {
   const desk: StageBox = { sw: 1440, sh: 900, bw: 1800, bh: 900 };
   const phone: StageBox = { sw: 390, sh: 844, bw: 1688, bh: 844 };
-  it('宽屏照旧:右边让出面板,上下留出世界名和时间轴', () => {
-    expect(freeArea(desk, true)).toEqual([0, 84, 1440 - PANEL_ROOM, 800]);
-    expect(freeArea(desk, false)).toEqual([0, 84, 1440, 800]);
+  it('宽屏:左边让出浮着的侧栏卡片(详情也在里面);上下留出右上的按钮和时间轴', () => {
+    expect(sideRoom(1440)).toBe(400);
+    expect(sideRoom(1024)).toBe(368);
+    expect(sideRoom(390)).toBe(0);
+    expect(freeArea(desk, true)).toEqual([400, 64, 1440, 796]);
+    expect(freeArea(desk, false)).toEqual([400, 64, 1440, 796]);
   });
   it('窄屏:抽屉开着时是抽屉上方、顶栏下方那一截,左右不让', () => {
     const g = sheetGeometry(844, NARROW_ROW_H, NARROW_TOP_ROOM);

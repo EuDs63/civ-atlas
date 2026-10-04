@@ -1,14 +1,15 @@
 /**
- * 世界概览(点左上角的世界名打开):全屏浮层。
+ * 世界概览(点世界名、侧栏里的"全部 N 国""编年史""世界参数"打开):全屏浮层。
  *
- *   头部  世界名、"种子 7 · 当前 2679 年 · 未干预";汇总数字(国家 现存 / 共、民族、城镇、州,跟着时间轴的当前年份);
- *         AI 设置入口(AiMenu)、存档(SaveMenu)、导出(ExportMenu)、成书(收起概览 + 打开写史书窗口)、关闭
+ *   头部  世界名;一行"种子 7，当前 2679 年，未干预";一行汇总(现存几国、历来几国、民族、城镇、州,跟着时间轴的当前年份);
+ *         关闭。窄屏(手机)还有 AI 设置入口(AiMenu)、存档(SaveMenu)、导出(ExportMenu)、成书(收起概览 + 打开写史书窗口)——
+ *         宽屏这几样在侧栏和地图右上
  *   页签  国家(WorldOverviewCountries.tsx)/ 编年史(Chronicle.tsx)/ 我的干预(WorldOverviewInterventions.tsx)/
  *         创世(WorldOverviewGenesis.tsx:种子、新世界、世界参数、回放世界形成、改地形)
- *   底部  一行小字:源代码 · 隐私政策 · 用户协议(新标签页打开;网址在 links.ts)
- * 关闭:✕ / Esc / 点浮层外面。窄屏铺满全屏。开没开、在哪一页见 overviewStore.ts(别处用 openOverview(tab, opts) 打开某一页)。
+ *   底部  一行小字:源代码、隐私政策、用户协议(新标签页打开;网址在 links.ts)
+ * 关闭:右上角的关闭 / Esc / 点浮层外面。窄屏铺满全屏。开没开、在哪一页见 overviewStore.ts(别处用 openOverview(tab, opts) 打开某一页)。
  *
- * 存档、导出、AI 这三个菜单一直挂着(浮层关着时只是藏起来):导出做到一半收起概览,做完照样在顶部提示;
+ * 窄屏的存档、导出、AI 这三个菜单一直挂着(浮层关着时只是藏起来):导出做到一半收起概览,做完照样在顶部提示;
  * 别处(成书窗口、AI 功能)照样能打开 AI 设置。
  */
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
@@ -31,6 +32,9 @@ import { currentWorld, useSavesVersion } from './saveStore';
 import { closeOverview, setOverviewTab, useOverview, type OverviewTab } from './overviewStore';
 import type { Style } from './mapLayers';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
+import { useNarrow } from './device';
+import { Icon } from './icons';
+import { APP_VERSION } from './version';
 import './overview.css';
 
 export interface WorldOverviewProps {
@@ -96,6 +100,7 @@ export function WorldOverview(p: WorldOverviewProps) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   const nIv = edits.interventions.length;
   const ready = !!p.data && !p.generating;
+  const narrow = useNarrow();
   return (
     <div className="ov-root" hidden={!open}>
       <div className="ov-scrim" onClick={closeOverview} />
@@ -103,22 +108,26 @@ export function WorldOverview(p: WorldOverviewProps) {
         <header className="ov-head">
           {open ? <OverviewSummary civ={p.civ} seed={p.data ? p.data.world.params.seed : null} /> : <span className="ov-summary" />}
           <div className="ov-actions">
-            <AiMenu />
-            <SaveMenu ready={ready} onOpenText={p.onOpenText} onOpenStored={p.onOpenStored} />
-            <ExportMenu data={p.data} civ={p.civ} style={p.style} layer={p.dataLayer} />
-            <button
-              className="ov-btn ov-primary ov-book"
-              data-act="ov-book"
-              disabled={!p.civ || !p.civ.viable}
-              onClick={() => {
-                closeOverview();
-                openHistoryBook();
-              }}
-            >
-              成书
-            </button>
-            <button className="ov-x" data-act="ov-close" onClick={closeOverview} title="关闭" aria-label="关闭">
-              ✕
+            {narrow && (
+              <>
+                <AiMenu />
+                <SaveMenu ready={ready} onOpenText={p.onOpenText} onOpenStored={p.onOpenStored} />
+                <ExportMenu data={p.data} civ={p.civ} style={p.style} layer={p.dataLayer} />
+                <button
+                  className="ov-btn ov-primary ov-book"
+                  data-act="ov-book"
+                  disabled={!p.civ || !p.civ.viable}
+                  onClick={() => {
+                    closeOverview();
+                    openHistoryBook();
+                  }}
+                >
+                  成书
+                </button>
+              </>
+            )}
+            <button className="ov-x" data-act="ov-close" onClick={closeOverview} title="关闭(Esc)" aria-label="关闭">
+              <Icon name="close" size={14} />
             </button>
           </div>
         </header>
@@ -143,18 +152,18 @@ const ABOUT = [
   { id: 'terms', name: '用户协议', href: TERMS_URL },
 ];
 
-/** 底部一行小字:源代码 · 隐私政策 · 用户协议(新标签页打开) */
+/** 底部一行小字:源代码、隐私政策、用户协议(新标签页打开),最右边是版本号 */
 function AboutLinks() {
   return (
     <footer className="ov-about">
-      {ABOUT.map((l, i) => (
-        <span key={l.id}>
-          {i > 0 && <i aria-hidden="true">·</i>}
-          <a href={l.href} target="_blank" rel="noreferrer" data-link={l.id}>
-            {l.name}
-          </a>
-        </span>
+      {ABOUT.map((l) => (
+        <a key={l.id} href={l.href} target="_blank" rel="noreferrer" data-link={l.id}>
+          {l.name}
+        </a>
       ))}
+      <span className="ov-ver" data-version>
+        版本 {APP_VERSION}
+      </span>
     </footer>
   );
 }
@@ -211,35 +220,18 @@ function OverviewSummary({ civ, seed }: { civ: Civ | null; seed: number | null }
     for (const s of civ.settlements) if (populationAt(s, year) > 0) towns++;
     return { alive, founded, cultures, towns, regions: civ.regions.count };
   }, [civ, year]);
-  const sub = [seed !== null ? `种子 ${seed}` : '正在生成', civ ? `当前 ${year} 年` : null, n ? `已干预 ${n} 处` : '未干预'].filter(Boolean).join(' · ');
+  const sub = [seed !== null ? `种子 ${seed}` : '正在生成', civ ? `当前 ${year} 年` : null, n ? `已干预 ${n} 处` : '未干预'].filter(Boolean).join('，');
   return (
     <div className="ov-summary">
       <div className="ov-title">
         <span className="ov-name">{title || '未命名世界'}</span>
         <span className="ov-subline">{sub}</span>
+        {stats && (
+          <span className="ov-subline ov-stats">
+            现存 {stats.alive} 国（历来 {stats.founded} 国），{stats.cultures} 个民族，{stats.towns} 座城镇，{stats.regions} 州
+          </span>
+        )}
       </div>
-      {stats && (
-        <div className="ov-stats">
-          <div>
-            <b>
-              {stats.alive} / {stats.founded}
-            </b>
-            <span>国家 现存 / 共</span>
-          </div>
-          <div>
-            <b>{stats.cultures}</b>
-            <span>民族</span>
-          </div>
-          <div>
-            <b>{stats.towns}</b>
-            <span>城镇</span>
-          </div>
-          <div>
-            <b>{stats.regions}</b>
-            <span>州</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
