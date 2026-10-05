@@ -489,7 +489,7 @@
   height: 28px;
 }
 
-/* ==== 顶上:提示条(让开右上的按钮,最多两行)、数据图层的图例 ==== */
+/* ==== 顶上:提示条(让开右上的按钮,最多三行)、数据图层的图例 ==== */
 .app.phone .toast {
   left: calc(12px + var(--safe-l));
   right: calc(12px + 44px + 8px + var(--safe-r));
@@ -520,10 +520,12 @@
 .app.phone .toast-text:has(.toast-more) .toast-main {
   -webkit-line-clamp: 1;
 }
+/* 小字最多两行(窄屏一行放不下"自动存在这个浏览器里……"这样的说明,截成省略号就看不全了) */
 .app.phone .toast-more {
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .app.phone .toast-bar {
   width: 64px;
