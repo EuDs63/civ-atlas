@@ -3,13 +3,15 @@
  *
  * 信息页(按时间轴当前那一年;没立国 = 立国那年的样子,已亡 = 亡国前的样子):
  *   顶部  颜色块、国名(可改,输入时预览国号变迁)、"国家，1045 年立国"、关闭
- *   按钮  干预历史(主操作;窄屏点了底部抽屉展开)/ 设为中心 / 改名 / 更多(在编年史中查看、让 AI 写国史、让 AI 讲名字由来)
+ *   按钮  干预历史(主操作;窄屏点了底部抽屉展开)/ 设为中心 / 改名 / 更多(在编年史中查看、让 AI 写国史、让 AI 讲名字由来;
+ *         有主体民族时还有讲它的族名由来、给它起族名)
  *   概况  国都、疆域(历年州数的小柱图,和概览"国家"表同一份)、人口(境内城镇)、主体民族、邻国(可点),
  *         来历 / 结局 / 历任国都(有才写)
  *   朝代  改朝换代过才有:一朝一行(新的在上),当前那一朝标"当前";点一行 = 时间轴跳到它开始的那年
  *   大事  到当前年份为止最近 5 条(可点:跳到那一年,地图上闪出事发地);"全部 N 件"打开概览的编年史页、只看这国的"全部"
  *         (N 和那里"全部"的条数一样,连同历代君主继位)
- *   名字由来(AI 释名,点了才出;先"生成中…"再出结果;没设置 AI 时一行提示 + "设置 AI")、AI 起名(改名时的入口)
+ *   名字由来(AI 释名,点了才出;先"生成中…"再出结果;没设置 AI 时一行提示 + "设置 AI")、AI 起名(改名时的入口);
+ *         主体民族的族名由来、起族名接在后面
  *
  * 顶部、按钮、概况、小柱图、大事这些零件在 panelParts.tsx,城 / 地理实体 / 州的面板(CityPanel、PlacePanel、RegionPanel)
  * 用的是同一套。
@@ -150,7 +152,7 @@ function CountryHead({ civ, raw, id, year, names, shared }: CountryPanelProps & 
   );
 }
 
-function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: Polity; shared: Shared }) {
+function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanelProps & { p: Polity; shared: Shared }) {
   const { ai } = shared;
   const shownYear = shownYearOf(p, year, civ.endYear);
   const alive = polityAlive(p, year);
@@ -170,6 +172,9 @@ function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: 
   const folks = [...folk].sort((a, b) => b[1] - a[1]);
   const top = folks.length ? civ.cultures[folks[0][0]] : civ.cultures[p.culture];
   const share = folks.length && n > 1 ? Math.round((folks[0][1] / n) * 100) : null;
+  // 主体民族(占这国一半以上的州):"更多"里讲它的族名由来、给它起族名(和州面板民族一行的同一套),结果也在面板最下面
+  const mainFolk = folks.length && folks[0][1] * 2 >= n ? folks[0][0] : null;
+  const folkAi = useRevealAi({ civ, raw, raster, target: mainFolk !== null ? { kind: 'culture', id: mainFolk } : null, lazy: true, what: '族名' });
   const near = useMemo(() => [...neighborsAt(civ, id, shownYear).near], [civ, id, shownYear]);
   // 疆域小柱图:和概览"国家"表里的同一份(0 年到结束年份均匀取样的州数),按这国最多时的州数定高
   const hist = polityHistory(civ);
@@ -217,6 +222,16 @@ function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: 
           <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
             让 AI 讲名字由来
           </AiMenuItem>
+          {mainFolk !== null && (
+            <>
+              <AiMenuItem icon={<Icon name="sparkle" size={16} />} act="culture-explain" disabled={folkAi.ai.busy} onClick={folkAi.ai.ask}>
+                让 AI 讲{cultureLabel(civ.cultures[mainFolk])}的族名由来
+              </AiMenuItem>
+              <AiMenuItem icon={<Icon name="rename" size={16} />} act="culture-suggest" onClick={folkAi.ai.suggest}>
+                让 AI 给{cultureLabel(civ.cultures[mainFolk])}起族名
+              </AiMenuItem>
+            </>
+          )}
         </MoreAct>
       </Acts>
       <div className="cp-body">
@@ -320,6 +335,7 @@ function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: 
           }
         />
         <AiBox ai={ai} aiRef={shared.aiRef} />
+        <AiBox ai={folkAi.ai} aiRef={folkAi.aiRef} />
       </div>
     </>
   );

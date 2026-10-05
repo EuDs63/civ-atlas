@@ -2671,6 +2671,23 @@ for (const style of ['realistic', 'fantasy']) {
     if (!renamed) errs.push('AI 起名:选中候选、确定后地图上的城名没有变');
     if (!stale.includes('写于改名前')) errs.push('AI 起名:改名后释名没有标"写于改名前"');
   }
+  // 国家"更多"里也能讲主体民族的族名由来(和州面板民族一行的同一套),写在面板最下面
+  let folkItem = '';
+  let folkNote = '';
+  const pol = ((await page.evaluate('window.__wfPickables()')) as Pick[]).find((q) => q.kind === 'polity');
+  if (pol) {
+    await page.keyboard.press('Escape');
+    await page.evaluate((id) => (window as any).__wfSelect('polity', id), pol.id);
+    await page.waitForTimeout(600);
+    await page.click('.inspector [data-act=more]');
+    folkItem = await page.locator('.pm-menu [data-act=culture-explain]').innerText({ timeout: 3000 }).catch(() => '');
+    await page.click('.pm-menu [data-act=culture-explain]', { timeout: 3000 }).catch(() => {});
+    await page.waitForSelector('.inspector .cp-ai .ain-note:not(.writing) .ain-text', { timeout: 10000 }).catch(() => null);
+    folkNote = (await page.locator('.inspector .cp-ai').last().innerText().catch(() => '')).replace(/\n/g, ' ');
+  }
+  console.log(`国家「${pol?.text}」的"更多"里「${folkItem.replace(/\n/g, ' ')}」→ 面板最下面「${folkNote.slice(0, 40)}…」`);
+  if (!/^让 AI 讲.+族的族名由来/.test(folkItem) || !folkNote.includes('族名由来') || !folkNote.includes('测试用假 AI'))
+    errs.push(`国家面板:"更多"里讲主体民族的族名由来不对(「${folkItem}」→「${folkNote.slice(0, 60)}」)`);
   await page.evaluate(() => localStorage.clear());
 }
 
