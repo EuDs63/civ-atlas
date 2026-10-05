@@ -5,7 +5,7 @@
  *   颜色块 + 国名(宋体)+ 小字"相邻 / 本国";迁都时是本国城市的名牌。鼠标移到可选目标上(地图上或名牌上)名牌反色。
  *   点名牌或地图上的目标 = 下令(PolityPick.accept)。顶部提示条"选择与某国结盟的国家 · N 年起生效 · 取消 · Esc"。
  * - 下了令、正在推演:地图还压着(这期间不接受点击),只留本国和对象的名牌;顶部提示条"正在重新推演 X–3000 年"带进度。
- *   推完:收起面板、地图缩回整张图(App 从生效年份接着放,提示"…,已从 X 年起重新推演"带撤销)。
+ *   推完:面板留着、回到信息页;选对象时缩回了整张图的,地图飞回这个国家(App 从生效年份接着放,提示"…,已从 X 年起重新推演"带撤销)。
  * - 平时选中国家:国都画一个直径 24 的主色圆环,旁边写"竹影城 · 国都" —— 默认写在圆环下面,压着地图上的字(国名、城名、地名)
  *   就换到上面 / 右边 / 左边……挑一处不压字的(地图停稳了再挑,拖动、飞行时跟着圆环走)。
  * - 名牌、圆环每帧按"世界坐标 → 屏幕坐标"重新摆(平移、缩放、左右无限拖动、弯边投影、地球仪都对;转到球背面的不显示);
@@ -16,9 +16,9 @@ import type { Civ } from '../gen/civ/types';
 import type { World } from '../gen/world';
 import { capitalAt, polityAlive } from '../gen/civ/growth';
 import { ownersAt } from '../gen/civ/timeline';
-import { clearSelection, getSelection, useCivTime, useSelection } from './civView';
+import { getSelection, useCivTime, useSelection } from './civView';
 import { getPolityPick, nameAt, setPickHover, setPolityPick, usePickHover, usePolityPick } from './Interventions';
-import { endRun, getPanel, requestFly, usePanel } from './panelStore';
+import { endRun, getPanel, requestFly, setPanelTab, setSheet, usePanel } from './panelStore';
 import { clearToast, showToast } from './toastStore';
 import { isCoarse } from './device';
 import { sideRoom } from './flyTo';
@@ -328,7 +328,8 @@ export function TargetLayer({ civ, world, toClient, resim, generating, labelAt }
     };
   }, [resim, generating, endYear]);
 
-  // ---- 推完:面板收起、地图缩回整张图(App 已经从生效年份接着放);没推起来(比如和改地形撞上)也别卡住 ----
+  // ---- 推完:面板留着、回到信息页(手机上回到半高);选对象时地图缩回了整张图,飞回这个国家(App 已经从生效年份接着放)。
+  //      重推后这个国家没了(稳定键指不到),App 已经取消了选中,面板自然关掉;没推起来(比如和改地形撞上)也别卡住 ----
   const sawBusy = useRef(false);
   useEffect(() => {
     if (!run) {
@@ -342,8 +343,9 @@ export function TargetLayer({ civ, world, toClient, resim, generating, labelAt }
     if (sawBusy.current) {
       sawBusy.current = false;
       endRun();
-      clearSelection();
-      requestFly('home');
+      setPanelTab('info');
+      setSheet('half');
+      if (run.target?.kind === 'polity' && getSelection().sel) requestFly('sel');
       return;
     }
     const timer = window.setTimeout(() => {

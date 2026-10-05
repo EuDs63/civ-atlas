@@ -1595,7 +1595,7 @@ for (const style of ['realistic', 'fantasy']) {
     orders = await page.locator('.timebar .tb-order').count();
     // 已生效的提示(带撤销)
     ivToast = await toastText(page, 'resim-done');
-    await page.click('.timebar button.tb-play'); // 暂停,下面重新点开这个国家读面板(下了令面板就收起了)
+    await page.click('.timebar button.tb-play'); // 暂停,下面在地图上重新点开这个国家读面板
     const again = await reopen();
     // 还活着:没有"结局"一行,小字是"N 年立国"
     aliveAfter = again ? (again.includes('结局') ? `还是亡了(${again.replace(/\n/g, ' ').slice(0, 80)})` : '至今还在') : '';
@@ -1660,7 +1660,8 @@ for (const style of ['realistic', 'fantasy']) {
 
 // 国家面板:点国家 → 暂停、地图飞过去(疆域在面板左边)、国都圆环;信息页(三格数字、朝代条、疆域、邻国、相关事件、2×2 按钮)
 // → 干预历史 → 干预页(生效年份、六条命令)→ 宣战:只有相邻国家浮出名牌 → Esc 回到干预页 → 结盟:地图压暗、提示条"选择与…结盟的国家"、
-// 悬停名牌反色、悬停国土"点击选择" → 点名牌 → 面板收起、"…结盟,已从 N 年起重新推演"带撤销、从 N 年接着放 → 撤销 →"已撤销"
+// 悬停名牌反色、悬停国土"点击选择" → 点名牌 → 推演时面板藏起,推完面板还在(回到信息页)、地图飞回这国、"…结盟,已从 N 年起重新推演"带撤销、
+// 从 N 年接着放 → 撤销 →"已撤销"
 {
   type Plate = { kind: string; id: number; text: string; note: string; x: number; y: number; on: boolean; self: boolean };
   type Pick = { kind: string; id: number; text: string; x: number; y: number };
@@ -1690,6 +1691,9 @@ for (const style of ['realistic', 'fantasy']) {
   let hoverVerdict = '';
   let doneToast = '';
   let panelAfter = -1;
+  let infoAfter = false;
+  let kPick = NaN;
+  let kAfter = NaN;
   let tlAfter = '';
   let playingAfter = false;
   let undoToast = '';
@@ -1722,6 +1726,7 @@ for (const style of ['realistic', 'fantasy']) {
     await page.waitForTimeout(900);
     dim = await page.locator('.tp-dim').count();
     allyPlates = await plates();
+    kPick = await page.evaluate(() => (window as any).__wfView.k);
     pickToast = await toastText(page, 'pick');
     hiddenWhilePicking = (await insHidden(page));
     const tgt = allyPlates.filter((p) => !p.self).sort((a, b) => Math.abs(a.x - vp.width / 2) - Math.abs(b.x - vp.width / 2))[0];
@@ -1742,9 +1747,15 @@ for (const style of ['realistic', 'fantasy']) {
       await page.waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev, { timeout: 20000 }).catch(() => null);
       await page.waitForTimeout(300);
       doneToast = await toastText(page, 'resim-done');
-      panelAfter = await page.locator('.inspector').count();
+      // 提示条 7 秒就收,后面要点它的"撤销":先记下时间轴、停下播放(放着的时候每一步都慢),再看面板和地图
       tlAfter = await page.locator('.timebar .tb-year').innerText().catch(() => '');
       playingAfter = (await page.locator('.timebar .tb-play.on').count()) > 0;
+      if (playingAfter) await page.click('.timebar .tb-play').catch(() => {});
+      panelAfter = await page.locator('.inspector:not(.hidden)').count();
+      infoAfter = await page.locator('.inspector .cp[data-tab=info]').isVisible().catch(() => false);
+      // 选对象时地图缩回了整张图:推完飞回这个国家
+      await page.waitForFunction((k0) => (window as any).__wfView.k > k0 + 0.01, kPick, { timeout: 3000 }).catch(() => null);
+      kAfter = await page.evaluate(() => (window as any).__wfView.k);
       // 撤销
       const prev2 = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
       await page.click('.toast[data-toast=resim-done] .toast-act').catch(() => {});
@@ -1758,7 +1769,7 @@ for (const style of ['realistic', 'fantasy']) {
     `国家面板:点「${pol?.text}」→ 飞过去 ${flown};国都圆环 ${mark};面板「${info.slice(0, 160)}…」;` +
       `干预页 ${cmds} 条命令、「${cmdText}」;宣战名牌 ${warNames.join('、') || '—'}(邻国 ${near.join('、') || '—'});Esc 回到干预页 ${backToCmd};` +
       `结盟:压暗 ${dim}、名牌 ${allyPlates.length} 个、提示条「${pickToast}」、面板藏起 ${hiddenWhilePicking}、悬停「${hoverVerdict}」、名牌反色 ${plateOn};` +
-      `点名牌 →「${doneToast}」,面板 ${panelAfter} 个,时间轴 ${tlAfter}${playingAfter ? '(在放)' : '(停着)'};撤销 →「${undoToast}」`,
+      `点名牌 →「${doneToast}」,面板 ${panelAfter} 个${infoAfter ? '(信息页)' : ''},地图 k ${kPick.toFixed(2)} → ${kAfter.toFixed(2)},时间轴 ${tlAfter}${playingAfter ? '(在放)' : '(停着)'};撤销 →「${undoToast}」`,
   );
   if (!pol) errs.push('国家面板:没找到能点的国家');
   else {
@@ -1775,7 +1786,8 @@ for (const style of ['realistic', 'fantasy']) {
     if (!/点击选择/.test(hoverVerdict)) errs.push(`国家面板:选目标时悬停可选的国家没有"点击选择"(${hoverVerdict})`);
     if (!plateOn) errs.push('国家面板:鼠标移到可选目标上名牌没有反色');
     if (!/^.+与.+结盟,已从 \d+ 年起重新推演( \d+ 年时它叫.+)? 撤销$/.test(doneToast)) errs.push(`国家面板:下令后没有"…结盟,已从 N 年起重新推演"带撤销(${doneToast})`);
-    if (panelAfter !== 0) errs.push('国家面板:下令后面板没有收起');
+    if (panelAfter !== 1 || !infoAfter) errs.push(`国家面板:下令推完面板应留着、回到信息页(面板 ${panelAfter} 个,信息页 ${infoAfter})`);
+    if (!(kAfter > kPick + 0.01)) errs.push(`国家面板:结盟推完地图没有飞回这个国家(k ${kPick.toFixed(2)} → ${kAfter.toFixed(2)})`);
     const ty = Number(tlAfter.match(/\d+/)?.[0] ?? NaN);
     if (!(ty >= Y - 1 && ty <= Y + 40) || !playingAfter) errs.push(`国家面板:下令后没有从生效年份接着放(${tlAfter}${playingAfter ? '' : ',没在放'})`);
     if (!/^已撤销/.test(undoToast)) errs.push(`国家面板:撤销后没有"已撤销"(${undoToast})`);

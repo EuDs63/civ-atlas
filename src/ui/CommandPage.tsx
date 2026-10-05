@@ -4,8 +4,8 @@
  *   立即生效  保护(不会被灭亡)、禁止分裂、禁止扩张
  *   选择对象  结盟(任意国家)、宣战(仅相邻国家)、迁都(本国城市)→ 在地图上选(地图压暗、可选的对象浮出名牌,见 TargetPlates.tsx)
  *
- * 不可用的命令变淡,说明换成原因。下了令:面板收起,顶部提示条"正在重新推演 X–3000 年",推完"有鹰王朝禁止扩张,已从 X 年起重新推演"带撤销,
- * 从 X 年接着放(App.tsx、TargetPlates.tsx)。命令的数据和推演沿用 editsStore / gen/edits 的干预。
+ * 不可用的命令变淡,说明换成原因。下了令:推演时面板先藏起,顶部提示条"正在重新推演 X–3000 年",推完"有鹰王朝禁止扩张,已从 X 年起重新推演"带撤销,
+ * 面板回到信息页,从 X 年接着放(App.tsx、TargetPlates.tsx)。命令的数据和推演沿用 editsStore / gen/edits 的干预。
  */
 import { useMemo, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
@@ -72,7 +72,7 @@ export function CommandPage({ civ, id, year }: { civ: Civ; id: number; year: num
     return null;
   };
 
-  /** 下令:面板收起、后台重推;这条已经下过 = 原因 */
+  /** 下令:面板先藏起、后台重推;这条已经下过 = 原因 */
   const order = (v: Intervention, target: { kind: 'polity' | 'settlement'; id: number } | null): string | null => {
     const blocked = editBlock(interventionKeys(v));
     if (blocked) return blocked;
