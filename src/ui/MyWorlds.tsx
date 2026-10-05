@@ -11,7 +11,7 @@
  * 存、读、列都在 saveStore.ts;打开一个世界(生成 + 套上修改)由 App 做。一个世界都不剩时 App 直接进新建。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteWorld, duplicateWorld, listWorlds, loadWorld, notify, persistent, renameWorld, useSavesVersion, type StoredWorld } from './saveStore';
+import { deleteWorld, duplicateWorld, listWorlds, loadWorld, notify, persistent, renameWorld, restoreWorld, useSavesVersion, type StoredWorld } from './saveStore';
 import { downloadSave } from './SaveMenu';
 import { copyNotes } from '../ai/library';
 import { Icon } from './icons';
@@ -160,15 +160,11 @@ function WorldCard({
   onOpen: () => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const [arm, setArm] = useState(false);
   /** 长按:按下的计时器;长按开了菜单以后,松手那一下的点击不算打开 */
   const press = useRef<{ t: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
   const longFired = useRef(false);
   useEffect(() => {
-    if (!menuOpen) {
-      setArm(false);
-      return;
-    }
+    if (!menuOpen) return;
     const onDown = (e: PointerEvent) => {
       if (!root.current?.contains(e.target as Node)) onMenu(false);
     };
@@ -184,11 +180,6 @@ function WorldCard({
       window.removeEventListener('keydown', onKey, true);
     };
   }, [menuOpen, onMenu]);
-  useEffect(() => {
-    if (!arm) return;
-    const t = setTimeout(() => setArm(false), 3000);
-    return () => clearTimeout(t);
-  }, [arm]);
   useEffect(
     () => () => {
       if (press.current) clearTimeout(press.current.t);
@@ -319,16 +310,29 @@ function WorldCard({
           )}
           <hr className="pm-sep" />
           <button
-            className={`pm-item red${arm ? ' arm' : ''}`}
+            className="pm-item red"
             data-act="world-delete"
-            onClick={() => {
-              if (!arm) return setArm(true);
-              onMenu(false);
-              deleteWorld(w.id);
-            }}
+            onClick={act(() => {
+              // 点一下就删,不再问;提示条上的"撤销"兜底(提示条还在的时候点,放回原处)
+              const gone = deleteWorld(w.id);
+              // 别的页面里已经删掉了(这一页的列表还没跟上):没有可撤销的
+              if (!gone) return notify({ kind: 'ok', text: `「${name}」已在别的页面里删掉了` });
+              notify({
+                kind: 'ok',
+                text: `已删除「${name}」`,
+                action: {
+                  label: '撤销',
+                  act: 'world-undelete',
+                  onClick: () => {
+                    if (restoreWorld(gone)) notify(null);
+                    else notify({ kind: 'error', text: '没能放回去', more: ['浏览器存储已满'] });
+                  },
+                },
+              });
+            })}
           >
             <Icon name="trash" size={16} />
-            <span className="pm-text">{arm ? '再点一次删除' : '删除'}</span>
+            <span className="pm-text">删除</span>
           </button>
         </div>
       )}

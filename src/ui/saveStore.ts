@@ -550,14 +550,54 @@ function writeSave(id: string, save: SaveFile, meta?: Meta): boolean {
   return ok;
 }
 
-/** 删掉一个存档(连同缩略图、AI 写的东西)。删的是正在看的世界:不再自动存它 */
-export function deleteWorld(id: string) {
+/**
+ * 删掉一个存档(连同缩略图、AI 写的东西)。删的是正在看的世界:不再自动存它。
+ * 返回撤销用的那份;存档本身已经不在了(别的页面里删掉了)= null,没有可撤销的
+ */
+export function deleteWorld(id: string): DeletedWorld | null {
+  const kv = store();
+  const keys: [string, string][] = [];
+  for (const p of [PREFIX, THUMB, META, NOTES]) {
+    const v = kv.get(p + id);
+    if (v !== null) keys.push([p + id, v]);
+  }
   removeKeys(id);
   if (current?.id === id) {
     current = null;
     stopThumb();
   }
   changed();
+  return keys.some(([k]) => k === PREFIX + id) ? { id, keys } : null;
+}
+
+/** 删掉的世界删之前的样子(撤销删除用):存档、缩略图、打开记录、AI 写的史书和名字由来,各自原来存的字符串 */
+export interface DeletedWorld {
+  id: string;
+  keys: [string, string][];
+}
+
+/**
+ * 撤销删除:把删之前的几样原样写回,"我的世界"里回到原来的位置(按最近打开 / 修改的时间排)。
+ * 别的页面里还开着它、删了以后又自动存过的:以那边新存的为准,只补回现在没有的。
+ * 存档、打开记录(没建完的世界靠它记着还在建)、AI 写的东西有一样写不下(浏览器存储满了)
+ * = false,这次写回的都撤掉;缩略图写不下就算了(再打开会重画)
+ */
+export function restoreWorld(d: DeletedWorld): boolean {
+  const kv = store();
+  const wrote: string[] = [];
+  for (const p of [PREFIX, META, NOTES, THUMB]) {
+    const k = p + d.id;
+    const v = d.keys.find((e) => e[0] === k)?.[1];
+    if (v === undefined || kv.get(k) !== null) continue;
+    if (kv.set(k, v)) wrote.push(k);
+    else if (p !== THUMB) {
+      for (const w of wrote) kv.remove(w);
+      changed();
+      return false;
+    }
+  }
+  changed();
+  return true;
 }
 
 /** 给存档起名(改名);当前世界还没存过的(打开的链接),顺手存下来 */

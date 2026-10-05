@@ -172,7 +172,7 @@ import { astRoom, useAstOpen } from './astPanel';
 import { PREVIEW_EDIT_BLOCK, exitPreview, getAssistant, sameInBoth, setTrialRunner, syncAssistantWorld, useAssistantPreview } from './assistantStore';
 import { Globe, getGlobeOn, setGlobeOn, useGlobeOn, type GlobeApi } from './Globe';
 import { setupAi } from '../ai/setup';
-import { ToastBar, clearToast, showToast } from './Toast';
+import { ToastBar, clearToast, showToast, useToastOpen } from './Toast';
 import { DRAFT_SEG, FirstHint, HoverCard, MapBar, MapControls, PhoneButtons, SEG_LAYERS, hintSeen, markHintSeen } from './Corners';
 import { Sidebar } from './Sidebar';
 import { PhoneSheet } from './PhoneSheet';
@@ -1301,11 +1301,13 @@ export function App() {
     if (home || !t || !cur || cur.id !== t.id) return;
     if (isStored(t.id) && new URLSearchParams(location.search).get('w') !== t.id) writeWorldUrl(t);
   }, [v, home]);
-  // 我的世界里一个都不剩了(删光了、别的页面里删掉了):直接新建
+  // 我的世界里一个都不剩了(删光了、别的页面里删掉了):直接新建。
+  // 刚删掉的是最后一个、提示条上还能"撤销"时先停在这儿,提示收起了(没点撤销)再新建
+  const undeleting = useToastOpen('save', 'world-undelete');
   useEffect(() => {
-    if (home && !listWorlds().length) startDraft();
+    if (home && !undeleting && !listWorlds().length) startDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [home, v]);
+  }, [home, v, undeleting]);
   // 把 .json 拖进页面 = 从文件打开
   const [dropping, setDropping] = useState(false);
   const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');

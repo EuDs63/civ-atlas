@@ -494,6 +494,78 @@ describe('浏览器存储(saveStore)', () => {
     expect(saveStore.duplicateWorld('wnothere001')).toBeNull();
   });
 
+  it('删除后撤销:存档、缩略图、AI 写的东西原样放回,列表里回到原来的位置;存不下 = 说没放回去', () => {
+    const fake = new FakeStorage();
+    useStorage(fake);
+    const a = openWorld(7, { title: '苍澜界', edits: EDITS });
+    fake.setItem(`wenming-ditu:thumb:${a}`, 'data:image/jpeg;base64,AAAA');
+    putNote(a, NOTE);
+    tick();
+    const b = openWorld(8, { title: '赤霄纪' });
+    const order = saveStore.listWorlds().map((w) => w.id);
+    const before = new Map(fake.map);
+    const gone = saveStore.deleteWorld(a)!;
+    expect(saveStore.listWorlds().map((w) => w.id)).toEqual([b]);
+    expect([...fake.map.keys()].some((k) => k.endsWith(a))).toBe(false);
+    expect(saveStore.restoreWorld(gone)).toBe(true);
+    expect(saveStore.listWorlds().map((w) => w.id)).toEqual(order);
+    expect(new Map(fake.map)).toEqual(before);
+    expect(saveStore.loadWorld(a)).toMatchObject({ thumb: 'data:image/jpeg;base64,AAAA' });
+    expect(saveStore.loadWorld(a)?.save.edits).toEqual(EDITS);
+    expect(listNotes(a)).toEqual([NOTE]);
+
+    // 删了以后别的世界占满了存储:存档写不回去就不留半个(缩略图之类也不留)
+    const again = saveStore.deleteWorld(a)!;
+    let used = 0;
+    for (const [k, v] of fake.map) used += k.length + v.length;
+    fake.cap = used + 10;
+    expect(saveStore.restoreWorld(again)).toBe(false);
+    expect([...fake.map.keys()].some((k) => k.endsWith(a))).toBe(false);
+    expect(saveStore.listWorlds().map((w) => w.id)).toEqual([b]);
+  });
+
+  it('撤销删除碰上别的页面:那边删了 = 没有可撤销的;那边又存过 = 以那边为准只补缺的;打开记录写不下 = 整个不放回', () => {
+    const fake = new FakeStorage();
+    useStorage(fake);
+    const a = openWorld(7, { title: '苍澜界', edits: EDITS });
+    fake.setItem(`wenming-ditu:thumb:${a}`, 'data:image/jpeg;base64,AAAA');
+    putNote(a, NOTE);
+    tick();
+    const b = openWorld(8, { title: '赤霄纪' });
+    const key = (p: string) => `${p}${a}`;
+    const size = (ks: string[]) => ks.reduce((n, k) => n + k.length + (fake.getItem(k) ?? '').length, 0);
+    const used = () => [...fake.map].reduce((n, [k, v]) => n + k.length + v.length, 0);
+
+    // 删了以后别的页面(那边还开着)又自动存了一版:撤销不盖掉那一版,只补回缩略图、AI 写的东西这些没有的
+    const gone = saveStore.deleteWorld(a)!;
+    const newer = gone.keys.find(([k]) => k === key('wenming-ditu:world:'))![1].replace('苍澜界', '苍澜界二');
+    fake.setItem(key('wenming-ditu:world:'), newer);
+    expect(saveStore.restoreWorld(gone)).toBe(true);
+    expect(fake.getItem(key('wenming-ditu:world:'))).toBe(newer);
+    expect(saveStore.loadWorld(a)).toMatchObject({ thumb: 'data:image/jpeg;base64,AAAA' });
+    expect(listNotes(a)).toEqual([NOTE]);
+    expect(fake.getItem(key('wenming-ditu:meta:'))).not.toBeNull();
+
+    // 存档写得下、打开记录写不下:整个不放回(不留一个"看着建完了"的半截)
+    const must = [key('wenming-ditu:world:'), key('wenming-ditu:meta:'), key('civ-atlas:ai-notes:')];
+    const mustSize = size(must);
+    const again = saveStore.deleteWorld(a)!;
+    fake.cap = used() + mustSize - 3;
+    expect(saveStore.restoreWorld(again)).toBe(false);
+    expect([...fake.map.keys()].some((k) => k.endsWith(a))).toBe(false);
+    // 只差缩略图写不下:照样放回,缩略图再打开会重画
+    fake.cap = used() + mustSize + 3;
+    expect(saveStore.restoreWorld(again)).toBe(true);
+    expect(fake.getItem(key('wenming-ditu:thumb:'))).toBeNull();
+    expect(saveStore.listWorlds().map((w) => w.id)).toContain(a);
+    fake.cap = Infinity;
+
+    // 别的页面里已经删掉了(这一页还显示着):再删 = 清掉剩下的,没有可撤销的
+    fake.removeItem(`wenming-ditu:world:${b}`);
+    expect(saveStore.deleteWorld(b)).toBeNull();
+    expect([...fake.map.keys()].some((k) => k.endsWith(b))).toBe(false);
+  });
+
   it('复制 AI 写的东西:只在内存里的也带上;原来那份存在浏览器里、复制的存不下 = 说没存成', () => {
     // 隐私模式:都只在内存里,照样带上,不算失败
     useStorage(throwing);

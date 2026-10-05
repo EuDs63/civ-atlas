@@ -11,7 +11,7 @@ import { clearToast, useToast, type ToastAction } from './toastStore';
 // 各种状态里提示条之外的样式(首次打开时四角先藏着、史书进度条的"还没回字")
 import './states.css';
 
-export { clearToast, getToast, peekToast, showToast, useToast, type Toast, type ToastInput, type ToastKind } from './toastStore';
+export { clearToast, getToast, peekToast, showToast, useToast, useToastOpen, type Toast, type ToastInput, type ToastKind } from './toastStore';
 
 export function ToastBar() {
   const t = useToast();

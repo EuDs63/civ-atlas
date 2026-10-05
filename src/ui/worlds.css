@@ -245,9 +245,6 @@
 .mw-menu .pm-item.red:hover:not(:disabled) .icon {
   color: #fff;
 }
-.mw-menu .pm-item.red.arm {
-  background: color-mix(in srgb, var(--err) 12%, transparent);
-}
 .mw-foot {
   flex: none;
   margin-top: auto;

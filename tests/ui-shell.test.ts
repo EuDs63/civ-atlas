@@ -65,6 +65,14 @@ describe('顶部提示条', () => {
     clearToast('save');
     expect(getToast()?.id).toBe('terrain');
   });
+  it('带"撤销"的已完成照常排最前:它几秒就收,压在警告下面就一眼都看不到', () => {
+    vi.useFakeTimers();
+    showToast({ id: 'storage', kind: 'warn', text: '没能自动存档:浏览器存储已满' });
+    showToast({ id: 'save', kind: 'ok', text: '已删除「苍澜界」', action: { label: '撤销', onClick: () => {} } });
+    expect(getToast()?.id).toBe('save');
+    vi.advanceTimersByTime(7100);
+    expect(getToast()?.id).toBe('storage');
+  });
   it('两个按钮(二选一):按顺序排,只给 action 的老调用照旧', () => {
     const picked: string[] = [];
     showToast({
