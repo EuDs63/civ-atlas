@@ -8,7 +8,7 @@
  */
 import { generateWorld, DEFAULT_PARAMS } from '../src/gen/world';
 import { rasterize } from '../src/gen/raster';
-import { generateCiv } from '../src/gen/civ';
+import { generateCiv, planetTempo } from '../src/gen/civ';
 import { Biome } from '../src/gen/biomes';
 import { ownersAt } from '../src/gen/civ/timeline';
 import { HABITABLE_SUIT } from '../src/gen/civ/cultures';
@@ -60,15 +60,17 @@ let worstFrame = 0;
 let worstLabels = 0;
 for (const c of cases) {
   for (const seed of [3, 99]) {
-    const t0 = performance.now();
     const { terrain, ...pc } = c;
+    // 改过地形的世界要原来星球的扩张节拍:和 worker 一样事先记下(新建时先生成的就是没改的星球),不算进耗时
+    const tempo = terrain ? (planetTempo({ ...DEFAULT_PARAMS, ...pc, seed }) ?? null) : undefined;
+    const t0 = performance.now();
     const w = generateWorld({ ...DEFAULT_PARAMS, ...pc, seed }, undefined, terrain);
     const t1 = performance.now();
     const r = rasterize(w, 1);
     const t2 = performance.now();
     // 文明:按 progress 回调的时间点拆出"宜居度 + 划州"两步
     const marks: [string, number][] = [];
-    const civ = generateCiv(w, {}, (stage) => marks.push([stage, performance.now()]));
+    const civ = generateCiv(w, { tempo }, (stage) => marks.push([stage, performance.now()]));
     const t3 = performance.now();
     const civMs = t3 - t2;
     const habReg = (marks.find((m) => m[0] === '文明')?.[1] ?? t3) - t2;

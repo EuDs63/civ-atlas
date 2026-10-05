@@ -381,9 +381,11 @@ export interface CulturePlanParams {
   cultures: CivParams['cultures'];
   pace: number;
   birthSpan: number;
+  /** 扩张节拍(走一个标准路程要几年,不含 pace):给了就用它,不按这个世界标定(改过地形的世界用原来星球的节拍,见 index.ts 的 planetTempo) */
+  tempo?: number;
 }
 
-/** 定民族:数量、发源地、类型、扩张性、诞生年份,并按世界标定"走一步要几年"。可居州一个都没有时返回 null */
+/** 定民族:数量、发源地、类型、扩张性、诞生年份,并标定"走一步要几年"(给了 tempo 就用它)。可居州一个都没有时返回 null */
 export function planCultures(world: World, habitat: Habitat, regions: Regions, p: CulturePlanParams): CultureModel | null {
   const seed = world.params.seed;
   const base = subSeed(seed, 'civ-culture');
@@ -478,7 +480,7 @@ export function planCultures(world: World, habitat: Habitat, regions: Regions, p
     cost: costTable(T, cultures, seed),
     passed: new Uint8Array(cultures.length * R),
   };
-  model.spreadYears = calibrate(model) / Math.max(1e-3, p.pace);
+  model.spreadYears = (p.tempo ?? calibrate(model)) / Math.max(1e-3, p.pace);
   fixBirths(model);
   return model;
 }

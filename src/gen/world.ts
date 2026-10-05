@@ -91,6 +91,11 @@ export interface World {
   maxElevation: number;
   /** 作者放的火山(阶段 4 改地形):每座的峰顶地块,手绘风画火山符号;没有 = 空 */
   volcanoes: number[];
+  /**
+   * 生成时套上的地形修改(清理过,按先后);没改地形 = 不给。
+   * 推文明时看它:改过地形的世界,扩张节拍按没改地形时的同一颗星球定(gen/civ/index.ts 的 planetTempo)
+   */
+  terrain?: TerrainOp[];
 }
 
 export type Progress = (stage: string, pct: number) => void;
@@ -340,6 +345,7 @@ export function generateWorld(params: WorldParams, progress: Progress = () => {}
     history,
     maxElevation,
     volcanoes: ops.length ? volcanoPeaks(mesh, water, elevation, ops) : [],
+    ...(ops.length ? { terrain: ops.slice() } : {}),
   };
 }
 

@@ -10,11 +10,12 @@
  *   ⑥ 人物                 people.ts              → people(历代君主、战争里的统帅;按推出来的历史排,不改历史)
  *
  * 阶段 4 干预(params.interventions,interventions.ts):带着干预从第 0 年整段重推;干预年份之前和不干预时逐字节一致。
+ * 阶段 4 改地形(world.terrain):扩张节拍按没改地形时的同一颗星球定(planetTempo),只有改动附近的历史跟着地形变。
  *
  * 随机数一律从 subSeed(seed, 'civ-…') 取(见 rand.ts),不用 Math.random。
  */
-import type { Progress, World } from '../world';
-import type { ChangeLog, Civ, CivParams, Culture, Place, Polity, Route, Settlement } from './types';
+import { generateWorld, type Progress, type World, type WorldParams } from '../world';
+import type { ChangeLog, Civ, CivParams, Culture, Habitat, Place, Polity, Route, Settlement } from './types';
 import { computeHabitat } from './habitat';
 import { buildRegions, emptyRegions } from './regions';
 import { CivSim } from './sim';
@@ -45,24 +46,46 @@ export const DEFAULT_CIV_PARAMS: CivParams = {
 const MIN_HABITABLE_SUIT = 1;
 const MIN_HABITABLE_FRAC = 0.02;
 
+/** 陆地有几块、能不能有文明(可居的地方够不够) */
+function viability(world: World, habitat: Habitat): { land: number; viable: boolean } {
+  let land = 0;
+  let habitable = 0;
+  for (let i = 0; i < world.mesh.n; i++) {
+    if (world.water[i] !== 0) continue;
+    land++;
+    if (habitat.suitability[i] >= MIN_HABITABLE_SUIT) habitable++;
+  }
+  return { land, viable: land > 0 && habitable >= land * MIN_HABITABLE_FRAC };
+}
+
+/**
+ * 一颗星球的扩张节拍:民族走一个"标准路程"要几年(不含 pace;cultures.ts 的 calibrate),按**没改地形**的这组世界参数生成、标定。
+ * 节拍是整个世界一起标定的(到第 3000 年约九成可居州有人住):改过地形的世界要是按改后的地形重新标定,
+ * 远海放一座小岛也会把全世界的扩张都拨快或拨慢,各处的历史全跟着错开。所以改过地形的世界沿用原来星球的节拍,
+ * 只有改动附近(和受它牵连)的历史跟着地形变。
+ * 要多生成一遍没改过的地形;worker 按参数缓存,经 CivParams.tempo 传给 generateCiv。
+ * 没改过的星球长不出文明 = undefined(改过的世界按它自己标定)
+ */
+export function planetTempo(params: WorldParams, civ: Partial<CivParams> = {}): number | undefined {
+  const p: CivParams = { ...DEFAULT_CIV_PARAMS, ...civ };
+  const world = generateWorld(params);
+  const habitat = computeHabitat(world);
+  if (!viability(world, habitat).viable) return undefined;
+  const regions = buildRegions(world, habitat, { regionArea: p.regionArea });
+  const model = planCultures(world, habitat, regions, { cultures: p.cultures, pace: 1, birthSpan: p.birthSpan ?? BIRTH_SPAN });
+  return model?.spreadYears;
+}
+
 export function generateCiv(world: World, params: Partial<CivParams> = {}, progress: Progress = () => {}): Civ {
   const p: CivParams = { ...DEFAULT_CIV_PARAMS, ...params };
   const n = world.mesh.n;
 
   progress('宜居度', 0);
   const habitat = computeHabitat(world);
-
-  let land = 0;
-  let habitable = 0;
-  for (let i = 0; i < n; i++) {
-    if (world.water[i] !== 0) continue;
-    land++;
-    if (habitat.suitability[i] >= MIN_HABITABLE_SUIT) habitable++;
-  }
+  const { land, viable } = viability(world, habitat);
 
   progress('划分州', 0.3);
   const regions = land > 0 ? buildRegions(world, habitat, { regionArea: p.regionArea }) : emptyRegions(n);
-  const viable = land > 0 && habitable >= land * MIN_HABITABLE_FRAC;
 
   progress('文明', 0.8);
   const R = regions.count;
@@ -72,7 +95,9 @@ export function generateCiv(world: World, params: Partial<CivParams> = {}, progr
   //    同一个引擎、同一本日志
   const sim = new CivSim(R);
   const birthSpan = p.birthSpan ?? BIRTH_SPAN;
-  const model = viable ? planCultures(world, habitat, regions, { cultures: p.cultures, pace: p.pace, birthSpan }) : null;
+  // 改过地形:扩张节拍沿用没改地形时的同一颗星球(planetTempo);没改 = 按这个世界自己标定
+  const tempo = viable && world.terrain?.length ? (p.tempo === undefined ? planetTempo(world.params, p) : (p.tempo ?? undefined)) : undefined;
+  const model = viable ? planCultures(world, habitat, regions, { cultures: p.cultures, pace: p.pace, birthSpan, tempo }) : null;
   const pm = model ? planPolities(world, model, { polities: p.polities, pace: p.pace }) : null;
   // 阶段 4 干预(interventions.ts):事件最先预约(同一刻里先于别的一切事件,干预之前的历史一字不差)
   const iv = pm ? scheduleInterventions(sim, world.params.seed, p.interventions) : null;

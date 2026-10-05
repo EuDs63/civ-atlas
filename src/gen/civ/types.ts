@@ -337,7 +337,8 @@ export interface Civ {
   viable: boolean;
   /**
    * 民族扩张的时间标定:走一个"标准路程"(平地、普通地形、扩张性 1)要多少年。
-   * 按世界自动标定(默认到第 3000 年约九成可居州有人住),CivSim.fromCiv 接着推时要用。
+   * 按世界自动标定(默认到第 3000 年约九成可居州有人住;改过地形的世界按没改地形时的同一颗星球标定,见 index.ts 的 planetTempo),
+   * CivSim.fromCiv 接着推时要用。
    */
   spreadYears?: number;
   /**
@@ -434,6 +435,11 @@ export interface CivParams {
   birthSpan?: number;
   /** 阶段 4 干预(gen/edits.ts 的 Intervention;推演前先清理)。不给 / 空 = 不干预 */
   interventions?: readonly Intervention[];
+  /**
+   * 改过地形的世界用的扩张节拍:planetTempo(同样的世界参数)的结果,调用方缓存了传进来,省得每次多生成一遍没改过的地形;
+   * null = 没改过的星球长不出文明(按这个世界自己标定)。不给 = 现算。没改地形的世界不看它
+   */
+  tempo?: number | null;
 }
 
 // ---- 对外函数的签名(实现分别在 index.ts / timeline.ts / polities.ts) ----
