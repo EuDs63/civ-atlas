@@ -7,7 +7,9 @@
  *          搜索框里有字:搜索结果(点一条 = 选中它,地图飞过去)
  *          地图上选中了东西:它的详情(Inspector:国家 / 城 / 地理实体 / 州的面板)
  *          什么都没选:整个世界(WorldHome:国家按大小排、最近大事、我的干预、这颗星球)
- * 新建世界这一步左边是另一张卡片(NewWorld.tsx)。
+ * 收起:卡片右上角的侧栏图标 → 卡片往左滑走,左上角留一个小按钮(侧栏图标 + 世界名),点它滑回来;记在浏览器里(sideStore.ts)。
+ *       收起时选中了东西,卡片弹出来显示它,取消选中又收回去;收起时搜索框跟着卡片一起收起。
+ * 新建世界这一步左边是另一张卡片(NewWorld.tsx),不收起。
  *
  * 窄屏(手机)不用这个侧栏:同样的内容放进底部的世界卡片(PhoneSheet.tsx),这里的零件(搜索、世界名、"更多"菜单、整个世界)两边共用。
  */
@@ -33,6 +35,7 @@ import { AiMenuItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
 import { APP_VERSION } from './version';
 import { rgb } from './panelParts';
+import { collapseSide, expandSide, useSide } from './sideStore';
 import './sidebar.css';
 
 export interface SidebarProps {
@@ -68,23 +71,51 @@ const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
 export function Sidebar(p: SidebarProps) {
   const { sel } = useSelection();
   const s = useSearch(p.civ);
+  const side = useSide();
+  /** 收起了(弹出来显示选中的东西时不算):卡片滑到左边外面,换成左上角的小按钮 */
+  const hidden = side.collapsed && !side.peek;
   return (
-    <aside className="sidebar" aria-label="侧栏" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
-      <header className="sb-head">
-        <BackHome onClick={p.onHome} />
-        <WorldHead {...p} />
-        <SearchField s={s} civ={p.civ} />
-      </header>
-      <div className="sb-body">
-        {s.searching ? (
-          <SearchResults q={s.q} hits={s.hits} active={s.active} onActive={s.setActive} onPick={s.pick} />
-        ) : sel && p.civ && p.raw && p.data ? (
-          <div className="inspector-slot" ref={p.inspectorSlot} />
-        ) : (
-          <WorldHome {...p} />
-        )}
-      </div>
-    </aside>
+    <>
+      <aside
+        className={`sidebar${hidden ? ' side-hidden' : ''}`}
+        aria-label="侧栏"
+        aria-hidden={hidden || undefined}
+        ref={(el) => el?.toggleAttribute('inert', hidden)}
+        onPointerDown={stop}
+        onDoubleClick={stop}
+        onClick={stop}
+      >
+        <header className="sb-head">
+          <BackHome onClick={p.onHome} />
+          <button className="sb-collapse" data-act="side-collapse" aria-label="收起侧栏" data-tip="收起侧栏" onClick={collapseSide}>
+            <Icon name="sidebar" size={19} />
+          </button>
+          <WorldHead {...p} />
+          <SearchField s={s} civ={p.civ} />
+        </header>
+        <div className="sb-body">
+          {s.searching ? (
+            <SearchResults q={s.q} hits={s.hits} active={s.active} onActive={s.setActive} onPick={s.pick} />
+          ) : sel && p.civ && p.raw && p.data ? (
+            <div className="inspector-slot" ref={p.inspectorSlot} />
+          ) : (
+            <WorldHome {...p} />
+          )}
+        </div>
+      </aside>
+      {hidden && <SideOpen civ={p.civ} data={p.data} />}
+    </>
+  );
+}
+
+/** 卡片收起后左上角的小按钮:侧栏图标 + 世界名,点它卡片滑回来 */
+function SideOpen({ civ, data }: Pick<SidebarProps, 'civ' | 'data'>) {
+  const { title } = useWorldInfo(civ, data);
+  return (
+    <button className="side-open glass" data-act="side-expand" aria-label={`展开侧栏:${title}`} onPointerDown={stop} onDoubleClick={stop} onClick={expandSide}>
+      <Icon name="sidebar" size={19} />
+      <span className="side-open-name">{title}</span>
+    </button>
   );
 }
 

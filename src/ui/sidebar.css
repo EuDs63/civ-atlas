@@ -27,11 +27,113 @@
 
 /* ---- 顶上:世界名、按钮、搜索框 ---- */
 .sb-head {
+  position: relative;
   flex: none;
   padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* ---- 收起 / 展开(宽屏;sideStore.ts) ----
+   卡片右上角("‹ 我的世界"那一行的右边)一个侧栏图标,鼠标停上去在它左边提示"收起侧栏";
+   收起 = 卡片往左滑出去,左上角留一个毛玻璃小按钮(侧栏图标 + 世界名),点它滑回来 */
+.sidebar {
+  transition: transform 0.2s ease;
+}
+.sidebar.side-hidden {
+  transform: translateX(calc(-100% - 2 * var(--side-gap, 14px)));
+  visibility: hidden;
+  transition:
+    transform 0.2s ease,
+    visibility 0s linear 0.2s;
+}
+.sb-collapse {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+}
+.sb-collapse:hover,
+.sb-collapse:focus-visible {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+.sb-collapse::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: 3px;
+  right: 36px;
+  z-index: 9;
+  padding: 4px 9px;
+  border: 0.5px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--panel-solid);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+.sb-collapse:hover::after,
+.sb-collapse:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 0.12s ease 0.4s,
+    visibility 0s linear 0.4s;
+}
+.side-open {
+  position: absolute;
+  left: var(--side-gap, 14px);
+  top: var(--side-gap, 14px);
+  z-index: 5;
+  height: 36px;
+  max-width: 260px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px 0 10px;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: wf-reveal 0.2s ease-out;
+}
+.side-open:hover {
+  background: var(--panel-solid);
+}
+.side-open .icon {
+  flex: none;
+}
+.side-open-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar.side-hidden,
+  .app.has-side .bottom-row {
+    transition: none;
+  }
+  .side-open {
+    animation: none;
+  }
 }
 .sb-world {
   display: flex;

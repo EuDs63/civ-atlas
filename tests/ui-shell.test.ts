@@ -1,11 +1,14 @@
 /**
- * 界面骨架的纯逻辑:图层 ↔ (画风, 数据图层, 国家 / 民族开关) 的换算、网址里的图层、深浅主题;顶部提示条的 store。
+ * 界面骨架的纯逻辑:图层 ↔ (画风, 数据图层, 国家 / 民族开关) 的换算、网址里的图层、深浅主题;顶部提示条的 store;
+ * 宽屏左边侧栏卡片的收起 / 展开。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAP_LAYERS, layerDark, layerDef, layerFromUrl, layerOf } from '../src/ui/mapLayers';
 import { _resetToasts, clearToast, getToast, peekToast, showToast } from '../src/ui/toastStore';
 import { closeOverview, getOverview, openOverview } from '../src/ui/overviewStore';
-import { getChronicle, setChronicle } from '../src/ui/civView';
+import { clearSelection, getChronicle, getSelection, setChronicle, setSelection } from '../src/ui/civView';
+import { collapseSide, expandSide, getSide, setSideHold } from '../src/ui/sideStore';
+import { sideRoom } from '../src/ui/flyTo';
 
 describe('图层换算', () => {
   it('每个图层换成设置再换回来还是它自己', () => {
@@ -119,5 +122,56 @@ describe('世界概览', () => {
     expect(getChronicle().polity).toBe(2);
     closeOverview();
     expect(getChronicle().polity).toBe(null);
+  });
+});
+
+describe('侧栏收起', () => {
+  afterEach(() => {
+    clearSelection();
+    setSideHold(false);
+    expandSide();
+  });
+  it('收起:卡片占掉的宽度只剩左边距(和 desktop.css 的 --side-room 一致);窄屏照旧是 0;展开回到原来', () => {
+    expect(getSide()).toEqual({ collapsed: false, peek: false });
+    expect(sideRoom(1440)).toBe(400);
+    collapseSide();
+    expect(getSide()).toEqual({ collapsed: true, peek: false });
+    expect(sideRoom(1440)).toBe(14);
+    expect(sideRoom(1024)).toBe(14);
+    expect(sideRoom(390)).toBe(0);
+    expandSide();
+    expect(sideRoom(1440)).toBe(400);
+    expect(sideRoom(1024)).toBe(368);
+  });
+  it('收起时选中了东西:卡片弹出来(让出它的宽度);取消选中又收回去', () => {
+    collapseSide();
+    setSelection({ kind: 'polity', id: 3 });
+    expect(getSide().peek).toBe(true);
+    expect(sideRoom(1440)).toBe(400);
+    setSelection({ kind: 'settlement', id: 5 });
+    expect(getSide().peek).toBe(true);
+    clearSelection();
+    expect(getSide()).toEqual({ collapsed: true, peek: false });
+    expect(sideRoom(1440)).toBe(14);
+  });
+  it('弹出来时点收起:收回去,选中的留着;再点同一个又弹出来;展开着选中不算弹出', () => {
+    collapseSide();
+    setSelection({ kind: 'polity', id: 3 });
+    collapseSide();
+    expect(getSide().peek).toBe(false);
+    expect(getSelection().sel).toEqual({ kind: 'polity', id: 3 });
+    expect(sideRoom(1440)).toBe(14);
+    setSelection({ kind: 'polity', id: 3 });
+    expect(getSide().peek).toBe(true);
+    expandSide();
+    setSelection({ kind: 'polity', id: 4 });
+    expect(getSide()).toEqual({ collapsed: false, peek: false });
+  });
+  it('新建世界这一步:左边是新建世界的卡片,收起着也照常让出它', () => {
+    collapseSide();
+    setSideHold(true);
+    expect(sideRoom(1440)).toBe(400);
+    setSideHold(false);
+    expect(sideRoom(1440)).toBe(14);
   });
 });

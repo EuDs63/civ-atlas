@@ -147,6 +147,7 @@ import { getPolityPick, interventionActorThen, interventionDoneText, setPickHove
 import { Inspector } from './Inspector';
 import { TargetLayer } from './TargetPlates';
 import { FLY_MS, curvedFly, easeOutCubic, flatFly, selectionFocus, selectionKey, sideRoom, phoneFree, type FlyGoal } from './flyTo';
+import { setSideHold, useSide } from './sideStore';
 import { getPanel, setWorldSheet, usePanel } from './panelStore';
 import { closeOverview } from './overviewStore';
 import { NewWorld } from './NewWorld';
@@ -400,6 +401,9 @@ export function App() {
   const { stage, base: stageBase } = useStage();
   const draft = stage === 'draft';
   const home = stage === 'home';
+  // 宽屏左边的卡片收起了(sideStore.ts):新建世界那一步左边是新建世界的卡片,不算收起(sideRoom 照常让出它)
+  const sideUi = useSide();
+  setSideHold(stage !== 'world');
   /** 正在打开 / 已经打开的世界(生成完按它套上修改、交给自动存) */
   const targetRef = useRef<Target | null>(route.target);
   /** 新建中的名字(卡片上的输入框;打开没建完的世界时是它存的名字) */
@@ -2416,7 +2420,7 @@ export function App() {
   const screenStyle: CSSProperties = { clipPath: screenClip(view, sb, wrapW), display: globeOn ? 'none' : undefined };
   return (
     <div
-      className={`app${narrow ? ' phone' : ' has-side'}${chron.open ? ' chron-open' : ''}${panelOpen ? ' panel-open' : ''}${narrow && panelOpen && panelUi.sheet === 'full' ? ' sheet-full' : ''}${narrow && !selState.sel && panelUi.world === 'full' ? ' world-full' : ''}${narrow && panelUi.drag ? ' sheet-drag' : ''}${narrow && selState.sel && !panelOpen ? ' sheet-away' : ''}${picking ? ' picking' : ''}${globeOn ? ' globe-on' : ''}${data ? '' : ' booting'}${home ? ' home' : ''}${draft ? ' draft' : ''}`}
+      className={`app${narrow ? ' phone' : ' has-side'}${chron.open ? ' chron-open' : ''}${panelOpen ? ' panel-open' : ''}${narrow && panelOpen && panelUi.sheet === 'full' ? ' sheet-full' : ''}${narrow && !selState.sel && panelUi.world === 'full' ? ' world-full' : ''}${narrow && panelUi.drag ? ' sheet-drag' : ''}${narrow && selState.sel && !panelOpen ? ' sheet-away' : ''}${!narrow && world && sideUi.collapsed && !sideUi.peek ? ' side-collapsed' : ''}${picking ? ' picking' : ''}${globeOn ? ' globe-on' : ''}${data ? '' : ' booting'}${home ? ' home' : ''}${draft ? ' draft' : ''}`}
       data-theme={theme}
       data-layer={mapLayer}
       onDragOver={onDragOver}

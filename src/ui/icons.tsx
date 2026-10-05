@@ -48,6 +48,13 @@ const PATHS = {
     </>
   ),
   map: <path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2zM9 4v14M15 6v14" />,
+  /** 侧栏开关:左边带一道竖线的方框(和常见的侧栏按钮一样) */
+  sidebar: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
+      <path d="M9.5 5v14" />
+    </>
+  ),
   terrain: <path d="M3 19l6-10 4 6 3-4 5 8z" />,
   replay: (
     <>

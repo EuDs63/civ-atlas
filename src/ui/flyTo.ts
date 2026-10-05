@@ -15,6 +15,7 @@ import { clampCurved, clampSphere, stageToWorld, type MapView, type StageBox } f
 import type { MapSelection } from './civView';
 import { NARROW_MAX, safeInsets } from './device';
 import { ABOVE_SHEET, sheetGeometry } from './gestures';
+import { sideShown } from './sideStore';
 
 /** 飞行时长(毫秒) */
 export const FLY_MS = 600;
@@ -152,10 +153,11 @@ export function phoneFree(H: number, panel: boolean): [number, number] {
 
 /**
  * 宽屏左边浮着的侧栏卡片占掉的宽度:左边距 + 卡片 + 右边留空(和 desktop.css 的 --side-room 一致);
- * 窄屏没有侧栏 = 0。sw = 舞台宽(铺满窗口,和视口一样宽)
+ * 卡片收起了(sideStore.ts)只剩左边距;窄屏没有侧栏 = 0。sw = 舞台宽(铺满窗口,和视口一样宽)
  */
 export function sideRoom(sw: number): number {
   if (sw <= NARROW_MAX) return 0;
+  if (!sideShown()) return 14;
   return 14 + (sw >= 1100 ? 372 : 340) + 14;
 }
 

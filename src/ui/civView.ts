@@ -296,6 +296,11 @@ export function useSelection(): SelectionState {
   return selection.use();
 }
 
+/** 不经过 React 订阅选中的变化(sideStore.ts:侧栏收起时选中了东西,卡片弹出来) */
+export function subscribeSelection(f: () => void): () => void {
+  return selection.subscribe(f);
+}
+
 export function sameSelection(a: MapSelection | null, b: MapSelection | null): boolean {
   return a === b || (!!a && !!b && a.kind === b.kind && a.id === b.id);
 }

@@ -1,7 +1,7 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
- * 存档读档分享、导出、干预、改地形、AI、东西相连、多种投影、地球仪;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
+ * 存档读档分享、导出、干预、改地形、AI、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
  * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;创建时定下的种子、参数、地形在世界概览的"世界设定"页(只能看)
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
@@ -3640,6 +3640,65 @@ for (const style of ['realistic', 'fantasy']) {
   if (!nwBox || Math.abs(nwBox.y + nwBox.height - VH) > 1 || nwBox.width !== VW) errs.push(`手机:我的世界里点"新建世界",底部没有新建世界的卡片(${JSON.stringify(nwBox)})`);
   if (!nwTools || !nwBack) errs.push(`手机:新建卡片里点"改地形"没有换成改地形工具 / 点"完成"没退回(${nwTools},${nwBack})`);
   await mctx.close();
+}
+
+// 宽屏侧栏收起:卡片右上角的侧栏图标 → 卡片滑走、左上角留"图标 + 世界名"的小按钮,时间轴拉到最左,地图不动;
+// 收起时选中一个国家卡片弹出来显示它,取消选中又收回去;刷新后还是收起;点小按钮展开;新建世界那一步左边的卡片不受影响
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 820 } });
+  const sp = await ctx.newPage();
+  sp.on('pageerror', (e) => errs.push(`侧栏收起:${e.message}`));
+  await sp.goto(`${dev.url}/?seed=7`);
+  await sp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await sp.waitForTimeout(500);
+  const state = () =>
+    sp.evaluate(() => {
+      const side = document.querySelector('aside.sidebar:not(.nw-card)');
+      const r = side?.getBoundingClientRect();
+      const tl = document.querySelector('.bottom-row')?.getBoundingClientRect();
+      const pill = document.querySelector('.side-open') as HTMLElement | null;
+      const v = (window as any).__wfView;
+      return {
+        shown: !!side && r!.right > 0 && getComputedStyle(side).visibility === 'visible',
+        tlLeft: Math.round(tl?.left ?? -1),
+        pill: pill ? pill.innerText.trim() : null,
+        view: `${v.k.toFixed(3)},${Math.round(v.x)},${Math.round(v.y)}`,
+      };
+    });
+  const s0 = await state();
+  await sp.click('[data-act=side-collapse]');
+  await sp.waitForTimeout(500);
+  const s1 = await state();
+  // 收起时选中一个国家(和地图上点一样走 setSelection)
+  await sp.evaluate(() => (window as any).__wfSelect('polity', 1));
+  await sp.waitForTimeout(800);
+  const s2 = await state();
+  const ins = await sp.locator('.sidebar .inspector').count();
+  await sp.keyboard.press('Escape');
+  await sp.waitForTimeout(500);
+  const s3 = await state();
+  await sp.reload();
+  await sp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await sp.waitForTimeout(500);
+  const s4 = await state();
+  await sp.click('[data-act=side-expand]');
+  await sp.waitForTimeout(500);
+  const s5 = await state();
+  // 收起着进新建世界:左边新建世界的卡片照常在
+  await sp.click('[data-act=side-collapse]');
+  await sp.goto(`${dev.url}/?seed=7&new=1`);
+  await sp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await sp.waitForTimeout(300);
+  const nw = await sp.locator('.sidebar.nw-card').boundingBox();
+  console.log(`侧栏收起:开着 ${JSON.stringify(s0)};收起 ${JSON.stringify(s1)};选中 ${JSON.stringify(s2)};Esc ${JSON.stringify(s3)};刷新 ${JSON.stringify(s4)};展开 ${JSON.stringify(s5)};新建 ${JSON.stringify(nw)}`);
+  if (!s0.shown || s0.pill !== null || s0.tlLeft !== SIDE_ROOM) errs.push(`侧栏收起:一开始卡片应该开着、时间轴从 ${SIDE_ROOM} 起(${JSON.stringify(s0)})`);
+  if (s1.shown || !s1.pill || s1.tlLeft !== 14 || s1.view !== s0.view) errs.push(`侧栏收起:点收起后卡片没滑走 / 没有左上角的小按钮 / 时间轴没拉到最左 / 地图动了(${JSON.stringify(s1)})`);
+  if (!s2.shown || s2.pill !== null || !ins) errs.push(`侧栏收起:收起时选中国家,卡片没弹出来显示它(${JSON.stringify(s2)},面板 ${ins})`);
+  if (s3.shown || !s3.pill) errs.push(`侧栏收起:取消选中后卡片没收回去(${JSON.stringify(s3)})`);
+  if (s4.shown || !s4.pill) errs.push(`侧栏收起:刷新后没记住收起(${JSON.stringify(s4)})`);
+  if (!s5.shown || s5.pill !== null || s5.tlLeft !== SIDE_ROOM) errs.push(`侧栏收起:点左上角的小按钮没展开(${JSON.stringify(s5)})`);
+  if (!nw || nw.x < 0) errs.push(`侧栏收起:收起着进新建世界,左边新建世界的卡片不见了(${JSON.stringify(nw)})`);
+  await ctx.close();
 }
 
 // 源代码 · 隐私政策 · 用户协议:概览底部三条链接(网址和 src/ui/links.ts 一致、新标签页打开;手机上在屏幕里、点得到);
