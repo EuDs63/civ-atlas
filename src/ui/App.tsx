@@ -461,6 +461,8 @@ export function App() {
   const [replayOn, setReplayOn] = useState(false);
   /** 最上面的屏幕层(文字层放在这里,见 CivLayer 的 labelsHost) */
   const [labelsHost, setLabelsHost] = useState<HTMLDivElement | null>(null);
+  /** 放大后的文明细节层放在这一层屏幕层里(见 CivLayer 的 detailHost) */
+  const [civDetailHost, setCivDetailHost] = useState<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   /** 地形图、回放帧在右边接的那一份(左右无限拖动,见 mapWrap.ts) */
   const canvasCopyRef = useRef<HTMLCanvasElement>(null);
@@ -2379,9 +2381,13 @@ export function App() {
           {data && <TerrainDetail world={data.world} raster={data.raster} style={style} view={view} mp={mp} />}
           {data && <MapDecor world={data.world} style={style} view={view} mp={mp} />}
         </div>
+        {/* 放大后的文明细节层(CivLayer 放进来):盖住下面的地形,在文明底图那一层地图框之下 */}
+        <div className="screen-layer" ref={setCivDetailHost} style={screenStyle} />
         <div className="canvas-wrap-upper" style={wrapStyle}>
           <div className="map-box-upper" style={{ width: box.w, height: box.h }}>
-            {data && <CivLayer world={data.world} raster={data.raster} civ={civ} geo={rawCiv} style={style} view={view} mp={mp} labelsHost={labelsHost} />}
+            {data && (
+              <CivLayer world={data.world} raster={data.raster} civ={civ} geo={rawCiv} style={style} view={view} mp={mp} labelsHost={labelsHost} detailHost={civDetailHost} />
+            )}
             <canvas ref={overlayRef} className={`overlay ${replayOn && replay ? 'show' : ''}`} />
             <canvas ref={overlayCopyRef} className={`overlay wrap-copy ${replayOn && replay ? 'show' : ''}`} />
             {data && !curved && <TerrainOverlay width={data.world.width} height={data.world.height} shown={shownTerrain} wrap={wrapW} />}

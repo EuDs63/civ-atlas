@@ -192,6 +192,35 @@ export function xRange(p: ArrayLike<number>): [number, number] {
 }
 
 /**
+ * 只留和 box(世界坐标 [x0, y0, x1, y1],x 展开的,可以超出 [0, W))沾边的线(外扩 pad 个世界单位;
+ * 东西相连时线挪整圈后沾边也算)。细节层只重画看得见的那一块,不用把整个世界的线都描一遍
+ */
+export function cullLines<T extends Polyline>(lines: T[], box: readonly [number, number, number, number], W: number, pad = 0): T[] {
+  const [bx0, by0, bx1, by1] = box;
+  return lines.filter((l) => {
+    const p = l.pts;
+    let lo = Infinity;
+    let hi = -Infinity;
+    let ylo = Infinity;
+    let yhi = -Infinity;
+    for (let i = 0; i < p.length; i += 2) {
+      const x = p[i];
+      const y = p[i + 1];
+      if (x < lo) lo = x;
+      if (x > hi) hi = x;
+      if (y < ylo) ylo = y;
+      if (y > yhi) yhi = y;
+    }
+    if (yhi < by0 - pad || ylo > by1 + pad) return false;
+    if (!W) return hi >= bx0 - pad && lo <= bx1 + pad;
+    // 挪整圈:有没有一份落进 [bx0, bx1]
+    const k0 = Math.ceil((bx0 - pad - hi) / W);
+    const k1 = Math.floor((bx1 + pad - lo) / W);
+    return k0 <= k1;
+  });
+}
+
+/**
  * 把折线加进一条 Path2D(按 scale 换算成像素)。
  * wrap = 世界东西相连时的周期(世界宽度,见 meshWrap):伸出主图左右边的线在另一边再加一份。
  * proj(弯边投影,按投影重画):逐点投影到地图平面再 × scale,长段加密;伸出 ±180° 的在另一边再加一份

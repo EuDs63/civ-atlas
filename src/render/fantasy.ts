@@ -2347,8 +2347,8 @@ export function fantasyInkMask(world: World, r: Raster, forest: number, paper: n
   return ink;
 }
 
-/** 符号层的像素 → 让位遮罩(见 fantasyInkMask) */
-function inkFromPixels(px: Uint8ClampedArray, N: number, forest: number, paper: number): InkMask {
+/** 符号层的像素 → 让位遮罩(见 fantasyInkMask;文明细节层按放大后的符号层也用它) */
+export function inkFromPixels(px: Uint8ClampedArray, N: number, forest: number, paper: number): InkMask {
   const hard = new Uint8Array(N);
   const soft = new Uint8Array(N);
   for (let k = 0; k < N; k++) {

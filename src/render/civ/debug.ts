@@ -7,7 +7,7 @@ import type { Civ } from '../../gen/civ/types';
 import type { Mesh } from '../../gen/mesh';
 import { boxBlurWrap, wrapShifts } from '../common';
 import { relShifts, reprojectImage } from '../projection';
-import { addToPath, chaikin, meshWrap, traceBoundaries, type Polyline } from './lines';
+import { addToPath, chaikin, cullLines, meshWrap, traceBoundaries, type Polyline } from './lines';
 import type { CivDrawParams, CivStyle } from './overlay';
 
 type RGB = [number, number, number];
@@ -50,6 +50,7 @@ function rampAt(stops: RGB[], t: number): RGB {
 // ---- 缓存 ----
 interface Cache {
   field?: { raster: Raster; v: Float32Array };
+  heat?: { raster: Raster; key: string; canvas: HTMLCanvasElement | OffscreenCanvas };
   lines?: Polyline[];
   sites?: { cell: number; r: number }[];
 }
@@ -87,13 +88,43 @@ function habitatField(civ: Civ, r: Raster): Float32Array {
   return num;
 }
 
+/** 热力图的离屏画布(整图大小;放大后的细节层按视口放大贴上),按画风缓存 */
+export function habitatCanvas(p: CivDrawParams): HTMLCanvasElement | OffscreenCanvas {
+  const c = cacheOf(p.civ);
+  const key = rampKey(p.style);
+  if (c.heat && c.heat.raster === p.raster && c.heat.key === key) return c.heat.canvas;
+  const { w, h } = p.raster;
+  const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  (canvas.getContext('2d') as CanvasRenderingContext2D).putImageData(habitatImage(p), 0, 0);
+  if (c.heat) c.heat.canvas.width = c.heat.canvas.height = 0;
+  c.heat = { raster: p.raster, key, canvas };
+  return canvas;
+}
+
 export function drawHabitat(ctx: CanvasRenderingContext2D, p: CivDrawParams) {
+  const { raster: r } = p;
+  const { w, h } = r;
+  const img = habitatImage(p);
+  if (p.proj) {
+    // 弯边投影:先放进一张等距圆柱的离屏画布,再按投影一行一行铺过来
+    const tmp =
+      typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+    (tmp.getContext('2d') as CanvasRenderingContext2D).putImageData(img, 0, 0);
+    reprojectImage(ctx, tmp, w, h, p.proj.mp, { s: r.scale, ox: 0, oy: 0 });
+    tmp.width = tmp.height = 0;
+    return;
+  }
+  // putImageData 会覆盖而不是叠加:它是这一层最先画的,所以直接写
+  ctx.putImageData(img, 0, 0);
+}
+
+function habitatImage(p: CivDrawParams): ImageData {
   const { raster: r, civ, style } = p;
   const v = habitatField(civ, r);
   const { w, h, water } = r;
   const stops = HABITAT_RAMP[rampKey(style)];
   const fantasy = style === 'fantasy';
-  const img = ctx.createImageData(w, h);
+  const img = new ImageData(w, h);
   const d = img.data;
   // 预先算好 256 级色表
   const LUT = 256;
@@ -120,17 +151,7 @@ export function drawHabitat(ctx: CanvasRenderingContext2D, p: CivDrawParams) {
     d[o + 2] = lut[li * 4 + 2];
     d[o + 3] = lut[li * 4 + 3] * fade;
   }
-  if (p.proj) {
-    // 弯边投影:先放进一张等距圆柱的离屏画布,再按投影一行一行铺过来
-    const tmp =
-      typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
-    (tmp.getContext('2d') as CanvasRenderingContext2D).putImageData(img, 0, 0);
-    reprojectImage(ctx, tmp, w, h, p.proj.mp, { s: r.scale, ox: 0, oy: 0 });
-    tmp.width = tmp.height = 0;
-    return;
-  }
-  // putImageData 会覆盖而不是叠加:它是这一层最先画的,所以直接写
-  ctx.putImageData(img, 0, 0);
+  return img;
 }
 
 /** 平滑后的州界折线(世界坐标) */
@@ -142,24 +163,28 @@ export function regionLines(mesh: Mesh, civ: Civ): Polyline[] {
 
 export function drawRegionLines(ctx: CanvasRenderingContext2D, p: CivDrawParams) {
   const S = p.raster.scale;
+  // 线宽、虚线长短(细节层按屏幕重画时 × pen,见 overlay.ts)
+  const P = S * (p.pen ?? 1);
   const path = new Path2D();
-  addToPath(path, regionLines(p.world.mesh, p.civ), S, meshWrap(p.world.mesh), p.proj);
+  const wrap = meshWrap(p.world.mesh);
+  const all = regionLines(p.world.mesh, p.civ);
+  addToPath(path, p.cull ? cullLines(all, p.cull, wrap, 4) : all, S, wrap, p.proj);
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   if (p.style === 'fantasy') {
     // 墨色点划线,像旧地图上的州县界
-    ctx.setLineDash([3.2 * S, 2.4 * S]);
+    ctx.setLineDash([3.2 * P, 2.4 * P]);
     ctx.strokeStyle = 'rgba(70,50,36,0.5)';
-    ctx.lineWidth = 0.9 * S;
+    ctx.lineWidth = 0.9 * P;
     ctx.stroke(path);
   } else {
     // 写实:先描一道很淡的暗边,再描一道半透明的亮线 —— 雪地、沙漠上也看得清
     ctx.strokeStyle = p.style === 'data' ? 'rgba(20,20,20,0.35)' : 'rgba(20,16,10,0.22)';
-    ctx.lineWidth = 2 * S;
+    ctx.lineWidth = 2 * P;
     ctx.stroke(path);
     ctx.strokeStyle = p.style === 'data' ? 'rgba(255,255,255,0.7)' : 'rgba(255,250,240,0.62)';
-    ctx.lineWidth = 0.8 * S;
+    ctx.lineWidth = 0.8 * P;
     ctx.stroke(path);
   }
   ctx.restore();
@@ -184,6 +209,8 @@ function sites(civ: Civ): { cell: number; r: number }[] {
 
 export function drawSites(ctx: CanvasRenderingContext2D, p: CivDrawParams) {
   const S = p.raster.scale;
+  // 圆点大小(细节层按屏幕重画时 × pen)
+  const P = S * (p.pen ?? 1);
   const { x, y } = p.world.mesh;
   const list = sites(p.civ);
   ctx.save();
@@ -198,9 +225,9 @@ export function drawSites(ctx: CanvasRenderingContext2D, p: CivDrawParams) {
     for (const sh of pj ? relShifts(rel, 6 / Math.max(1e-6, K)) : wrapShifts(x[e.cell], x[e.cell], wrap, 4)) {
       const px = pj ? (pj.W / 2 + K * (rel + sh)) * S : (x[e.cell] + sh) * S;
       const py = pj ? pj.Y(y[e.cell]) * S : y[e.cell] * S;
-      const rr = e.r * S;
-      halo.moveTo(px + rr + 0.9 * S, py);
-      halo.arc(px, py, rr + 0.9 * S, 0, Math.PI * 2);
+      const rr = e.r * P;
+      halo.moveTo(px + rr + 0.9 * P, py);
+      halo.arc(px, py, rr + 0.9 * P, 0, Math.PI * 2);
       dot.moveTo(px + rr, py);
       dot.arc(px, py, rr, 0, Math.PI * 2);
     }

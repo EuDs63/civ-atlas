@@ -23,7 +23,7 @@ import type { Civ } from '../../gen/civ/types';
 import { Layer } from '../../gen/civ/types';
 import { logIndexAfter, ownersAt, type Owners } from '../../gen/civ/timeline';
 import { nearX, valueNoise, wrapShifts } from '../common';
-import { addToPath, chaikin, meshWrap, sphereMean, xRange } from './lines';
+import { addToPath, chaikin, cullLines, meshWrap, sphereMean, xRange } from './lines';
 import type { CivDrawParams } from './overlay';
 import { projectLinePts, type Projector } from '../projection';
 
@@ -633,9 +633,12 @@ function inkDashes(lines: SidedLine[], S: number, dash: number, gap: number, pat
 
 export function drawBorders(ctx: CanvasRenderingContext2D, p: CivDrawParams): void {
   if (!p.show.polities || !p.civ.polities.length) return;
-  const lines = borderLines(p, Layer.Polity);
+  const all0 = borderLines(p, Layer.Polity);
+  const lines = p.cull ? cullLines(all0, p.cull, meshWrap(p.world.mesh), 8) : all0;
   if (!lines.length) return;
   const S = p.raster.scale;
+  // 线宽、虚线长短(细节层按屏幕重画时 × pen,见 overlay.ts)
+  const P = S * (p.pen ?? 1);
   const wrap = meshWrap(p.world.mesh);
   // 两国之间 / 国家和部落地带之间
   const inner = lines.filter((l) => l.left >= 0 && l.right >= 0);
@@ -652,34 +655,35 @@ export function drawBorders(ctx: CanvasRenderingContext2D, p: CivDrawParams): vo
     const pens = [new Path2D(), new Path2D(), new Path2D()];
     // 墨线下面先垫一道淡淡的纸色,穿过深色树林时也看得清
     ctx.strokeStyle = 'rgba(246,236,210,0.6)';
-    ctx.lineWidth = 3.8 * S;
+    ctx.lineWidth = 3.8 * P;
     ctx.stroke(path(inner));
-    inkDashes(inner, S, 5, 3, pens, wrap, p.proj);
+    const pen = p.pen ?? 1;
+    inkDashes(inner, S, 5 * pen, 3 * pen, pens, wrap, p.proj);
     const widths = [1.45, 2.05, 2.75];
     ctx.strokeStyle = 'rgba(58,32,20,0.9)';
     pens.forEach((pa, i) => {
-      ctx.lineWidth = widths[i] * S;
+      ctx.lineWidth = widths[i] * P;
       ctx.stroke(pa);
     });
     // 国家和部落地带之间:点划线(旧地图上的"界"),和道路的虚线区分开
     ctx.strokeStyle = 'rgba(246,236,210,0.45)';
-    ctx.lineWidth = 3 * S;
+    ctx.lineWidth = 3 * P;
     ctx.stroke(path(outer));
     ctx.strokeStyle = 'rgba(58,32,20,0.78)';
-    ctx.lineWidth = 1.35 * S;
-    ctx.setLineDash([4.2 * S, 1.9 * S, 0.01, 1.9 * S]);
+    ctx.lineWidth = 1.35 * P;
+    ctx.setLineDash([4.2 * P, 1.9 * P, 0.01, 1.9 * P]);
     ctx.stroke(path(outer));
   } else {
     const all = path(lines);
     ctx.strokeStyle = 'rgba(255,252,244,0.6)';
-    ctx.lineWidth = 4 * S;
+    ctx.lineWidth = 4 * P;
     ctx.stroke(all);
     ctx.strokeStyle = 'rgba(62,28,40,0.95)';
-    ctx.lineWidth = 1.7 * S;
+    ctx.lineWidth = 1.7 * P;
     ctx.stroke(path(inner));
-    ctx.setLineDash([3.6 * S, 2.4 * S]);
+    ctx.setLineDash([3.6 * P, 2.4 * P]);
     ctx.strokeStyle = 'rgba(62,28,40,0.85)';
-    ctx.lineWidth = 1.4 * S;
+    ctx.lineWidth = 1.4 * P;
     ctx.stroke(path(outer));
   }
   ctx.restore();

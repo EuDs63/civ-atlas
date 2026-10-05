@@ -16,6 +16,10 @@
  *    选中的城画一圈细环、选中的东西的名字底下垫一层光晕 —— 这两样画在文字层上。
  *    文字层排完就把放上去的字和符号记下(ui/mapPick.ts),单击地图时按它查点到了什么。
  *
+ * 5. 文明细节层(CivDetail.tsx,放大到 1.2 倍以上):底图、选中层、高亮层看得见的那一块按屏幕像素重画,放在不缩放的屏幕层里
+ *    (App 传进来的 detailHost);这时上面 1、3、4 这几张被 CSS 放大的画布藏起来,底图、选中层也先不重画(回放时每帧省一次整图),
+ *    缩回 1.2 倍以下再画。
+ *
  * 弯边投影(罗宾森、摩尔威德……,mp 不为空):底图、选中层、高亮层按投影重画在地图平面上 —— 色块、罩染这样的"面"
  * 按等距圆柱算好再按行重投影,国界、州界、道路、描边逐点投影(线宽、虚线处处一致);拖动中心时底图先把等距圆柱原图
  * 整图重投影(ui/projection.ts 的 ProjLayer,快),停下来再按投影重画。文字层按投影排(LabelView.proj),
@@ -43,6 +47,7 @@ import { nearX } from '../render/common';
 import { labelProjection, projector, type MapProj } from '../render/projection';
 import { ProjLayer, useMapMoving } from './projection';
 import { useAvoidBoxes } from './uiAvoid';
+import { CivDetail } from './CivDetail';
 
 /** 高亮闪烁:约两秒,亮 → 暗 → 亮 → 暗 → 亮,最后淡出 */
 const FLASH: Keyframe[] = [
@@ -115,7 +120,11 @@ export interface CivLayerProps {
   mp?: MapProj | null;
   /** 文字层放在哪(屏幕层,不随地图 CSS 缩放;还没有 = 先不画字) */
   labelsHost?: HTMLElement | null;
+  /** 放大后的文明细节层放在哪(屏幕层:地形细节层之上、这一层地图框之下;没有 = 不画细节层) */
+  detailHost?: HTMLElement | null;
 }
+
+const VIEW_1: CivViewport = { k: 1, x: 0, y: 0 };
 
 interface LabelsDebug {
   ready: boolean;
@@ -141,7 +150,7 @@ interface LabelsDebug {
   wars?: { lines: number; marks: number } | null;
 }
 
-export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null, labelsHost = null }: CivLayerProps) {
+export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null, labelsHost = null, detailHost = null }: CivLayerProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLCanvasElement>(null);
   const hlRef = useRef<HTMLCanvasElement>(null);
@@ -150,6 +159,9 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
   const refCopy = useRef<HTMLCanvasElement>(null);
   const selCopy = useRef<HTMLCanvasElement>(null);
   const hlCopy = useRef<HTMLCanvasElement>(null);
+  // 文明细节层的高亮画布(闪烁动画和上面的高亮层一起放);细节层盖住时上面几张不用重画
+  const detailHl = useRef<HTMLCanvasElement>(null);
+  const [detailOn, setDetailOn] = useState(false);
   const hl = useCivHighlight();
   const { sel } = useSelection();
   const mpRef = useRef(mp);
@@ -194,6 +206,8 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
+    // 放大后细节层盖住了这一张(藏着):先不画,细节层关了再画
+    if (detailOn) return;
     if (mp) {
       copyStale.current = false;
       mirrorCanvas(refCopy.current, null, false);
@@ -271,7 +285,7 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
     else copyStale.current = true;
     (window as unknown as { __wfCiv: unknown }).__wfCiv = { ready: true, ms: performance.now() - t0, show, year: params.year, fast };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, raster, show, mp, moving]);
+  }, [params, raster, show, mp, moving, detailOn]);
   useLayoutEffect(() => {
     if (!copyStale.current || !copyVisible()) return;
     copyStale.current = false;
@@ -303,6 +317,12 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
     for (const m of marks) if (m) lit++;
     for (const a of cv.getAnimations?.() ?? []) a.cancel();
     const anim = cv.animate?.(FLASH, { duration: FLASH_MS, easing: 'ease-in-out', fill: 'forwards' });
+    // 细节层的高亮(放大后画的是它)一起闪
+    const dh = detailHl.current;
+    if (dh) {
+      for (const a of dh.getAnimations?.() ?? []) a.cancel();
+      dh.animate?.(FLASH, { duration: FLASH_MS, easing: 'ease-in-out', fill: 'forwards' });
+    }
     mirrorCanvas(copy, cv, !m);
     // 地球仪借用的是等距圆柱那一张(弯边投影时这张是投影过的,地球仪也不在)
     if (!m) patchFeed({ hl: cv, hlVer: feed.hlVer + 1, hlStamp: hl.stamp });
@@ -338,6 +358,8 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
   useEffect(() => {
     const cv = selRef.current;
     if (!cv) return;
+    // 放大后细节层盖住了这一张:先不画(选中的轮廓由细节层画)
+    if (detailOn) return;
     if (!sel || !ok || !base || sel.kind === 'settlement') {
       if (cv.width) cv.width = cv.height = 0;
       mirrorCanvas(selCopy.current, cv, false);
@@ -362,7 +384,7 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
     patchFeed({ sel: cv, selVer: feed.selVer + 1 });
     (window as unknown as { __wfSelection: unknown }).__wfSelection = { kind: sel.kind, id: sel.id, lit, ms: performance.now() - t0 };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel, ok, base, world, raster, style, selPolityYear, selZoom, mp]);
+  }, [sel, ok, base, world, raster, style, selPolityYear, selZoom, mp, detailOn]);
 
   // ---- 2. 文字层 ----
   // 地理名不随年份变:回放时不用每帧重新生成;国名、城名、城镇符号随年份变
@@ -499,6 +521,22 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
       <canvas ref={hlRef} className="civ-hl" style={{ pointerEvents: 'none', opacity: 0 }} />
       <canvas ref={hlCopy} className="civ-hl wrap-copy" style={{ pointerEvents: 'none', opacity: 0 }} />
       {labelsHost && createPortal(<canvas ref={textRef} className="civ-labels" style={{ pointerEvents: 'none' }} />, labelsHost)}
+      <CivDetail
+        world={world}
+        raster={raster}
+        params={params}
+        civ={ok ? base : null}
+        style={style}
+        sel={sel}
+        selYear={selPolityYear}
+        hl={hl}
+        view={view ?? VIEW_1}
+        mp={mp}
+        host={detailHost}
+        hlRef={detailHl}
+        hide={[ref, refCopy, selRef, selCopy, hlRef, hlCopy]}
+        onCover={setDetailOn}
+      />
     </>
   );
 }

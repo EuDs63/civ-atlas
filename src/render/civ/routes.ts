@@ -12,7 +12,7 @@
  */
 import type { Civ, Route } from '../../gen/civ/types';
 import type { Mesh } from '../../gen/mesh';
-import { addToPath, chaikin, meshWrap, unwrapLine, type Polyline } from './lines';
+import { addToPath, chaikin, cullLines, meshWrap, unwrapLine, type Polyline } from './lines';
 import type { CivDrawParams } from './overlay';
 
 type Kind = Route['kind'];
@@ -134,11 +134,13 @@ export function routeLines(mesh: Mesh, civ: Civ, year: number = Infinity): Route
 export function drawRoutes(ctx: CanvasRenderingContext2D, p: CivDrawParams): void {
   if (!p.show.routes || !p.civ.routes.length) return;
   const S = p.raster.scale;
+  // 线宽、虚线长短(细节层按屏幕重画时 × pen,见 overlay.ts)
+  const P = S * (p.pen ?? 1);
   const lines = routeLines(p.world.mesh, p.civ, p.year);
   const wrap = meshWrap(p.world.mesh);
   const path = (ls: Polyline[]) => {
     const pa = new Path2D();
-    addToPath(pa, ls, S, wrap, p.proj);
+    addToPath(pa, p.cull ? cullLines(ls, p.cull, wrap, 4) : ls, S, wrap, p.proj);
     return pa;
   };
   const road = path(lines.road);
@@ -151,44 +153,44 @@ export function drawRoutes(ctx: CanvasRenderingContext2D, p: CivDrawParams): voi
     // 墨色:航线是海上的点线;大路长虚线、小路短虚线。
     // 路下面先垫一道很淡的纸色,穿过深色树林时也看得清(像旧地图上路从树林符号里"让"出来)
     ctx.strokeStyle = 'rgba(52,58,66,0.62)';
-    ctx.lineWidth = 1.25 * S;
-    ctx.setLineDash([0.01, 3.4 * S]);
+    ctx.lineWidth = 1.25 * P;
+    ctx.setLineDash([0.01, 3.4 * P]);
     ctx.stroke(sea);
     ctx.setLineDash([]);
     ctx.strokeStyle = 'rgba(246,236,210,0.3)';
-    ctx.lineWidth = 2 * S;
+    ctx.lineWidth = 2 * P;
     ctx.stroke(trail);
     ctx.strokeStyle = 'rgba(246,236,210,0.45)';
-    ctx.lineWidth = 2.8 * S;
+    ctx.lineWidth = 2.8 * P;
     ctx.stroke(road);
     ctx.strokeStyle = 'rgba(74,46,28,0.7)';
-    ctx.lineWidth = 0.8 * S;
-    ctx.setLineDash([2.2 * S, 2.4 * S]);
+    ctx.lineWidth = 0.8 * P;
+    ctx.setLineDash([2.2 * P, 2.4 * P]);
     ctx.stroke(trail);
     ctx.strokeStyle = 'rgba(74,42,24,0.9)';
-    ctx.lineWidth = 1.2 * S;
-    ctx.setLineDash([4.6 * S, 2.6 * S]);
+    ctx.lineWidth = 1.2 * P;
+    ctx.setLineDash([4.6 * P, 2.6 * P]);
     ctx.stroke(road);
   } else {
     // 写实:浅色点线航线;土黄细线,先描一道很淡的暗边(雪地、沙漠上也看得清)
     ctx.strokeStyle = 'rgba(226,238,246,0.7)';
-    ctx.lineWidth = 1.2 * S;
-    ctx.setLineDash([0.01, 3.2 * S]);
+    ctx.lineWidth = 1.2 * P;
+    ctx.setLineDash([0.01, 3.2 * P]);
     ctx.stroke(sea);
     ctx.setLineDash([]);
     ctx.strokeStyle = 'rgba(38,28,14,0.24)';
-    ctx.lineWidth = 2 * S;
+    ctx.lineWidth = 2 * P;
     ctx.stroke(trail);
     ctx.strokeStyle = 'rgba(38,28,14,0.36)';
-    ctx.lineWidth = 2.5 * S;
+    ctx.lineWidth = 2.5 * P;
     ctx.stroke(road);
-    ctx.setLineDash([2.4 * S, 2 * S]);
+    ctx.setLineDash([2.4 * P, 2 * P]);
     ctx.strokeStyle = 'rgba(246,230,186,0.85)';
-    ctx.lineWidth = 0.9 * S;
+    ctx.lineWidth = 0.9 * P;
     ctx.stroke(trail);
     ctx.setLineDash([]);
     ctx.strokeStyle = 'rgba(248,228,174,0.97)';
-    ctx.lineWidth = 1.2 * S;
+    ctx.lineWidth = 1.2 * P;
     ctx.stroke(road);
   }
   ctx.restore();

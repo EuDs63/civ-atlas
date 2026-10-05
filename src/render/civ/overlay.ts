@@ -89,6 +89,13 @@ export interface CivDrawParams {
    * 见 fantasy.ts 的 fantasyGlobeInkMask)。主图不给
    */
   globeInk?: boolean;
+  /**
+   * 放大后的细节层(render/civ/detail.ts)按屏幕重画:线宽、虚线长短 × pen(世界单位里的倍数,< 1 = 比地图放大得慢,
+   * 见 detailPen)。画布另有变换(地图平面 × S → 画布像素)。不给 = 1(整张图)
+   */
+  pen?: number;
+  /** 细节层:只画和这块(世界坐标,x 展开的 [x0, y0, x1, y1])沾边的线;不给 = 全画 */
+  cull?: readonly [number, number, number, number];
 }
 
 export function drawCivOverlay(ctx: CanvasRenderingContext2D, p: CivDrawParams) {

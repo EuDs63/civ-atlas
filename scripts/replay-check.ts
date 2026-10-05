@@ -2634,6 +2634,94 @@ for (const style of ['realistic', 'fantasy']) {
   }
 }
 
+// 放大后的文明细节层:国家视图放大到 8 倍 → 细节层开着,画在不缩放的屏幕层里、画布像素 = 屏幕像素(不在被 CSS 放大的地图框里),
+// 被放大的文明底图藏起来,色块、国界画出来了;放大后回放每帧耗时(回放时按粗一点的格画,停下来补细的);缩回 1 倍细节层关掉、底图回来
+{
+  await page.goto(`${dev.url}/?seed=7&style=fantasy&civ=polities`);
+  await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const mb = (await page.locator('.map-box').boundingBox())!;
+  const st = (await page.locator('main.stage').boundingBox())!;
+  // 瓦利亚帝国和贾拉尔汗国交界的地方(陆地上有国界)
+  await page.mouse.move(st.x + (st.width - mb.width) / 2 + mb.width * 0.4, mb.y + mb.height * 0.67);
+  for (let i = 0; i < 40 && (await page.evaluate(() => (window as any).__wfView.k)) < 8; i++) {
+    await page.mouse.wheel(0, -200);
+    await page.waitForTimeout(30);
+  }
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(500);
+  const d = await page.evaluate(() => {
+    const w = window as any;
+    const cv = document.querySelector('canvas.civ-detail') as HTMLCanvasElement;
+    const r = cv.getBoundingClientRect();
+    const low = document.querySelector('.map-box-upper canvas.civ') as HTMLCanvasElement;
+    // 画了东西:取样看有没有不透明的像素
+    const px = cv.width ? cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data : new Uint8ClampedArray(0);
+    let lit = 0;
+    let n = 0;
+    for (let i = 3; i < px.length; i += 4 * 101) {
+      n++;
+      if (px[i] > 8) lit++;
+    }
+    return {
+      ...w.__wfCivDetail,
+      inScreen: !!cv.closest('.screen-layer') && !cv.closest('.map-box, .map-box-upper'),
+      shown: getComputedStyle(cv).display !== 'none',
+      // 画布像素 / 屏幕上的 CSS 像素 = 像素密度(按屏幕像素画,不是被 CSS 放大的)
+      ratio: cv.width / r.width,
+      dpr: window.devicePixelRatio,
+      lowHidden: getComputedStyle(low).visibility === 'hidden',
+      litFrac: n ? lit / n : 0,
+    };
+  });
+  console.log(
+    `放大 ${d.k?.toFixed(1)} 倍:文明细节层 ${d.on ? '开' : '关'}(画布 ${d.w}×${d.h},画布像素 / 屏幕像素 ${d.ratio?.toFixed(2)},在屏幕层里 ${d.inScreen}),` +
+      `重画 ${d.ms?.toFixed(0)} ms(色块 ${d.wash?.toFixed(0)}、符号遮罩 ${d.ink?.toFixed(0)}),上了色的取样 ${(d.litFrac * 100).toFixed(0)}%;被放大的底图藏起来 ${d.lowHidden}`,
+  );
+  if (!d.on || !d.shown) errs.push('文明细节层:放大到 8 倍后没有打开');
+  if (!d.inScreen) errs.push('文明细节层:画布不在屏幕层里(放在被 CSS 放大的地图框里,Safari 会按低分辨率显示)');
+  if (!(Math.abs(d.ratio - d.dpr) < 0.05)) errs.push(`文明细节层:不是按屏幕像素画的(画布像素 / 屏幕像素 ${d.ratio},像素密度 ${d.dpr})`);
+  if (!d.lowHidden) errs.push('文明细节层:被放大的文明底图没有藏起来(会叠在上面发糊)');
+  if (!(d.litFrac > 0.05)) errs.push('文明细节层:放大后没画出色块 / 国界');
+  // 放大后回放:每帧(细节层重画)耗时;回放中按粗一点的格画,停下来补细的
+  await page.click('.timebar .tb-speed button:has-text("4×")');
+  await page.click('.timebar button.tb-play');
+  const fr = await page.evaluate(async () => {
+    const w = window as any;
+    const ms: number[] = [];
+    const steps: number[] = [];
+    let last: unknown = null;
+    const t0 = performance.now();
+    while (performance.now() - t0 < 2500) {
+      await new Promise((r) => requestAnimationFrame(r));
+      const c = w.__wfCivDetail;
+      if (c && c !== last && c.drew && c.fast) {
+        ms.push(c.ms);
+        steps.push(c.step);
+      }
+      last = c;
+    }
+    return { ms, steps };
+  });
+  await page.click('.timebar button.tb-play');
+  await page.waitForTimeout(600);
+  const dEnd = await page.evaluate(() => (window as any).__wfCivDetail);
+  const fs = [...fr.ms].sort((a, b) => a - b);
+  const med = fs[fs.length >> 1] ?? NaN;
+  console.log(
+    `放大后回放:${fs.length} 帧,细节层每帧中位数 ${med.toFixed(1)} ms、最慢 ${(fs.at(-1) ?? NaN).toFixed(1)} ms(格宽 ${fr.steps[0]?.toFixed(1)} CSS 像素);` +
+      `停下来后格宽 ${dEnd?.step?.toFixed(1)}`,
+  );
+  if (fs.length < 5) errs.push('文明细节层:放大后回放没有跟着年份重画');
+  if (!(med <= REPLAY_BUDGET)) errs.push(`文明细节层:放大后回放每帧太慢(中位数 ${med.toFixed(1)} ms,预算 ${REPLAY_BUDGET} ms)`);
+  if (!(dEnd?.step <= 1.01) || dEnd?.fast) errs.push('文明细节层:回放停下来后没有按细格补画');
+  // 缩回 1 倍:细节层关掉,被放大的底图回来
+  await page.evaluate(() => (window as any).__wfSetView({ k: 1, x: 0, y: 0 }));
+  await page.waitForTimeout(400);
+  const back = await page.evaluate(() => ({ on: (window as any).__wfCivDetail?.on, low: getComputedStyle(document.querySelector('.map-box-upper canvas.civ')!).visibility }));
+  if (back.on || back.low === 'hidden') errs.push(`文明细节层:缩回 1 倍后没有关掉(${JSON.stringify(back)})`);
+}
+
 // 多种投影:弹层里切到罗宾森(切换耗时)→ 点一座城 → 详情是这座城;左右拖 = 转中央经线;弹层里的中央经线滑条;
 // 改中央经线 → 刷新后投影和中心都还在;导出罗宾森图片(尺寸、外轮廓外是底色、里面有图)
 {
@@ -2712,6 +2800,7 @@ for (const style of ['realistic', 'fantasy']) {
   const kz = (await view()).k;
   let dHidden = 0;
   let dSlid = 0;
+  let cHidden = 0;
   await page.mouse.down();
   for (let s = 1; s <= 15; s++) {
     await page.mouse.move(mb.x + mb.width * (0.5 - (0.2 * s) / 15), mb.y + mb.height * 0.5);
@@ -2719,15 +2808,21 @@ for (const style of ['realistic', 'fantasy']) {
     const d = await page.evaluate(() => ({ ...(window as any).__wfDetail, shown: (document.querySelector('canvas.detail') as HTMLElement).style.display !== 'none' }));
     if (!d.on || !d.shown) dHidden++;
     else if (d.slide) dSlid++;
+    // 文明细节层跟着一起平移,不藏起来
+    const c = await page.evaluate(() => ({ ...(window as any).__wfCivDetail, shown: (document.querySelector('canvas.civ-detail') as HTMLElement).style.display !== 'none' }));
+    if (!c.on || !c.shown) cHidden++;
   }
   await page.mouse.up();
   await page.waitForTimeout(400);
   const dEnd = await page.evaluate(() => (window as any).__wfDetail);
   const lonEnd = (await view()).lon;
-  console.log(`罗宾森放大 ${kz.toFixed(1)} 倍左右拖:15 步里细节层藏起来 ${dHidden} 次、整块平移 ${dSlid} 次;松手后按 ${dEnd?.lon?.toFixed(1)}°(中央经线 ${lonEnd.toFixed(1)}°)重画`);
+  console.log(`罗宾森放大 ${kz.toFixed(1)} 倍左右拖:15 步里细节层藏起来 ${dHidden} 次、整块平移 ${dSlid} 次(文明细节层藏起来 ${cHidden} 次);松手后按 ${dEnd?.lon?.toFixed(1)}°(中央经线 ${lonEnd.toFixed(1)}°)重画`);
   if (dHidden) errs.push('投影:罗宾森放大后左右拖动时细节层藏起来了(露出放大的整图,发糊)');
+  if (cHidden) errs.push('投影:罗宾森放大后左右拖动时文明细节层藏起来了(露出放大的文明底图,发糊)');
   if (!dSlid) errs.push('投影:罗宾森放大后左右拖动时细节层没有跟着平移');
   if (!dEnd?.on || dEnd.slide || Math.abs(dEnd.lon - lonEnd) > 1e-6) errs.push('投影:罗宾森放大后拖完,细节层没有按新的中央经线重画');
+  const cEnd = await page.evaluate(() => (window as any).__wfCivDetail);
+  if (!cEnd?.on || cEnd.slide || Math.abs(cEnd.lon - lonEnd) > 1e-6) errs.push('投影:罗宾森放大后拖完,文明细节层没有按新的中央经线重画');
   await page.evaluate(() => (window as any).__wfSetView({ k: 1, x: 0, y: 0 }));
   await page.waitForTimeout(300);
   // 4. 只用左键:右键不出菜单;弹层里的中央经线滑条转到 −120°(显示"120°W")

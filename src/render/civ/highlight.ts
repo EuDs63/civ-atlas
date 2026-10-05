@@ -98,7 +98,7 @@ export function pixOf(world: World, raster: Raster, civ: Civ): Int16Array {
   return pix;
 }
 
-type RGBA = [number, number, number, number];
+export type RGBA = [number, number, number, number];
 /**
  * 两种画法:写实 / 数据图层上用亮色(米白 + 金),手绘羊皮纸上米白不显眼,相关国家改用朱砂描边(旧地图上圈地的红线)。
  * fill = 罩染 [相关国家, 事发州](RGBA 0–255);line = 描边 [垫底, 本色, 光晕]
@@ -120,7 +120,12 @@ const LOOK: Record<'light' | 'ink', { fill: [RGBA, RGBA]; polLine: [string, stri
   },
 };
 /** 事发地在屏幕上很小(外框 × 缩放倍数不到地图宽的这么多)时,外面再画一个圆圈,整张地图上也一眼找得到 */
-const RING_BELOW = 0.05;
+export const RING_BELOW = 0.05;
+
+/** 高亮罩染的颜色 [相关国家, 事发州](RGBA 0–255;放大后的细节层用) */
+export function highlightFill(style: CivStyle): [RGBA, RGBA] {
+  return LOOK[style === 'fantasy' ? 'ink' : 'light'].fill;
+}
 
 /**
  * 画高亮。画布大小 = raster.w × raster.h(和文明底图一样)。返回每州的标记(见 highlightMarks)。
@@ -535,7 +540,7 @@ export function selectionLook(style: CivStyle): (typeof SEL_LOOK)['light'] {
 }
 
 /** 选中的国家(year 这一年)/ 州 → 每州的分组(亮 = 1,不亮 = −1)和亮了几个州;别的东西、一个州都没亮 = null */
-function selectionGroup(civ: Civ, sel: SelectionTarget, year: Year): { group: Int32Array; lit: number } | null {
+export function selectionGroup(civ: Civ, sel: SelectionTarget, year: Year): { group: Int32Array; lit: number } | null {
   if (sel.kind !== 'polity' && sel.kind !== 'region') return null;
   const R = civ.regions.count;
   const group = new Int32Array(R).fill(-1);
