@@ -9,6 +9,9 @@ import { ownersAt } from '../src/gen/civ/timeline';
 import { populationAt } from '../src/gen/civ/growth';
 import { rasterize, type Raster } from '../src/gen/raster';
 import { cityEntries, entriesUpTo, firstOwned, ownerSpans, placeFacts, popSeries, regionEntries, kmText, areaText } from '../src/ui/panelData';
+import { interventionActorThen, interventionDoneText, interventionText, nameAt } from '../src/ui/Interventions';
+import { polityKey, regionKey } from '../src/gen/edits';
+import { polityAlive } from '../src/gen/civ/growth';
 
 let cached: { world: World; civ: Civ; raster: Raster } | null = null;
 function seed7() {
@@ -111,5 +114,27 @@ describe('面板统计', () => {
     expect(kmText(12345)).toBe('1.2 万');
     expect(areaText(123456)).toBe('12 万');
     expect(areaText(5432)).toBe('5400');
+  });
+});
+
+describe('干预的说法', () => {
+  it('推完的提示:用给的国名(用户点的那个),保护写成"保护某国";不给就用生效那年的名字;那年叫什么另外查得到', () => {
+    const { civ } = seed7();
+    const p = civ.polities.find((q) => polityAlive(q, 2000) && polityAlive(q, 2500))!;
+    const q = civ.polities.find((o) => o.id !== p.id && polityAlive(o, 2000))!;
+    const a = polityKey(civ, p.id);
+    const then = nameAt(p, 2000);
+    expect(interventionDoneText(civ, { kind: 'halt', a, from: 2000 }, -1, '甲国')).toBe('甲国禁止扩张');
+    expect(interventionDoneText(civ, { kind: 'halt', a, from: 2000, until: 2300 }, -1, '甲国')).toBe('甲国禁止扩张(至第 2300 年)');
+    expect(interventionDoneText(civ, { kind: 'protect', a, from: 2000 }, -1, '甲国')).toBe('保护甲国');
+    expect(interventionDoneText(civ, { kind: 'unity', a, from: 2000 }, -1, '甲国')).toBe('甲国禁止分裂');
+    expect(interventionDoneText(civ, { kind: 'ally', a, b: polityKey(civ, q.id), from: 2000 }, -1, '甲国')).toBe(`甲国与${nameAt(q, 2000)}结盟`);
+    expect(interventionDoneText(civ, { kind: 'halt', a, from: 2000 })).toBe(`${then}禁止扩张`);
+    expect(interventionActorThen(civ, { kind: 'halt', a, from: 2000 })).toBe(then);
+    // "我的干预"列表的写法不变
+    expect(interventionText(civ, { kind: 'halt', a, from: 2000 })).toBe(`${then}:禁止扩张`);
+    const found = { kind: 'found' as const, region: regionKey(civ, 0), from: 2000 };
+    expect(interventionActorThen(civ, found)).toBeNull();
+    expect(interventionDoneText(civ, found, -1, '甲国')).toBe(interventionText(civ, found));
   });
 });

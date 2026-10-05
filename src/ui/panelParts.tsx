@@ -361,8 +361,8 @@ export function useYearInput(initial: number, lo: number, hi: number, onChange?:
   return { text, setText, setRaw, y, valid, lo, hi, nudge: (d: number) => setText(String(clampY(y + d))) };
 }
 
-/** 生效年份:−100 −10 [年份] +10,下面一句说明 */
-export function YearStepper({ yi }: { yi: YearInput }) {
+/** 生效年份:−100 −10 [年份] +10,下面一句说明;then = 第二行(那一年它叫什么,和现在不一样时才给) */
+export function YearStepper({ yi, then }: { yi: YearInput; then?: string }) {
   const { text, setText, setRaw, y, lo, hi, nudge } = yi;
   return (
     <div className="cp-from">
@@ -390,7 +390,15 @@ export function YearStepper({ yi }: { yi: YearInput }) {
           +10
         </button>
       </div>
-      <span className="cp-note">该年之前的历史不变,之后重新推演。</span>
+      <span className="cp-note">
+        该年之前的历史不变,之后重新推演。
+        {then && (
+          <>
+            <br />
+            {then}
+          </>
+        )}
+      </span>
     </div>
   );
 }

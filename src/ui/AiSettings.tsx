@@ -3,7 +3,6 @@
  *
  *   openAiSettings(tab?)  打开它(成书窗口的"AI 设置"、提示条的"去设置"、别的面板要打开 AI 设置时都用这个)
  *   AiSettingsHost        窗口本身,App 里一直挂着(所以不管从哪儿打开都在)
- *   AiMenu                一个"AI"小按钮(带是否已设置的小圆点),点了打开 / 关上 —— 给概览之类的头部用
  *
  *   我们的 AI(积分):登录后按次扣积分;服务器还没上线时显示"还在内测,暂未开放"(src/ai/providers/official.ts)
  *   DeepSeek / 阿里云百炼:用户自己的 API 密钥,只存在这个浏览器里,请求直接从浏览器发给那一家
@@ -88,21 +87,6 @@ function useEscape(f: () => void) {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
-}
-
-/** "AI"小按钮:点了打开 / 关上 AI 设置(窗口由 AiSettingsHost 画) */
-export function AiMenu() {
-  const d = useDialog();
-  const status = useAiStatus();
-  const tip = status.ready ? `AI:${status.label}${status.model ? ` · ${status.model}` : ''}` : (status.reason ?? '设置 AI');
-  return (
-    <div className="ai">
-      <button className={`ai-btn${d.open ? ' on' : ''}`} onClick={() => (d.open ? closeAiSettings() : openAiSettings())} title={tip}>
-        <i className={`ai-dot${status.ready ? ' ok' : ''}`} />
-        AI
-      </button>
-    </div>
-  );
 }
 
 function AiDialog({ tab, onTab, onClose }: { tab: Tab; onTab: (t: Tab) => void; onClose: () => void }) {

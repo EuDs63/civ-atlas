@@ -114,6 +114,8 @@ import { fantasyGlobeBase, releaseFantasyGlobeBase } from '../render/fantasy';
 import type { LabelPick } from './mapPick';
 import { AVOID_MS, measureAvoid, type Box } from './uiAvoid';
 import type { GlobeTexRequest, GlobeTexResponse } from '../globeWorker';
+import { fileBaseName } from '../gen/savefile';
+import { currentWorld } from './saveStore';
 import './globe.css';
 
 const D = Math.PI / 180;
@@ -1612,12 +1614,13 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       drawOverlay(ov.getContext('2d')!, { ...overlayInput(w, h, sc, false, [], false), selection: null, selWorld: null, lines: civLineStrokes(civParamsOf(p)) });
       octx.drawImage(ov, 0, 0);
       ov.width = ov.height = 0;
-      const blob = await new Promise<Blob>((res, rej) => out.toBlob((b) => (b ? res(b) : rej(new Error('图片太大,浏览器编码不了'))), 'image/png'));
-      out.width = out.height = 0;
+      // 文件名在编码之前定下:编码要一会儿,这期间换了年份、打开了别的世界,名字照样对得上画出来的这一张
       const civ = p.civ;
       const year = civ ? Math.floor(Math.max(0, Math.min(civ.endYear, getCivTime().year ?? civ.endYear))) : 0;
       const styleName = p.style === 'realistic' ? '写实' : p.style === 'fantasy' ? '手绘' : '数据图层';
-      const name = `文明与地图-种子${p.world.params.seed}-第${year}年-地球仪-${styleName}.png`;
+      const name = `${fileBaseName({ title: currentWorld()?.title, seed: p.world.params.seed })}-第${year}年-地球仪-${styleName}.png`;
+      const blob = await new Promise<Blob>((res, rej) => out.toBlob((b) => (b ? res(b) : rej(new Error('图片太大,浏览器编码不了'))), 'image/png'));
+      out.width = out.height = 0;
       (window as unknown as { __wfGlobeExport: unknown }).__wfGlobeExport = { name, w: W, h: H, bytes: blob.size };
       return { blob, name, w: W, h: H };
     } finally {

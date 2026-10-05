@@ -496,6 +496,9 @@
 .nw-seed-ctl .nw-btn:disabled {
   opacity: 0.45;
 }
+.sb-row-main .nw-seed-bad {
+  color: var(--warn);
+}
 .nw-seed.locked .sb-row-side {
   color: var(--ink-2);
 }
@@ -767,6 +770,10 @@
 }
 .nw-sheet .nw-title {
   font-size: 22px;
+}
+.nw-sheet .nw-intro {
+  margin-top: -10px;
+  font-size: 14px;
 }
 .nw-sheet .nw-seed-input {
   width: 92px;

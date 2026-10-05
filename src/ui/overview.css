@@ -82,9 +82,7 @@
 }
 
 /* 次按钮(半透明底)/ 主按钮(主色底白字) */
-.ov-btn,
-.ov .save-btn,
-.ov .export-btn {
+.ov-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -97,16 +95,11 @@
   line-height: 1.2;
   white-space: nowrap;
 }
-.ov-btn:hover:not(:disabled),
-.ov .save-btn:hover:not(:disabled),
-.ov .save-btn.on,
-.ov .export-btn:hover:not(:disabled),
-.ov .export-btn.on {
+.ov-btn:hover:not(:disabled) {
   border: 0;
   background: var(--hover-bg);
 }
-.ov-btn:disabled,
-.ov .export-btn:disabled {
+.ov-btn:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -116,22 +109,6 @@
 }
 .ov-btn.ov-primary:hover:not(:disabled) {
   background: var(--accent-hover);
-}
-/* AI 设置入口:文字按钮 + 状态点(绿 = 能用) */
-.ov .ai-btn {
-  border: 0;
-  background: transparent;
-  padding: 8px 10px;
-  font-size: 14px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--ink-2);
-}
-.ov .ai-btn:hover,
-.ov .ai-btn.on {
-  border: 0;
-  background: var(--hover-bg);
-  color: var(--ink);
 }
 .ov-x {
   width: 30px;
@@ -149,24 +126,6 @@
 .ov-x:hover {
   background: var(--hover-bg);
   color: var(--ink);
-}
-/* 存档 / 导出的下拉菜单:从按钮下面展开,盖在页面内容上 */
-.ov .save-menu,
-.ov .export-menu {
-  top: calc(100% + 6px);
-  z-index: 5;
-  max-height: calc(100vh - 150px);
-  overflow-y: auto;
-  background: var(--panel-solid);
-  border: 1px solid var(--line);
-  border-radius: var(--r-panel);
-  box-shadow: var(--shadow-panel);
-}
-.ov .export-item b {
-  font-size: 14px;
-}
-.ov .export-item span {
-  font-size: 12px;
 }
 
 /* ---- 页签 ---- */
@@ -694,19 +653,16 @@ button.ov-iv-text:hover {
     flex-basis: 100%;
     gap: 12px;
   }
+  /* 关闭钉在右上角,不另占一行 */
   .ov-actions {
-    margin-left: 0;
-    flex-basis: 100%;
-    flex-wrap: wrap;
+    display: contents;
   }
   .ov-x {
     position: absolute;
     right: 8px;
     top: 10px;
   }
-  .ov-btn,
-  .ov .save-btn,
-  .ov .export-btn {
+  .ov-btn {
     padding: 7px 12px;
   }
   .ov-tabs,
@@ -782,15 +738,6 @@ button.ov-iv-text:hover {
   .app:has(> .ov-root:not([hidden])) > .toast {
     top: auto;
     bottom: 16px;
-  }
-  .ov .save-menu,
-  .ov .export-menu {
-    position: fixed;
-    left: 8px;
-    right: 8px;
-    top: 130px;
-    width: auto;
-    max-height: calc(100vh - 150px);
   }
 }
 

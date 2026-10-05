@@ -6,7 +6,8 @@
  * - 在地图上选目标(PolityPick):干预页 / 州的"划给…"发起;地图压暗、可选的对象浮出名牌(TargetPlates.tsx),
  *   单击地图或名牌 = accept(编号);悬停卡片写"点击选择 / 不可选 / 本国"(hoverInfo.ts)。
  * - 州的干预(州面板 RegionPanel.tsx 的"在这里立国""划给…")用这里的 regionOrders / MineList 列出这一州的干预(可撤销)。
- * - 所有干预的列表在概览的"我的干预"页(WorldOverviewInterventions.tsx,用这里的 interventionText)。
+ * - 所有干预的列表在概览的"我的干预"页(WorldOverviewInterventions.tsx,用这里的 interventionText);
+ *   推完一条干预顶部的提示用 interventionDoneText(写用户点的那个国名,那一年名字不一样再补一行)。
  * - 下了 / 删了干预,editsStore 里的干预列表一变,App 就在后台从第 0 年重推文明(见 App.tsx)。
  *
  * 国家、州、城一律按稳定键记(gen/edits.ts);显示的名字按当前这份历史解析。
@@ -162,15 +163,16 @@ export function civIndexes(civ: Civ, list: readonly unknown[]): number[] {
 /**
  * 一条干预的说法:"大昌:保护""大昌:保护(至第 2300 年)""大昌与索拉特结盟(至第 2000 年)""大昌向索拉特宣战""大昌:禁止分裂"
  * "瑞州划给大昌(永久)""在瑞州立国(号饕餮)""大昌迁都瑞城""大昌:禁止扩张(至第 1800 年)"。
- * i = 它在这份历史的 Civ.interventions 里是第几条(给了、立国立成了,就写出立出来的国名)
+ * i = 它在这份历史的 Civ.interventions 里是第几条(给了、立国立成了,就写出立出来的国名);
+ * a = 下令的国家怎么称呼(不给 = 生效那年的名字)
  */
-export function interventionText(civ: Civ, v: Intervention, i = -1): string {
+export function interventionText(civ: Civ, v: Intervention, i = -1, a?: string): string {
   if (v.kind === 'found') {
     const made = i >= 0 ? foundedBy(civ, i) : -1;
     const shown = made >= 0 ? `,即${nameAt(civ.polities[made], v.from)}` : v.name ? `(号${v.name})` : '';
     return `在${regionKeyName(civ, v.region)}立国${shown}`;
   }
-  const A = keyName(civ, v.a, v.from);
+  const A = a ?? keyName(civ, v.a, v.from);
   switch (v.kind) {
     case 'protect':
       return `${A}:保护${v.until !== undefined ? `(至第 ${v.until} 年)` : ''}`;
@@ -187,6 +189,31 @@ export function interventionText(civ: Civ, v: Intervention, i = -1): string {
     case 'halt':
       return `${A}:禁止扩张${v.until !== undefined ? `(至第 ${v.until} 年)` : ''}`;
   }
+}
+
+/**
+ * 推完一条干预后顶部提示的说法:"有鹰王朝禁止扩张""保护有鹰王朝(至第 2300 年)""有鹰王朝禁止分裂",
+ * 别的同 interventionText("有鹰王朝与索拉特结盟""瑞州划给有鹰王朝""在瑞州立国,即饕餮")。
+ * a = 下令的国家怎么称呼:国家面板下的令用面板标题上的名字(用户点的那个),不给 = 生效那年的名字
+ */
+export function interventionDoneText(civ: Civ, v: Intervention, i = -1, a?: string): string {
+  if (v.kind === 'found') return interventionText(civ, v, i);
+  const A = a ?? keyName(civ, v.a, v.from);
+  switch (v.kind) {
+    case 'protect':
+      return `保护${A}${v.until !== undefined ? `(至第 ${v.until} 年)` : ''}`;
+    case 'unity':
+      return `${A}禁止分裂`;
+    case 'halt':
+      return `${A}禁止扩张${v.until !== undefined ? `(至第 ${v.until} 年)` : ''}`;
+    default:
+      return interventionText(civ, v, i, A);
+  }
+}
+
+/** 下令的国家在生效那一年叫什么(立国没有下令的国家 = null) */
+export function interventionActorThen(civ: Civ, v: Intervention): string | null {
+  return v.kind === 'found' ? null : keyName(civ, v.a, v.from);
 }
 
 let owners: Owners | undefined;

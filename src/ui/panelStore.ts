@@ -22,6 +22,8 @@ export interface IvRun {
   target: { kind: 'polity' | 'settlement'; id: number } | null;
   /** 生效年份 */
   from: number;
+  /** 下令时面板标题上的国名(推完的提示用它,和用户点的那个对得上;没有 = 用生效那年的名字) */
+  shown?: string;
   /** 下令的时刻(performance.now) */
   t0: number;
 }

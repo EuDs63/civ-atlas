@@ -2,27 +2,18 @@
  * 世界概览(点世界名、侧栏里的"全部 N 国""编年史""世界参数"打开):全屏浮层。
  *
  *   头部  世界名;一行"种子 7，当前 2679 年，未干预";一行汇总(现存几国、历来几国、民族、城镇、州,跟着时间轴的当前年份);
- *         关闭。窄屏(手机)还有 AI 设置入口(AiMenu)、存档(SaveMenu)、导出(ExportMenu)、成书(收起概览 + 打开写史书窗口)——
- *         宽屏这几样在侧栏和地图右上
+ *         关闭。存档、导出、AI 设置、写成史书不放这里:宽屏在侧栏和地图右上,手机在底部世界卡片的按钮和「···」里
  *   页签  国家(WorldOverviewCountries.tsx)/ 编年史(Chronicle.tsx)/ 我的干预(WorldOverviewInterventions.tsx)/
  *         世界设定(WorldOverviewGenesis.tsx:创建时定下的种子、参数、地形,只能看;以它为底稿新建、回放世界形成)
  *   世界名旁边"改名"(点了就地变成输入框)
  *   底部  一行小字:源代码、隐私政策、用户协议(新标签页打开;网址在 links.ts)
  * 关闭:右上角的关闭 / Esc / 点浮层外面。窄屏铺满全屏。开没开、在哪一页见 overviewStore.ts(别处用 openOverview(tab, opts) 打开某一页)。
- *
- * 窄屏的存档、导出、AI 这三个菜单一直挂着(浮层关着时只是藏起来):导出做到一半收起概览,做完照样在顶部提示;
- * 别处(成书窗口、AI 功能)照样能打开 AI 设置。
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { World, WorldParams } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import type { Civ } from '../gen/civ/types';
-import type { LayerId } from '../render/layers';
 import { polityAlive, populationAt } from '../gen/civ/growth';
-import { SaveMenu } from './SaveMenu';
-import { ExportMenu } from './ExportMenu';
-import { AiMenu } from './AiSettings';
-import { openHistoryBook } from './HistoryBook';
 import { Chronicle } from './Chronicle';
 import { CountriesPage } from './WorldOverviewCountries';
 import { InterventionsPage } from './WorldOverviewInterventions';
@@ -31,9 +22,7 @@ import { getCivTime, subscribeCivTime } from './civView';
 import { useEdits } from './editsStore';
 import { currentWorld, renameWorld, useSavesVersion } from './saveStore';
 import { closeOverview, setOverviewTab, useOverview, type OverviewTab } from './overviewStore';
-import type { Style } from './mapLayers';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
-import { useNarrow } from './device';
 import { Icon } from './icons';
 import { APP_VERSION } from './version';
 import { TitleInput } from './worldParts';
@@ -43,9 +32,6 @@ export interface WorldOverviewProps {
   data: { world: World; raster: Raster } | null;
   civ: Civ | null;
   params: WorldParams;
-  /** 导出用:当前画风、数据图层 */
-  style: Style;
-  dataLayer: LayerId;
   /** 世界还在生成 */
   generating: boolean;
   /** 正在重推历史(干预页先不判"未生效") */
@@ -94,8 +80,6 @@ export function WorldOverview(p: WorldOverviewProps) {
 
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   const nIv = edits.interventions.length;
-  const ready = !!p.data && !p.generating;
-  const narrow = useNarrow();
   return (
     <div className="ov-root" hidden={!open}>
       <div className="ov-scrim" onClick={closeOverview} />
@@ -103,24 +87,6 @@ export function WorldOverview(p: WorldOverviewProps) {
         <header className="ov-head">
           {open ? <OverviewSummary civ={p.civ} seed={p.data ? p.data.world.params.seed : null} /> : <span className="ov-summary" />}
           <div className="ov-actions">
-            {narrow && (
-              <>
-                <AiMenu />
-                <SaveMenu ready={ready} />
-                <ExportMenu data={p.data} civ={p.civ} style={p.style} layer={p.dataLayer} />
-                <button
-                  className="ov-btn ov-primary ov-book"
-                  data-act="ov-book"
-                  disabled={!p.civ || !p.civ.viable}
-                  onClick={() => {
-                    closeOverview();
-                    openHistoryBook();
-                  }}
-                >
-                  成书
-                </button>
-              </>
-            )}
             <button className="ov-x" data-act="ov-close" onClick={closeOverview} title="关闭(Esc)" aria-label="关闭">
               <Icon name="close" size={14} />
             </button>

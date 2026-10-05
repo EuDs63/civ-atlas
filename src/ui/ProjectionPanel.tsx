@@ -14,7 +14,7 @@ import type { MapSelection } from './civView';
 
 /** 悬停时的一句用途(弹层里地方小,比 render/projection.ts 的说明短) */
 const SHORT_HINT: Partial<Record<ProjectionId, string>> = {
-  equirect: '主图;改地形、导出都用它',
+  equirect: '默认的平铺地图,经纬线横平竖直',
   robinson: '地图集常用,整体观感好',
   naturalEarth: '介于罗宾森和等距圆柱之间',
   mollweide: '等面积,各地大小可比',

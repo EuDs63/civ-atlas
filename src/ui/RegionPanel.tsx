@@ -10,7 +10,7 @@
  *
  * "在这里立国""划给…"换到干预页:生效年份(−100 −10 [年份] +10)+ 国名(可不填)/ 永久;
  * "划给…"在地图上选国家(地图压暗、可选的国家浮出名牌,见 TargetPlates.tsx)。下了干预回到信息页,App 在后台重推,
- * 顶部提示"已从 X 年重新推演 · …"带撤销。
+ * 顶部提示"…划给…,已从 X 年起重新推演"带撤销。
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { Civ } from '../gen/civ/types';

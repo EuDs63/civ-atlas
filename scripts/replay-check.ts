@@ -1429,7 +1429,7 @@ for (const style of ['realistic', 'fantasy']) {
     if (!(ty >= Y && ty <= Y + 40) || !playing) errs.push(`干预:重推完时间轴没有从干预那一年(${Y})接着放(${tl}${playing ? '' : ',没在放'})`);
     if (orders !== 1) errs.push(`干预:时间轴上应有 1 枚「令」(${orders})`);
     if (listed !== 1) errs.push(`干预:概览里的干预列表应有 1 条(${listed})`);
-    if (!/已从 \d+ 年重新推演 · .*保护.*撤销/.test(ivToast)) errs.push(`干预:重推完顶部没有"已从 N 年重新推演"(带撤销)的提示(${ivToast})`);
+    if (!/保护.+,已从 \d+ 年起重新推演.*撤销/.test(ivToast)) errs.push(`干预:重推完顶部没有"保护…,已从 N 年起重新推演"(带撤销)的提示(${ivToast})`);
     const RESIM_BUDGET = process.env.CI ? 2500 : 1000;
     if (resim && !(resim.paintedMs <= RESIM_BUDGET)) errs.push(`干预:重推太慢(${resim.paintedMs.toFixed(0)} ms,预算 ${RESIM_BUDGET} ms)`);
     // 干预也自动存:刷新页面 → 自动恢复修改 → 按存下的干预重推一次
@@ -1465,7 +1465,7 @@ for (const style of ['realistic', 'fantasy']) {
 
 // 国家面板:点国家 → 暂停、地图飞过去(疆域在面板左边)、国都圆环;信息页(三格数字、朝代条、疆域、邻国、相关事件、2×2 按钮)
 // → 干预历史 → 干预页(生效年份、六条命令)→ 宣战:只有相邻国家浮出名牌 → Esc 回到干预页 → 结盟:地图压暗、提示条"选择与…结盟的国家"、
-// 悬停名牌反色、悬停国土"点击选择" → 点名牌 → 面板收起、"已从 N 年重新推演 · …结盟"带撤销、从 N 年接着放 → 撤销 →"已撤销"
+// 悬停名牌反色、悬停国土"点击选择" → 点名牌 → 面板收起、"…结盟,已从 N 年起重新推演"带撤销、从 N 年接着放 → 撤销 →"已撤销"
 {
   type Plate = { kind: string; id: number; text: string; note: string; x: number; y: number; on: boolean; self: boolean };
   type Pick = { kind: string; id: number; text: string; x: number; y: number };
@@ -1579,7 +1579,7 @@ for (const style of ['realistic', 'fantasy']) {
     if (!hiddenWhilePicking) errs.push('国家面板:选目标时面板没有收起');
     if (!/点击选择/.test(hoverVerdict)) errs.push(`国家面板:选目标时悬停可选的国家没有"点击选择"(${hoverVerdict})`);
     if (!plateOn) errs.push('国家面板:鼠标移到可选目标上名牌没有反色');
-    if (!/^已从 \d+ 年重新推演 · .+与.+结盟 撤销$/.test(doneToast)) errs.push(`国家面板:下令后没有"已从 N 年重新推演 · …结盟"带撤销(${doneToast})`);
+    if (!/^.+与.+结盟,已从 \d+ 年起重新推演( \d+ 年时它叫.+)? 撤销$/.test(doneToast)) errs.push(`国家面板:下令后没有"…结盟,已从 N 年起重新推演"带撤销(${doneToast})`);
     if (panelAfter !== 0) errs.push('国家面板:下令后面板没有收起');
     const ty = Number(tlAfter.match(/\d+/)?.[0] ?? NaN);
     if (!(ty >= Y - 1 && ty <= Y + 40) || !playingAfter) errs.push(`国家面板:下令后没有从生效年份接着放(${tlAfter}${playingAfter ? '' : ',没在放'})`);
@@ -1821,7 +1821,7 @@ for (const style of ['realistic', 'fantasy']) {
 
 // 城 / 地理实体 / 州的面板(和国家面板同一套):点一座城 → 城面板(三格、兴衰、历任归属、2×2 按钮)→ "看所属国家"切到国家面板;
 // 点一个地名 → 地理实体面板(改名 / 名字由来 / 起名);点一个州 → 州面板 → "划给…" → 干预页 → "选择国家" → 地图压暗、名牌、
-// 提示条 → 点名牌 → "已从 N 年重新推演 · …划给…"带撤销,州面板里列出这一州的干预 → 撤销 → "已撤销"、列表没了
+// 提示条 → 点名牌 → "…划给…,已从 N 年起重新推演"带撤销,州面板里列出这一州的干预 → 撤销 → "已撤销"、列表没了
 {
   type Plate = { kind: string; id: number; text: string; note: string; x: number; y: number; on: boolean; self: boolean };
   type Pick = { kind: string; id: number; text: string; x: number; y: number };
@@ -1935,7 +1935,7 @@ for (const style of ['realistic', 'fantasy']) {
     }
     break;
   }
-  // 4. 城面板"迁都到这里":替所属国下迁都令(和国家干预页同一套)→ 面板收起、推演 → "已从 N 年重新推演 · …迁都…"带撤销 → 撤销
+  // 4. 城面板"迁都到这里":替所属国下迁都令(和国家干预页同一套)→ 面板收起、推演 → "…迁都…,已从 N 年起重新推演"带撤销 → 撤销
   let moveToast = '';
   let moveHidden = false;
   let moveUndo = '';
@@ -1970,11 +1970,11 @@ for (const style of ['realistic', 'fantasy']) {
   if (!dim || !cedePlates.length) errs.push(`州面板:"划给…"选国家时没有压暗 / 名牌(压暗 ${dim},名牌 ${cedePlates.length})`);
   if (!/^选择.+要划给的国家 \d+ 年起生效 取消 · Esc$/.test(pickToast)) errs.push(`州面板:"划给…"选国家的提示条不对(${pickToast})`);
   if (!hidden) errs.push('州面板:选国家时面板没有收起');
-  if (!/^已从 \d+ 年重新推演 · .+划给.+ 撤销$/.test(doneToast)) errs.push(`州面板:划给后没有"已从 N 年重新推演 · …划给…"带撤销(${doneToast})`);
+  if (!/^.+划给.+,已从 \d+ 年起重新推演 撤销$/.test(doneToast)) errs.push(`州面板:划给后没有"…划给…,已从 N 年起重新推演"带撤销(${doneToast})`);
   if (!mineAfter.includes('划给')) errs.push(`州面板:划给后面板里没列出这一州的干预(${mineAfter})`);
   if (!/^已撤销/.test(undoToast) || !mineGone) errs.push(`州面板:撤销后不对(「${undoToast}」,列表没了 ${mineGone})`);
   if (moveCity < 0) errs.push('城面板:没找到能"迁都到这里"的城');
-  else if (!moveHidden || !/^已从 \d+ 年重新推演 · .+迁都.+ 撤销$/.test(moveToast) || !/^已撤销/.test(moveUndo))
+  else if (!moveHidden || !/^.+迁都.+,已从 \d+ 年起重新推演 撤销$/.test(moveToast) || !/^已撤销/.test(moveUndo))
     errs.push(`城面板:"迁都到这里"不对(面板收起 ${moveHidden},「${moveToast}」,撤销「${moveUndo}」)`);
   await page.evaluate(() => localStorage.clear());
 }
@@ -3527,7 +3527,7 @@ for (const style of ['realistic', 'fantasy']) {
     if (!full || !sheet1 || Math.abs(sheet1.y - 0.08 * VH) > 8 || !fullCapsuleHidden) errs.push(`手机:往上拖没有拉到顶 / 胶囊没藏起来(${JSON.stringify(sheet1)})`);
     if (cmds !== 6) errs.push(`手机:干预页不对(${cmds} 条命令)`);
     if (!/^选择与.+结盟的国家 \d+ 年起生效 取消$/.test(pickToast) || !hiddenWhilePicking) errs.push(`手机:选目标的提示条 / 卡片收起不对(${pickToast})`);
-    if (!/^已从 \d+ 年重新推演 · .+与.+结盟 撤销$/.test(doneToast)) errs.push(`手机:点名牌后没有生效(${doneToast})`);
+    if (!/^.+与.+结盟,已从 \d+ 年起重新推演( \d+ 年时它叫.+)? 撤销$/.test(doneToast)) errs.push(`手机:点名牌后没有生效(${doneToast})`);
     if (!/^已撤销/.test(undoToast)) errs.push(`手机:撤销后没有"已撤销"(${undoToast})`);
   }
   if (!lp || Math.abs(lp.y + lp.height - VH) > 1 || lp.width !== VW) errs.push(`手机:图层弹层不是底部抽屉(${JSON.stringify(lp)})`);

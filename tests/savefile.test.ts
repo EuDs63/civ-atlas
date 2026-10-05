@@ -23,6 +23,7 @@ import {
   decodeShare,
   editCount,
   encodeShare,
+  fileBaseName,
   makeSave,
   parseSave,
   saveFileName,
@@ -92,6 +93,9 @@ describe('存档文件 · 往返', () => {
     expect(saveFileName({ title: '九州大陆', seed: 7 })).toBe('文明与地图-九州大陆.json');
     expect(saveFileName({ seed: 2024 })).toBe('文明与地图-种子2024.json');
     expect(saveFileName({ title: 'a/b:c*?', seed: 1 })).toBe('文明与地图-abc.json');
+    // 导出的图片、编年史用同一个开头
+    expect(fileBaseName({ title: '九州大陆', seed: 7 })).toBe('文明与地图-九州大陆');
+    expect(fileBaseName({ title: '  ', seed: 7 })).toBe('文明与地图-种子7');
   });
 
   it('改了几处 = 改名条数 + 干预条数', () => {

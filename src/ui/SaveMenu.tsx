@@ -13,6 +13,7 @@ import { SHARE_WARN_LENGTH, editCount, encodeShare, hasShareData, saveFileName, 
 import { useEdits } from './editsStore';
 import { addFileSaver, currentSave, currentWorld, loadWorld, notify, persistent, storageIsFull, useSavesVersion } from './saveStore';
 import { Icon } from './icons';
+import { noteDismiss } from './dismissClick';
 
 export interface SaveMenuProps {
   /** 世界生成完了(能存) */
@@ -130,7 +131,9 @@ export function SaveMenu({ ready, icon }: SaveMenuProps) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+      noteDismiss(e);
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     document.addEventListener('pointerdown', onDown, true);

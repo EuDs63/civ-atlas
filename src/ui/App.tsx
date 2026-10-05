@@ -143,11 +143,11 @@ import {
 import { getStage, setStage, useStage, type DraftBase, type Stage } from './stageStore';
 import { polityAlive } from '../gen/civ/growth';
 import { CIV_SHOW_OFF, drawCivOverlay } from '../render/civ/overlay';
-import { getPolityPick, interventionText, setPickHover, setPolityPick, usePolityPick } from './Interventions';
+import { getPolityPick, interventionActorThen, interventionDoneText, setPickHover, setPolityPick, usePolityPick } from './Interventions';
 import { Inspector } from './Inspector';
 import { TargetLayer } from './TargetPlates';
 import { FLY_MS, curvedFly, easeOutCubic, flatFly, selectionFocus, selectionKey, sideRoom, phoneFree, type FlyGoal } from './flyTo';
-import { setWorldSheet, usePanel } from './panelStore';
+import { getPanel, setWorldSheet, usePanel } from './panelStore';
 import { closeOverview } from './overviewStore';
 import { NewWorld } from './NewWorld';
 import { MyWorlds } from './MyWorlds';
@@ -179,6 +179,7 @@ import {
   useTerrainTool,
   type TerrainStatus,
 } from './TerrainTools';
+import { dismissing, tookDismissClick } from './dismissClick';
 
 type Replay = { w: number; h: number; frames: Uint8ClampedArray[]; mya: number[]; idx: number };
 
@@ -485,7 +486,7 @@ export function App() {
     t0: number;
     workerMs?: number;
     arrived?: number;
-    /** 这次重推是新加了一条干预 / 撤销了一条(推完在顶部提示"已从第 N 年重新推演""已撤销") */
+    /** 这次重推是新加了一条干预 / 撤销了一条(推完在顶部提示"…,已从 N 年起重新推演""已撤销") */
     added?: Intervention;
     removed?: Intervention;
     left?: number;
@@ -666,10 +667,15 @@ export function App() {
         const v = info.added;
         const named = applyNames(civ, getEdits().names);
         const idx = (civ.interventions ?? []).findIndex((x) => JSON.stringify(x) === JSON.stringify(v));
+        // 国家面板下的令:写面板标题上的名字(用户点的那个);那一年它叫别的名字,第二行补一句
+        const run = getPanel().run;
+        const shown = run && run.from === v.from ? run.shown : undefined;
+        const then = interventionActorThen(named, v);
         showToast({
           id: 'resim-done',
           kind: 'ok',
-          text: `已从 ${y} 年重新推演 · ${interventionText(named, v, idx)}`,
+          text: `${interventionDoneText(named, v, idx, shown)},已从 ${y} 年起重新推演`,
+          more: shown && then && then !== shown ? [`${v.from} 年时它叫${then}`] : undefined,
           action: {
             label: '撤销',
             onClick: () => {
@@ -1972,8 +1978,8 @@ export function App() {
       if (touches.current.size === 2) startPinch();
       return;
     }
-    // 改地形:画线的工具按下就开始画(不平移)
-    if (terrainDown(worldAt(e.clientX, e.clientY), e.button)) {
+    // 改地形:画线的工具按下就开始画(不平移);点地图收菜单的那一下不画
+    if (!dismissing(e.nativeEvent) && terrainDown(worldAt(e.clientX, e.clientY), e.button)) {
       moved.current = true;
       terrainStroke.current = touch;
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -2120,6 +2126,8 @@ export function App() {
     // 只管点在地图(或地图外的空白)上的:时间轴、按钮、图例上的点击冒泡上来不算
     const t = e.target as HTMLElement;
     if (t !== e.currentTarget && !t.closest('.canvas-wrap, .globe')) return;
+    // 点地图收起菜单的那一下只收起菜单(dismissClick.ts)
+    if (tookDismissClick()) return;
     if ((getGlobeOn() ? globeApi.current?.dragged() : moved.current) || replayOn) return;
     // 改地形:单击放火山 / 挖湖,不看详情(双击的第二下不再放)
     if (getTerrainTool().on) {
@@ -2508,8 +2516,6 @@ export function App() {
           params={params}
           data={data}
           civ={civ}
-          style={style}
-          dataLayer={layer}
           generating={!!progress}
           resimBusy={!!resim}
           replay={{ on: replayOn, ready: !!replay }}

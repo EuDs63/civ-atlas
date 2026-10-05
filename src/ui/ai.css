@@ -1,38 +1,7 @@
 /*
- * AI 设置窗口、调用记录(AiSettings.tsx、AiCallLog.tsx)和"AI"小按钮。
+ * AI 设置窗口、调用记录(AiSettings.tsx、AiCallLog.tsx)。
  * 样式:面板实色底、圆角 4、按钮圆角 3;主按钮主色底白字,次按钮半透明底;标题宋体。
  */
-
-/* ---- "AI"小按钮(概览头部等处用) ---- */
-.ai {
-  position: relative;
-  flex: none;
-}
-.ai-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  border-radius: var(--r-btn);
-  background: var(--btn);
-  padding: 8px 14px;
-  font-size: 14px;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.ai-btn:hover,
-.ai-btn.on {
-  background: var(--hover-bg);
-}
-.ai-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--line-strong);
-}
-.ai-dot.ok {
-  background: var(--ok);
-}
 
 /* ---- 窗口 ---- */
 .ai-dialog-bg {

@@ -4,6 +4,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAiStatus } from '../ai/client';
+import { noteDismiss } from './dismissClick';
 
 export function PopMenu({
   label,
@@ -44,7 +45,9 @@ export function PopMenu({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false);
+      if (root.current?.contains(e.target as Node)) return;
+      setOpen(false);
+      noteDismiss(e);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;

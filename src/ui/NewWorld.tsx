@@ -2,7 +2,8 @@
  * 新建世界(宽屏是左边的卡片,手机是底部的卡片):先定下这颗星球的样子,再点"创建世界"推演它的历史。
  * 这时地图只看地形(没有国家、时间轴),种子、六项世界参数、改地形都还能改;创建以后这三样锁住(世界设定页只能看)。
  *
- *   星球     种子 +"换一颗";世界参数(点开是六个滑条,松手就重新生成);回放这颗星球的形成
+ *   星球     种子 +"换一颗"(种子框只收数字,敲了别的字在「种子」下面提示一行);世界参数(点开是六个滑条,松手就重新生成);
+ *            回放这颗星球的形成
  *            长不出文明的星球下面一行提示(照样能创建)
  *   改地形   可选;点开是工具面板(TerrainTools.tsx 的 TerrainPanel)
  *   名字     给这个世界起个名字(不填 = 未命名世界)
@@ -66,6 +67,8 @@ export function NewWorld(p: NewWorldProps) {
   useEffect(() => setName(p.title), [p.title]);
   const [seedText, setSeedText] = useState(String(p.params.seed));
   useEffect(() => setSeedText(String(p.params.seed)), [p.params.seed]);
+  /** 种子框刚才敲进了数字以外的字(没进框):在「种子」下面提示一行 */
+  const [seedBad, setSeedBad] = useState(false);
   const [rewriting, setRewriting] = useState(false);
   const closeRewrite = useCallback(() => setRewriting(false), []);
   const more = useRef<HTMLDivElement>(null);
@@ -85,6 +88,7 @@ export function NewWorld(p: NewWorldProps) {
   const commitName = () => {
     if (name !== p.title) p.onTitle(name);
   };
+  const intro = base ? `设定都带过来了，改完存成一个新世界，${base.title}本身不变。` : '先定下这颗星球的样子，再推演它三千年的历史。';
   const isDefault = SLIDERS.every((s) => p.params[s.key] === DEFAULT_PARAMS[s.key]);
   const canRewrite = !!p.civ && !!p.data;
 
@@ -101,6 +105,7 @@ export function NewWorld(p: NewWorldProps) {
     <div className="sb-row nw-seed">
       <span className="sb-row-main">
         <b>种子</b>
+        {seedBad && <small className="nw-seed-bad">只能填数字</small>}
       </span>
       <span className="nw-seed-ctl">
         <input
@@ -108,9 +113,17 @@ export function NewWorld(p: NewWorldProps) {
           aria-label="种子"
           value={seedText}
           inputMode="numeric"
-          onChange={(e) => setSeedText(e.target.value.replace(/\D/g, '').slice(0, 9))}
+          onChange={(e) => {
+            const v = e.target.value;
+            const d = v.replace(/\D/g, '');
+            setSeedBad(d !== v);
+            setSeedText(d.slice(0, 9));
+          }}
           onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
-          onBlur={commitSeed}
+          onBlur={() => {
+            setSeedBad(false);
+            commitSeed();
+          }}
         />
         <button className="nw-btn tint" data-act="new-seed" onClick={p.onRandomSeed} title="随机换一个种子">
           <Icon name="dice" size={16} />
@@ -277,6 +290,7 @@ export function NewWorld(p: NewWorldProps) {
               <div className="nw-title">{heading}</div>
               {moreMenu}
             </div>
+            {!down && !tool.on && <div className="nw-intro">{intro}</div>}
             {!down &&
               (tool.on ? (
                 <TerrainPanel disabled={p.busy} />
@@ -312,7 +326,7 @@ export function NewWorld(p: NewWorldProps) {
           {moreMenu}
           {rewrite}
         </div>
-        <div className="nw-intro">{base ? `设定都带过来了，改完存成一个新世界，${base.title}本身不变。` : '先定下这颗星球的样子，再推演它三千年的历史。'}</div>
+        <div className="nw-intro">{intro}</div>
       </header>
       <div className="sb-body nw-body">
         <section className="sb-sec">

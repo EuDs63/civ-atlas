@@ -12,7 +12,7 @@
  *
  * 重活在后台线程(src/exportWorker.ts,每次导出临时开一个)里做,界面不卡;主线程只画文字(要用页面里加载好的字体)、编码 PNG。
  * 用的是 App 当前显示的 civ(套过改名等修改的那份),不重新生成。
- * 文件名带种子、年份、画风:文明与地图-种子7-第3000年-手绘.png(JPEG 是 .jpg)
+ * 文件名带世界名(没起名 = 种子)、年份、画风:文明与地图-九州大陆-第3000年-手绘.png、文明与地图-种子7-第3000年-手绘.png(JPEG 是 .jpg)
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DEFAULT_PARAMS, type World, type WorldParams } from '../gen/world';
@@ -31,10 +31,12 @@ import type { ProjectionId } from '../render/projection';
 import { wrapOf } from '../render/common';
 import { clearToast, showToast } from './toastStore';
 import { exportGlobeView, useGlobeOn } from './Globe';
+import { noteDismiss } from './dismissClick';
+import { fileBaseName } from '../gen/savefile';
+import { currentWorld } from './saveStore';
 
 type Job = 'map' | 'mapjpg' | 'height16' | 'height8' | 'md' | 'txt' | 'legend' | 'globe';
 
-const APP = '文明与地图';
 
 interface Status {
   kind: 'busy' | 'ok' | 'error';
@@ -245,7 +247,9 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+      noteDismiss(e);
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     document.addEventListener('pointerdown', onDown, true);
@@ -269,6 +273,7 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
     setOpen(false);
     const { world, raster } = data;
     const seedN = world.params.seed;
+    const base = fileBaseName({ title: currentWorld()?.title, seed: seedN });
     // 点下去那一刻的年份和开关(导出过程中拖时间轴不影响这一张)
     const t = getCivTime();
     const y = civ ? Math.max(0, Math.min(civ.endYear, t.year ?? civ.endYear)) : 0;
@@ -299,7 +304,7 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
         setStatus({ kind: 'ok', text: `已导出 ${r.name}`, more: `${r.w}×${r.h} · ${gmb} · 用时 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` });
       } else if (job === 'map' || job === 'mapjpg') {
         const format: ImageFormat = job === 'map' ? 'png' : 'jpeg';
-        const name = `${APP}-种子${seedN}-第${yi}年-${styleName(style, layer)}${x2}.${IMAGE_FORMATS[format].ext}`;
+        const name = `${base}-第${yi}年-${styleName(style, layer)}${x2}.${IMAGE_FORMATS[format].ext}`;
         // 球面世界:按当前视图的中心展开(左右边 = 中心 ± 180°);投影、经纬网和屏幕上一样
         const center = wrapOf(world) ? xOfLon(getMapCenter(), world.width) : undefined;
         const projection = flatProjection(getProjection());
@@ -311,7 +316,7 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
         setStatus({ kind: 'ok', text: `已导出 ${name}`, more: `${r.w}×${r.h} · ${mb} · 用时 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` });
       } else if (job === 'height16' || job === 'height8') {
         const bits: HeightmapBits = job === 'height16' ? 16 : 8;
-        const name = `${APP}-种子${seedN}-高度图-${bits}位${x2}.png`;
+        const name = `${base}-高度图-${bits}位${x2}.png`;
         const req: ExportRequest =
           scale === 1
             ? { job: 'heightmap', seed: seedN, scale, bits, raster: { w: raster.w, h: raster.h, elev: raster.elev, water: raster.water } }
@@ -335,7 +340,7 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
         });
       } else if (job === 'md' || job === 'txt') {
         if (!civ) throw new Error('文明还没推演完');
-        const name = `${APP}-种子${seedN}-编年史.${job === 'md' ? 'md' : 'txt'}`;
+        const name = `${base}-编年史.${job === 'md' ? 'md' : 'txt'}`;
         const text = chronicleDocument(civ, { format: job, seed: seedN, params });
         const blob = new Blob([text], { type: job === 'md' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8' });
         download(blob, name);
@@ -343,7 +348,7 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
         setStatus({ kind: 'ok', text: `已导出 ${name}` });
       } else {
         if (!ok || !civ) throw new Error('文明还没推演完');
-        const name = `${APP}-种子${seedN}-第${yi}年-图例${x2}.png`;
+        const name = `${base}-第${yi}年-图例${x2}.png`;
         const cv = await drawLegend({ civ, style, year: y, show, seed: seedN }, scale);
         const blob = await toBlob(cv);
         download(blob, name);

@@ -4,6 +4,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAP_LAYERS, layerDark, layerDef, layerFromUrl, layerOf } from '../src/ui/mapLayers';
 import { _resetToasts, clearToast, getToast, peekToast, showToast } from '../src/ui/toastStore';
+import { closeOverview, getOverview, openOverview } from '../src/ui/overviewStore';
+import { getChronicle, setChronicle } from '../src/ui/civView';
 
 describe('图层换算', () => {
   it('每个图层换成设置再换回来还是它自己', () => {
@@ -95,5 +97,27 @@ describe('顶部提示条', () => {
     expect(peekToast('done')).toBe(null);
     expect(peekToast('keep')).not.toBe(null);
     expect(getToast()?.id).toBe('keep');
+  });
+});
+
+describe('世界概览', () => {
+  it('收起概览时编年史的"只看这一国"清掉(时间轴回到全部国家),概览不会被重新打开', () => {
+    openOverview('chronicle', { polity: 3 });
+    expect(getOverview()).toEqual({ open: true, tab: 'chronicle' });
+    expect(getChronicle()).toMatchObject({ open: true, polity: 3 });
+    closeOverview();
+    expect(getOverview().open).toBe(false);
+    expect(getChronicle()).toMatchObject({ open: false, polity: null });
+    // 老办法关编年史(setChronicle({ open: false }))也一样
+    openOverview('chronicle', { polity: 5 });
+    setChronicle({ open: false });
+    expect(getOverview().open).toBe(false);
+    expect(getChronicle().polity).toBe(null);
+    // 开着概览时换"只看哪一国"照常
+    openOverview('countries');
+    setChronicle({ polity: 2 });
+    expect(getChronicle().polity).toBe(2);
+    closeOverview();
+    expect(getChronicle().polity).toBe(null);
   });
 });

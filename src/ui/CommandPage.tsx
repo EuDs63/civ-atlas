@@ -4,7 +4,7 @@
  *   立即生效  保护(不会被灭亡)、禁止分裂、禁止扩张
  *   选择对象  结盟(任意国家)、宣战(仅相邻国家)、迁都(本国城市)→ 在地图上选(地图压暗、可选的对象浮出名牌,见 TargetPlates.tsx)
  *
- * 不可用的命令变淡,说明换成原因。下了令:面板收起,顶部提示条"正在重新推演 X–3000 年",推完"已从 X 年重新推演 · …"带撤销,
+ * 不可用的命令变淡,说明换成原因。下了令:面板收起,顶部提示条"正在重新推演 X–3000 年",推完"有鹰王朝禁止扩张,已从 X 年起重新推演"带撤销,
  * 从 X 年接着放(App.tsx、TargetPlates.tsx)。命令的数据和推演沿用 editsStore / gen/edits 的干预。
  */
 import { useMemo, useState } from 'react';
@@ -25,7 +25,7 @@ type Cmd = 'protect' | 'unity' | 'halt' | 'ally' | 'declare' | 'move';
 const CMDS: { k: Cmd; name: string; desc: string; pick: boolean }[] = [
   { k: 'protect', name: '保护', desc: '该国不会被灭亡', pick: false },
   { k: 'unity', name: '禁止分裂', desc: '该国不会分裂出新国家', pick: false },
-  { k: 'halt', name: '禁止扩张', desc: '该国疆域不再增加', pick: false },
+  { k: 'halt', name: '禁止扩张', desc: '不再主动扩张,被打时仍会夺回失地', pick: false },
   { k: 'ally', name: '结盟', desc: '选择一个国家,两国不再交战', pick: true },
   { k: 'declare', name: '宣战', desc: '选择一个相邻国家', pick: true },
   { k: 'move', name: '迁都', desc: '选择本国的一座城市', pick: true },
@@ -58,6 +58,8 @@ export function CommandPage({ civ, id, year }: { civ: Civ; id: number; year: num
   const has = (kind: InterventionKind) =>
     orders.some(({ v }) => v.kind === kind && v.kind !== 'found' && v.a === key && !('until' in v && v.until !== undefined && y >= v.until));
   const name = nameAt(p, y);
+  /** 面板标题上的名字(时间轴当前那一年的) */
+  const shown = nameAt(p, year);
 
   /** 这一条命令为什么用不了(能用 = null) */
   const why = (k: Cmd): string | null => {
@@ -72,7 +74,7 @@ export function CommandPage({ civ, id, year }: { civ: Civ; id: number; year: num
 
   /** 下令:面板收起、后台重推;这条已经下过 = 原因 */
   const order = (v: Intervention, target: { kind: 'polity' | 'settlement'; id: number } | null): string | null => {
-    startRun({ self: id, target, from: y });
+    startRun({ self: id, target, from: y, shown });
     if (!addIntervention(v)) {
       endRun();
       return '这条命令已经下过了';
@@ -127,7 +129,7 @@ export function CommandPage({ civ, id, year }: { civ: Civ; id: number; year: num
   return (
     <>
       <div className="cp-body">
-        <YearStepper yi={yi} />
+        <YearStepper yi={yi} then={valid && alive && name !== shown ? `${y} 年时它叫${name}。` : undefined} />
         <div className="cp-cmds">
           {CMDS.map((c) => {
             const off = why(c.k);

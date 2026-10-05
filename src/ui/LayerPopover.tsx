@@ -23,6 +23,7 @@ import { useProjection } from './projection';
 import { getCivTime } from './civView';
 import { CivToggles, CultureLegend } from './CivPanel';
 import './overview.css';
+import { noteDismiss } from './dismissClick';
 
 /** 缩略图大小(显示时 88×44 左右,按两倍像素做) */
 const TW = 192;
@@ -173,7 +174,9 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
     if (!open) return;
     requestThumbs(MAP_LAYERS.filter((l) => l.main).map((l) => l.id));
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+      noteDismiss(e);
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     document.addEventListener('pointerdown', onDown, true);

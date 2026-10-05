@@ -4,7 +4,7 @@
  *   openOverview()                               打开(停在上次那一页)
  *   openOverview('chronicle', { polity: 3 })     打开编年史,只看 3 号国家的事
  *   openOverview('interventions')                打开"我的干预"
- *   closeOverview()                              收起
+ *   closeOverview()                              收起(编年史的"只看这一国"一起清掉)
  *   useOverview() / getOverview()                { open, tab }
  *
  * 编年史以前是单独的窗口(civView.ts 的 setChronicle({ open })),现在是概览里的一页:
@@ -12,7 +12,7 @@
  * 网址 chron=1 / chron=all 打开网页时就停在编年史页。
  */
 import { useSyncExternalStore } from 'react';
-import { getChronicle, setChronicle, subscribeChronicle } from './civView';
+import { getChronicle, setChronicle, subscribeChronicle, type ChronicleView } from './civView';
 
 export type OverviewTab = 'countries' | 'chronicle' | 'interventions' | 'genesis';
 
@@ -36,11 +36,17 @@ const subs = new Set<() => void>();
 
 function set(next: OverviewState) {
   if (next.open === state.open && next.tab === state.tab) return;
+  const closing = state.open && !next.open;
   state = next;
   subs.forEach((f) => f());
-  // 编年史"开着" = 概览开在编年史页(同步到 civView 的编年史状态:App 根元素的 chron-open 读它)
+  // 编年史"开着" = 概览开在编年史页(同步到 civView 的编年史状态:App 根元素的 chron-open 读它);
+  // 收起概览时"只看这一国"一起清掉:时间轴上的事件点跟着编年史的筛选,收起后回到全部国家。两样一次改(分两次改,下面的订阅会在中间把概览又打开)
   const shown = state.open && state.tab === 'chronicle';
-  if (getChronicle().open !== shown) setChronicle({ open: shown });
+  const c = getChronicle();
+  const patch: Partial<ChronicleView> = {};
+  if (c.open !== shown) patch.open = shown;
+  if (closing && c.polity !== null) patch.polity = null;
+  if (patch.open !== undefined || patch.polity !== undefined) setChronicle(patch);
 }
 
 // 别处还按老办法开关编年史(setChronicle({ open })):换成开关概览的编年史页

@@ -171,11 +171,16 @@ export function saveText(save: SaveFile): string {
   return JSON.stringify(save, null, 2) + '\n';
 }
 
-/** 下载用的文件名:文明与地图-九州大陆.json;没起名 = 文明与地图-种子7.json */
-export function saveFileName(save: Pick<SaveFile, 'title' | 'seed'>): string {
+/** 下载的文件名开头(存档、导出的图片和编年史共用):文明与地图-九州大陆;没起名 = 文明与地图-种子7 */
+export function fileBaseName(save: Pick<SaveFile, 'title' | 'seed'>): string {
   // eslint-disable-next-line no-control-regex
   const t = cleanTitle(save.title).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/^\.+/, '').trim();
-  return `${SAVE_APP}-${t || `种子${save.seed}`}.json`;
+  return `${SAVE_APP}-${t || `种子${save.seed}`}`;
+}
+
+/** 下载用的文件名:文明与地图-九州大陆.json;没起名 = 文明与地图-种子7.json */
+export function saveFileName(save: Pick<SaveFile, 'title' | 'seed'>): string {
+  return `${fileBaseName(save)}.json`;
 }
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
