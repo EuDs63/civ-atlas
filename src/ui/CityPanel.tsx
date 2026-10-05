@@ -21,7 +21,7 @@ import { addIntervention, editBlock, interventionKeys } from './editsStore';
 import { NameEdit } from './NameEdit';
 import { nameAt } from './Interventions';
 import { endRun, startRun } from './panelStore';
-import { cityEntries, entriesUpTo, ownerSpans, ownersOf, popSeries, type OwnerSpan } from './panelData';
+import { cityEntries, entriesUpTo, ownerSpans, ownersOf, popPeak, popSeries, type OwnerSpan } from './panelData';
 import {
   Act,
   Acts,
@@ -254,13 +254,11 @@ function Trend({ civ, s, year, from, to, spans }: { civ: Civ; s: Settlement; yea
     }
     return kept;
   }, [civ, s, from, to]);
-  let peak = 0;
-  let peakYear = from;
-  for (const x of series)
-    if (x.pop > peak) {
-      peak = x.pop;
-      peakYear = x.year;
-    }
+  // 最盛:按年份逐处算准(小柱图只在柱子中间取样,会比现在的人口还少);正看着的这一年也算进去
+  const top = useMemo(() => popPeak(s, from, to), [s, from, to]);
+  const now = year >= from && year <= to ? populationAt(s, year) : 0;
+  const peak = Math.max(top.pop, now);
+  const peakYear = now > top.pop ? year : top.year;
   if (!(to > from) || peak <= 0) return null;
   const span = to - from;
   const ownerAt = (y: number) => spans.find((sp) => y >= sp.from && y < sp.to)?.polity ?? -1;
