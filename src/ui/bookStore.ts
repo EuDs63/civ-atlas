@@ -19,6 +19,7 @@ import { writeHistory } from '../ai/history';
 import {
   BOOK_LENGTHS,
   BOOK_STYLES,
+  HISTORY_STYLES,
   buildHistoryPrompts,
   historyNoteKey,
   storeScope,
@@ -148,6 +149,11 @@ const TOAST = 'book';
 export function bookTitleText(title: string, scope: { kind: string }, worldTitle?: string | null): string {
   const t = scope.kind === 'world' && worldTitle && title === '世界通史' ? `${worldTitle}通史` : title;
   return `《${t}》`;
+}
+
+/** 分几次写时一次写的叫什么:纪传体一篇、编年体一卷,其余一章 */
+export function bookUnit(style: HistoryStyle): string {
+  return style === 'biography' ? '篇' : (HISTORY_STYLES[style].unit ?? '章');
 }
 
 /**

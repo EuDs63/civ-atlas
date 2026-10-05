@@ -6,10 +6,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Civ } from '../gen/civ/types';
 import { deleteNote, getNote, useNotesVersion } from '../ai/library';
-import { HISTORY_LENGTHS, HISTORY_STYLES, textLength, type HistoryLength, type HistoryStyle } from '../ai/prompts/history';
+import { HISTORY_LENGTHS, textLength, type HistoryLength, type HistoryStyle } from '../ai/prompts/history';
 import { asHistoryNote, historyFileName, historyMarkdown, historyNoteStatus, historyStyleLabel, historyWriter, shortDate, type HistoryNote } from '../ai/history';
 import { currentWorld, useSavesVersion } from './saveStore';
-import { bookTitleText, closeBookReader, openBookReader, startBook, stopBook, useBook } from './bookStore';
+import { bookTitleText, bookUnit, closeBookReader, openBookReader, startBook, stopBook, useBook } from './bookStore';
 import { useDialogEscape } from './BookDialog';
 import './book.css';
 
@@ -49,22 +49,35 @@ interface Chapter {
   t: string;
   /** "1045–1536" */
   y: string;
+  /** 列传这一篇写了谁(从"### 某某传"取):目录里写"列传 | 司空弈、顾珏" */
+  who?: string[];
 }
 
 /** "## 卷一 诸部初立(第 0—1045 年)" / "## 本纪·大澜王朝" / "## 列传" → 卷次、章名、年份 */
 export function parseChapter(line: string): Omit<Chapter, 'id'> {
   let rest = line.trim();
   let y = '';
-  const ym = /\s*[((]\s*(?:第\s*)?(\d+)\s*(?:年)?\s*[—–\-~至到]+\s*(?:第\s*)?(\d+)\s*年?\s*[))]\s*$/.exec(rest);
+  const ym = /\s*[(（]\s*(?:第\s*)?(\d+)\s*(?:年)?\s*[—–\-~至到]+\s*(?:第\s*)?(\d+)\s*年?\s*[)）]\s*$/.exec(rest);
   if (ym) {
     y = `${ym[1]}–${ym[2]}`;
     rest = rest.slice(0, ym.index).trim();
   }
-  const cm = /^(第[一二三四五六七八九十百零〇两\d]+[章卷篇回]|卷[一二三四五六七八九十百零〇\d]+)\s*[··::、.\s]?\s*(.*)$/.exec(rest);
+  const cm = /^(第[一二三四五六七八九十百零〇两\d]+[章卷篇回]|卷[一二三四五六七八九十百零〇\d]+)\s*[·・:：、.\s]?\s*(.*)$/.exec(rest);
   if (cm && cm[2]) return { n: cm[1], t: cm[2].trim(), y };
-  const pm = /^(本纪|世家|列传)\s*[··:]\s*(.+)$/.exec(rest);
+  const pm = /^(本纪|世家|列传)\s*[·・:：]\s*(.+)$/.exec(rest);
   if (pm) return { n: pm[1], t: pm[2].trim(), y };
   return { n: '', t: rest, y };
+}
+
+/** "司空弈传" / "一、顾珏传" / "司空弈、顾珏合传(第 1200—1260 年)" → 传主的名字;不像传名的 → 空 */
+export function lifeName(line: string): string {
+  const t = line
+    .trim()
+    .replace(/\s*[(（][^()（）]*[)）]\s*$/, '')
+    .replace(/^[一二三四五六七八九十百\d]+\s*[、.．]\s*/, '');
+  if (t.startsWith('列传')) return '';
+  const m = /^(.+?)\s*合?传$/.exec(t);
+  return m && m[1].length <= 16 ? m[1].trim() : '';
 }
 
 function inline(s: string): ReactNode {
@@ -72,9 +85,10 @@ function inline(s: string): ReactNode {
   return parts.map((p, i) => (p.startsWith('**') && p.endsWith('**') && p.length > 4 ? <b key={i}>{p.slice(2, -2)}</b> : p));
 }
 
-function layout(text: string, bookTitle: string): { blocks: ReactNode[]; chapters: Chapter[] } {
+export function layout(text: string, bookTitle: string): { blocks: ReactNode[]; chapters: Chapter[] } {
   const blocks: ReactNode[] = [];
   const chapters: Chapter[] = [];
+  const lives = (c: Chapter | undefined) => !!c && (c.n === '列传' || (!c.n && c.t === '列传'));
   text.split('\n').forEach((raw, i) => {
     const line = raw.trim();
     if (!line) return;
@@ -94,7 +108,12 @@ function layout(text: string, bookTitle: string): { blocks: ReactNode[]; chapter
             {c.y && <span className="bk-ch-y">{c.y}</span>}
           </h3>,
         );
-      } else blocks.push(<h4 key={i}>{inline(body)}</h4>);
+      } else {
+        const c = chapters[chapters.length - 1];
+        const who = lives(c) ? lifeName(body) : '';
+        if (who && !c.who?.includes(who)) c.who = [...(c.who ?? []), who];
+        blocks.push(<h4 key={i}>{inline(body)}</h4>);
+      }
       return;
     }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) return void blocks.push(<hr key={i} />);
@@ -108,9 +127,6 @@ function layout(text: string, bookTitle: string): { blocks: ReactNode[]; chapter
 }
 
 // ---------------------------------------------------------------------------
-
-/** 分几次写时一次写的叫什么:纪传体一篇、编年体一卷,其余一章 */
-const unitOf = (style: HistoryStyle) => (style === 'biography' ? '篇' : (HISTORY_STYLES[style].unit ?? '章'));
 
 /** 元信息:"纪传体 · 中篇 · 截至 3000 年"(一国的写起止年份) */
 function metaLine(style: HistoryStyle, length: HistoryLength, range: string, scopeKind: string): string {
@@ -173,7 +189,7 @@ function Reader({ civ }: { civ: Civ }) {
   const info = note
     ? [`${fmt(textLength(note.text))} 字`, historyWriter(note), shortDate(note.createdAt)].filter(Boolean).join(' · ')
     : writing
-      ? `正在写${live!.calls > 1 ? `第 ${live!.call + 1} ${unitOf(style)}(共 ${live!.calls} ${unitOf(style)})` : ''}…… ${text ? `${fmt(textLength(text))} 字` : ''}`
+      ? `正在写${live!.calls > 1 ? `第 ${live!.call + 1} ${bookUnit(style)}(共 ${live!.calls} ${bookUnit(style)})` : ''}…… ${text ? `${fmt(textLength(text))} 字` : ''}`
       : live!.status === 'stopped'
         ? '已停止,写到一半的没有保存。'
         : (live!.error?.message ?? '没写完');
@@ -261,8 +277,8 @@ function Reader({ civ }: { civ: Civ }) {
             <nav className="bk-toc" aria-label="目录">
               {chapters.map((c) => (
                 <button key={c.id} className="bk-toc-row" onClick={() => document.getElementById(c.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-                  <span className="bk-toc-n">{c.n}</span>
-                  <span className="bk-toc-t">{c.t}</span>
+                  <span className="bk-toc-n">{c.who ? '列传' : c.n}</span>
+                  <span className="bk-toc-t">{c.who ? c.who.join('、') : c.t}</span>
                   <span className="bk-toc-y">{c.y}</span>
                 </button>
               ))}

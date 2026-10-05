@@ -28,6 +28,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* "2/5 章":只在手机上显示(电脑上那行字里已经写了第几章) */
+.book-chip-n {
+  display: none;
+  flex: none;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
 .book-chip-bar {
   flex: none;
   width: 80px;
@@ -487,7 +494,7 @@
   }
 }
 
-/* ---- 窄屏(手机):成书窗口、阅读页全屏;写作进度缩成右上按钮左边一个只有细进度条的毛玻璃小块 ---- */
+/* ---- 窄屏(手机):成书窗口、阅读页全屏;写作进度缩成右上按钮左边一个毛玻璃小块(细进度条,分章写的左边加"2/5 章") ---- */
 @media (max-width: 760px) {
   .book-chip {
     height: 44px;
@@ -503,6 +510,9 @@
   }
   .book-chip-text {
     display: none;
+  }
+  .book-chip-n {
+    display: block;
   }
   .book-chip-bar {
     width: 56px;

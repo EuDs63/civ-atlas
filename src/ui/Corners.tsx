@@ -15,7 +15,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
 import { currentWorld, useSavesVersion } from './saveStore';
-import { bookProgress, bookTitleText, openBookReader, useBook } from './bookStore';
+import { bookProgress, bookTitleText, bookUnit, openBookReader, useBook } from './bookStore';
 import type { HoverInfo } from './hoverInfo';
 import { Icon } from './icons';
 import { LayerPopover, type LayerPopoverProps } from './LayerPopover';
@@ -81,7 +81,8 @@ function AssistantButton({ disabled }: { disabled: boolean }) {
 }
 
 /**
- * 右上的写作进度:"正在撰写《某某通史》"+ 80px 细进度条;写完"《某某通史》已完成 · 打开",点开读过就收起。
+ * 右上的写作进度:"正在撰写《某某通史》"+ 80px 细进度条;分几次写的(长篇一章一次)写"正在写《某某通史》第 2 章(共 5 章)",
+ * 手机上只有进度条和左边的"2/5 章"。写完"《某某通史》已完成 · 打开",点开读过就收起。
  * 助手开着、这本书是助手写的:进度在助手里那一行,这里不再重复
  */
 function BookChip() {
@@ -94,6 +95,8 @@ function BookChip() {
   const name = bookTitleText(job.title, job.opts.scope, currentWorld()?.title);
   const writing = job.status === 'writing';
   const pct = Math.round(bookProgress(job) * 100);
+  const unit = bookUnit(job.opts.style);
+  const parts = writing && job.calls > 1;
   return (
     <button
       className={`book-chip${writing ? '' : ' done'}`}
@@ -101,7 +104,10 @@ function BookChip() {
       onClick={() => openBookReader(writing ? null : job.key)}
       title={writing ? '看看写到哪了' : '打开阅读'}
     >
-      <span className="book-chip-text">{writing ? `正在撰写${name}` : `${name}已完成 · 打开`}</span>
+      <span className="book-chip-text">
+        {!writing ? `${name}已完成 · 打开` : parts ? `正在写${name}第 ${job.call + 1} ${unit}（共 ${job.calls} ${unit}）` : `正在撰写${name}`}
+      </span>
+      {parts && <span className="book-chip-n">{`${job.call + 1}/${job.calls} ${unit}`}</span>}
       <span className="book-chip-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
         <span style={{ width: `${pct}%` }} />
       </span>

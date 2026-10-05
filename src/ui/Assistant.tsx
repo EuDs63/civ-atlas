@@ -19,7 +19,7 @@ import { capitalAt, polityAlive, polityAllTitles, polityName } from '../gen/civ/
 import { openAiSettings, useAiStatus } from '../ai/client';
 import { stepsSummary, type TrialRow, type TrialView } from '../ai/agent/assistant';
 import { WISH_MAX, type RewriteLock } from '../ai/prompts/rewrite';
-import { bookProgress, openBookReader, useBook } from './bookStore';
+import { bookProgress, bookUnit, openBookReader, useBook } from './bookStore';
 import { getCivTime, pickChronicleEntry, setSelection, useSelection, type MapSelection } from './civView';
 import { useEdits } from './editsStore';
 import { requestFly } from './panelStore';
@@ -358,7 +358,7 @@ function BookRow({ s }: { s: AsStep }) {
   const failed = j?.status === 'error' || j?.status === 'stopped';
   const pct = j ? Math.round(bookProgress(j) * 100) : 100;
   const how = s.summary ?? '';
-  const now = writing ? `正在写第 ${Math.min(j!.calls, j!.call + 1)} 章` : failed ? '没写完' : '写好了，在「成书」里';
+  const now = writing ? `正在写第 ${Math.min(j!.calls, j!.call + 1)} ${bookUnit(j!.opts.style)}` : failed ? '没写完' : '写好了，在「成书」里';
   return (
     <div className="ast-row" data-tool="write_book">
       <StepIcon state={writing ? 'run' : failed ? 'error' : 'ok'} />

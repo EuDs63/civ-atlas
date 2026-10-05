@@ -115,6 +115,20 @@ describe('AI 写史书:材料', () => {
     for (const y of years) expect(y >= p.sections[1].from && y <= p.sections[1].to).toBe(true);
   });
 
+  it('纪传体通史:本纪、世家的篇名用这段结束时的国号(和卡片上一样;亡了的用亡国前的)', () => {
+    const p = buildHistoryPrompts(civ, { scope: { kind: 'world' }, style: 'biography', length: 'medium' });
+    const parts = p.sections.filter((s) => s.part === 'annal' || s.part === 'house');
+    expect(parts.length).toBeGreaterThanOrEqual(2);
+    for (const s of parts) {
+      const q = civ.polities[s.polity!];
+      const last = q.ended !== undefined ? Math.max(q.founded, q.ended - 1 / 512) : civ.endYear;
+      expect(s.name).toBe(polityName(q, Math.min(s.to, last)) || q.name);
+    }
+    // 种子 7 有国家后来改了国号:篇名是后来的
+    expect(parts.some((s) => s.name !== (polityName(civ.polities[s.polity!], civ.polities[s.polity!].founded) || civ.polities[s.polity!].name))).toBe(true);
+    expect(userOf(civ, { scope: { kind: 'world' }, style: 'biography', length: 'medium' })).toContain(`本纪·${parts.find((s) => s.part === 'annal')!.name}`);
+  });
+
   it('国史:主角写全(国号先后、历任国都、历朝、疆域、四邻),东方国家按朝代分章;书名用国号', () => {
     const p = buildHistoryPrompts(civ, { scope: { kind: 'polity', polity: east.id }, style: 'classic', length: 'medium' });
     const user = historyMessages(p, 0)[1].content;

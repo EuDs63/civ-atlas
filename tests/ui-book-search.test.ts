@@ -25,7 +25,7 @@ import {
 } from '../src/ui/bookStore';
 import { _resetToasts, getToast } from '../src/ui/toastStore';
 import { cultureRegion, polityNameAt, searchCiv, SEARCH_LIMIT } from '../src/ui/searchIndex';
-import { parseChapter } from '../src/ui/BookReader';
+import { layout, lifeName, parseChapter } from '../src/ui/BookReader';
 
 const world = generateWorld({ ...DEFAULT_PARAMS, seed: 7 });
 const civ = generateCiv(world);
@@ -160,6 +160,25 @@ describe('成书:后台写作', () => {
     expect(parseChapter('第三章 三朝鼎立(1536—2349)')).toEqual({ n: '第三章', t: '三朝鼎立', y: '1536–2349' });
     expect(parseChapter('本纪·大澜王朝')).toEqual({ n: '本纪', t: '大澜王朝', y: '' });
     expect(parseChapter('列传')).toEqual({ n: '', t: '列传', y: '' });
+    // 全角括号、全角冒号
+    expect(parseChapter('卷一 诸部初立\uff08第 0—1045 年\uff09')).toEqual({ n: '卷一', t: '诸部初立', y: '0–1045' });
+    expect(parseChapter('本纪\uff1a大澜王朝')).toEqual({ n: '本纪', t: '大澜王朝', y: '' });
+  });
+
+  it('列传在目录里写这一篇写了谁(从"### 某某传"取)', () => {
+    expect(lifeName('司空弈传')).toBe('司空弈');
+    expect(lifeName('二、顾珏传(第 1200—1260 年)')).toBe('顾珏');
+    expect(lifeName('司空弈、顾珏合传')).toBe('司空弈、顾珏');
+    expect(lifeName('顾珏传\uff08第 1200—1260 年\uff09')).toBe('顾珏');
+    expect(lifeName('列传')).toBe('');
+    expect(lifeName('史臣曰')).toBe('');
+    const text = ['## 本纪·大渊王朝', '正文。', '### 太祖起兵', '## 列传', '### 司空弈传', '甲。', '### 顾珏传', '乙。', '### 史臣曰', '## 列传·二', '### 萨利尔传'].join('\n');
+    const { chapters } = layout(text, '世界通史');
+    expect(chapters.map((c) => [c.n, c.t, c.who])).toEqual([
+      ['本纪', '大渊王朝', undefined],
+      ['', '列传', ['司空弈', '顾珏']],
+      ['列传', '二', ['萨利尔']],
+    ]);
   });
 });
 
