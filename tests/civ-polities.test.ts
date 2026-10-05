@@ -373,7 +373,8 @@ describe('城市成长 + 国家', () => {
           if (base[k] === fixed[k]) continue;
           changed++;
           // 海岸边的像素最近的地块可能是水,"像素 → 州"是借邻块的,本来就可能不准,按线改判正好纠正它
-          if (dist[k] >= 3 && nearWater(k)) continue;
+          // (海岸断头接到岸线上的那一截线,穿过的正是这种离水稍远的借来的陆地)
+          if (dist[k] >= 3 && (nearWater(k) || civ.regions.of[r.cell[k]] < 0)) continue;
           far = Math.max(far, dist[k]);
           if (dist[k] >= 3) beyond3++;
         }
@@ -414,6 +415,42 @@ describe('城市成长 + 国家', () => {
       }
     }
   }, 60_000);
+
+  it('海岸断头接到岸线上:网格的海岸外面多出来的陆地上也有线,大多数断头离水不到 1 个单位', () => {
+    for (const seed of [7, 2024]) {
+      const w = world({ ...small, seed });
+      const civ = civOf({ ...small, seed });
+      const r = rasterize(w, 1);
+      const W = r.w;
+      const waterNear = (x: number, y: number) => {
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = (((Math.floor(x) + dx) % W) + W) % W;
+            const yy = Math.floor(y) + dy;
+            if (yy >= 0 && yy < r.h && r.water[yy * W + xx] !== 0) return true;
+          }
+        return false;
+      };
+      const p: CivDrawParams = { world: w, raster: r, civ, style: 'fantasy', year: civ.endYear, show: { ...CIV_SHOW_OFF, polities: true } };
+      let n = 0;
+      let ok = 0;
+      for (const l of borderLines(p, Layer.Polity)) {
+        const q = l.pts;
+        const m = q.length / 2;
+        for (const [flag, i] of [
+          [l.end0, 0],
+          [l.end1, m - 1],
+        ] as const) {
+          if (!flag) continue;
+          n++;
+          if (waterNear(q[i * 2], q[i * 2 + 1])) ok++;
+        }
+      }
+      expect(n).toBeGreaterThan(20);
+      // 只停在网格海岸三角形里时约三四成;接上以后七成左右(接不上的:先走进了别的陆地块,或者两个地块间距内没碰到水)
+      expect(ok / n, `seed ${seed}`).toBeGreaterThan(0.6);
+    }
+  });
 
   it('界线由州界的链接成:每条线两侧归属不同,端点只落在三国交汇处或海岸', () => {
     const w = world({ ...small, seed: 7 });

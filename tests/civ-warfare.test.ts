@@ -6,16 +6,17 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_PARAMS, generateWorld, type World } from '../src/gen/world';
 import { generateCiv, type Civ } from '../src/gen/civ';
 import { ownersAt } from '../src/gen/civ/timeline';
-import type { Raster } from '../src/gen/raster';
+import { rasterize, type Raster } from '../src/gen/raster';
 import { CIV_SHOW_DEFAULT, CIV_SHOW_OFF, type CivDrawParams } from '../src/render/civ/overlay';
 import { AFTER, drawWarfare, frontTeeth, warFront, warMarkPoints, warScene, warsShown, warSpans } from '../src/render/civ/warfare';
 import type { LabelView } from '../src/render/labels/draw';
 
 let world: World;
 let civ: Civ;
+let raster: Raster;
 const params = (year: number, show = { ...CIV_SHOW_OFF, polities: true, wars: true }): CivDrawParams => ({
   world,
-  raster: {} as Raster,
+  raster,
   civ,
   style: 'fantasy',
   year,
@@ -49,6 +50,8 @@ function warYears(): number[] {
 beforeAll(() => {
   world = generateWorld({ ...DEFAULT_PARAMS, seed: 7, cells: 12000 });
   civ = generateCiv(world);
+  // 国界在海岸的断头按栅格接到岸线上(borders.ts),要一张真栅格
+  raster = rasterize(world, 1);
   // Node 里没有 Path2D:只要能加点就行
   (globalThis as { Path2D?: unknown }).Path2D ??= class {
     moveTo() {}

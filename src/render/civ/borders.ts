@@ -19,6 +19,7 @@
  * 接成长线时后一条挪到前一条的那一份上;色块按界线重新判归属、画线时,伸出主图左右边的部分在另一边再算 / 画一份。
  */
 import type { Mesh } from '../../gen/mesh';
+import type { Raster } from '../../gen/raster';
 import type { Civ } from '../../gen/civ/types';
 import { Layer } from '../../gen/civ/types';
 import { logIndexAfter, ownersAt, type Owners } from '../../gen/civ/timeline';
@@ -29,11 +30,16 @@ import { projectLinePts, type Projector } from '../projection';
 
 /** 色块按界线重新判归属的范围(世界单位):平滑后的线离原始像素分界最多约 3 个单位(单测核对) */
 export const BAND = 4;
+/** 海岸断头附近、州是从邻块借来的像素(见 territory.ts 的 pixelRegions):按界线重新判的范围放宽到这么远 */
+const WEAK_BAND = 2 * BAND;
 /** 界线平滑几遍(Chaikin):两遍后每段约 1 个单位长,地图上已看不出折角 */
 const SMOOTH_ROUNDS = 2;
 /** 手绘抖动:幅度(世界单位)、波长(世界单位) */
 const JITTER_AMP = 0.55;
 const JITTER_WAVE = 5;
+/** 海岸断头往外接到岸线上:最远接多长、每步走多少(世界单位;最远约两个地块的间距) */
+const COAST_REACH = 16;
+const COAST_STEP = 0.25;
 
 // ---------------------------------------------------------------------------
 // 1. 州界的链
@@ -355,8 +361,123 @@ function finish(l: SidedLine, fantasy: boolean): SidedLine {
   return { ...l, pts: p };
 }
 
+/**
+ * 海岸断头接到岸线上。网格的海岸在陆地块和水块的中心之间,栅格上的岸线细一些,有的地方比它往外多出一截陆地;
+ * 界线在网格的海岸三角形里就断了,多出来的那截陆地上没有线,色块按像素借来的州归属 ——
+ * 放大后在海岸和国界相交处凸出一块边缘一格一格的色块,越过界线的延长线。
+ * 从断头沿两侧最近的陆地块的中垂线(两家地块的分界)往外走,碰到水(栅格)就把线接到那儿。
+ * 找不到两侧的地块、走出 COAST_REACH 还没碰到水、或者先走进了别的陆地块,就不接
+ */
+function toCoast(l: SidedLine, mesh: Mesh, raster: Raster, regionOf: Int32Array, owner: ArrayLike<number>): SidedLine {
+  if (l.closed || !(l.end0 || l.end1)) return l;
+  const p = l.pts;
+  const m = p.length / 2;
+  if (m < 2) return l;
+  const back = Math.min(m - 1, 4);
+  const a = l.end0 ? coastTip(p[0], p[1], p[0] - p[back * 2], p[1] - p[back * 2 + 1], l.right, l.left, mesh, raster, regionOf, owner) : null;
+  const b = l.end1
+    ? coastTip(p[(m - 1) * 2], p[(m - 1) * 2 + 1], p[(m - 1) * 2] - p[(m - 1 - back) * 2], p[(m - 1) * 2 + 1] - p[(m - 1 - back) * 2 + 1], l.left, l.right, mesh, raster, regionOf, owner)
+    : null;
+  if (!a && !b) return l;
+  const q = new Float32Array(p.length + (a ? 2 : 0) + (b ? 2 : 0));
+  let o = 0;
+  if (a) {
+    q[o++] = a[0];
+    q[o++] = a[1];
+  }
+  q.set(p, o);
+  o += p.length;
+  if (b) {
+    q[o++] = b[0];
+    q[o++] = b[1];
+  }
+  return { ...l, pts: q };
+}
+
+/**
+ * 断头 (ex, ey) 往外(大致沿 (tx, ty))接到岸线的那一点;接不上 = null。
+ * 往外走时 left 一家在左手边、right 一家在右手边(和 bandLabels 判左右同一个算法)
+ */
+function coastTip(
+  ex: number,
+  ey: number,
+  tx: number,
+  ty: number,
+  left: number,
+  right: number,
+  mesh: Mesh,
+  raster: Raster,
+  regionOf: Int32Array,
+  owner: ArrayLike<number>,
+): [number, number] | null {
+  const { w, h, scale, water, cell } = raster;
+  const W = w / scale;
+  const at = (x: number, y: number) => {
+    const u = x - W * Math.floor(x / W);
+    const py = Math.floor(y * scale);
+    if (py < 0 || py >= h) return -1;
+    return py * w + Math.min(w - 1, Math.floor(u * scale));
+  };
+  const k0 = at(ex, ey);
+  if (k0 < 0 || water[k0] !== 0) return null;
+  // 两侧最近的陆地块:断头所在地块和它的邻块里找
+  const c0 = cell[k0];
+  const { adjStart, adj, x: mx, y: my } = mesh;
+  let la = -1;
+  let ra = -1;
+  let ld = Infinity;
+  let rd = Infinity;
+  const look = (c: number) => {
+    const r = regionOf[c];
+    if (r < 0) return;
+    const o = owner[r];
+    if (o !== left && o !== right) return;
+    const dx = nearX(mx[c], ex, W) - ex;
+    const d = dx * dx + (my[c] - ey) ** 2;
+    if (o === left && d < ld) {
+      ld = d;
+      la = c;
+    }
+    if (o === right && d < rd) {
+      rd = d;
+      ra = c;
+    }
+  };
+  look(c0);
+  for (let q = adjStart[c0]; q < adjStart[c0 + 1]; q++) look(adj[q]);
+  if (la < 0 || ra < 0) return null;
+  // 中垂线方向:垂直于两块中心的连线,朝断头往外的方向
+  const ax = nearX(mx[la], ex, W);
+  const bx = nearX(mx[ra], ex, W);
+  let dx = -(my[ra] - my[la]);
+  let dy = bx - ax;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (!(len > 0)) return null;
+  dx /= len;
+  dy /= len;
+  if (dx * tx + dy * ty < 0) {
+    dx = -dx;
+    dy = -dy;
+  }
+  // 往外走:left 一家要在左手边(左手 = (−dy, dx) 一侧)
+  if ((ax - ex) * -dy + (my[la] - ey) * dx <= 0) return null;
+  for (let s = COAST_STEP; s <= COAST_REACH; s += COAST_STEP) {
+    const x = ex + dx * s;
+    const y = ey + dy * s;
+    const k = at(x, y);
+    if (k < 0) return null;
+    if (water[k] !== 0) return [x, y];
+    // 只穿过这两块和网格上是水的地块(中垂线正是这两块的分界);走进别的陆地块就不接
+    const c = cell[k];
+    if (c !== la && c !== ra && regionOf[c] >= 0) return null;
+  }
+  return null;
+}
+
 interface LinesCache {
   key: number;
+  /** 海岸断头按哪张栅格接的(换了栅格要重接) */
+  raster: Raster;
   lines: SidedLine[];
 }
 interface CivLines {
@@ -395,11 +516,11 @@ export function borderLines(p: CivDrawParams, layer: Layer): SidedLine[] {
   const fantasy = p.style === 'fantasy';
   const ck = `${layer}|${fantasy ? 1 : 0}`;
   const hit = c.byKey.get(ck);
-  if (hit && hit.key === key) return hit.lines;
+  if (hit && hit.key === key && hit.raster === p.raster) return hit.lines;
   const own = ownersAt(civ, p.year, c.owners);
   const owner = layer === Layer.Culture ? own.culture : own.polity;
-  const lines = mergeChains(regionChains(world.mesh, civ), owner).map((l) => finish(l, fantasy));
-  c.byKey.set(ck, { key, lines });
+  const lines = mergeChains(regionChains(world.mesh, civ), owner).map((l) => finish(toCoast(l, world.mesh, p.raster, civ.regions.of, owner), fantasy));
+  c.byKey.set(ck, { key, raster: p.raster, lines });
   return lines;
 }
 
@@ -425,7 +546,17 @@ const NO_RANGE: [number, number] = [0, 0];
  * 最近点落在折线顶点上时,按两侧线段法线之和判左右(尖角外侧也不会判反)。
  * 像素的采样点和 washPixels 一样:工作像素 (x, y) 对应全分辨率像素 (x·f + ⌊f/2⌋, …) 的中心。
  */
-export function bandLabels(label: Int16Array, W: number, H: number, f: number, scale: number, lines: SidedLine[], wrap = 0): void {
+export function bandLabels(
+  label: Int16Array,
+  W: number,
+  H: number,
+  f: number,
+  scale: number,
+  lines: SidedLine[],
+  wrap = 0,
+  /** 工作分辨率:1 = 这个像素的州是从邻块借来的;海岸断头附近这样的像素按 WEAK_BAND 判 */
+  weak: Uint8Array | null = null,
+): void {
   const N = W * H;
   let sc = bandScratch.get(N);
   if (!sc) bandScratch.set(N, (sc = { best: new Float32Array(N), lab: new Int16Array(N), stamp: new Int32Array(N), s: 0 }));
@@ -434,10 +565,15 @@ export function bandLabels(label: Int16Array, W: number, H: number, f: number, s
   const off = (f >> 1) + 0.5;
   const band = BAND * scale;
   const band2 = band * band;
+  const wide = WEAK_BAND * scale;
+  const wide2 = wide * wide;
   const touched: number[] = [];
   for (const l of lines) {
     const p = l.pts;
     const m = p.length / 2;
+    // 海岸断头附近的几段(沿线离断头 COAST_SPAN 以内):借来州的像素放宽范围 —— 接到岸线上的那一截线旁边,
+    // 网格的海岸外面多出来的陆地整片跟着线判,不在线外剩下一小条别家的颜色
+    const nearEnd = weak && !l.closed && (l.end0 || l.end1) ? endSegments(p, l.end0, l.end1) : null;
     // 各段的单位法线(左手边):(−dy, dx) / 长度。最近点落在折线的顶点上时,用两侧法线之和判左右
     // (只看一段的延长线,在尖角外侧会判反)
     const nx = new Float64Array(m - 1);
@@ -450,9 +586,10 @@ export function bandLabels(label: Int16Array, W: number, H: number, f: number, s
       ny[i] = dx / len;
     }
     const segs = m - 1;
-    // 东西相连:伸出主图左右边的线在另一边再判一份(平移 sh 个世界单位;不相连时只有 0)
+    // 东西相连:伸出主图左右边的线在另一边再判一份(平移 sh 个世界单位;不相连时只有 0)。
+    // 断头附近放宽到 WEAK_BAND 的,离左右边 WEAK_BAND 以内就要在另一边判
     const [lo, hi] = wrap ? xRange(p) : NO_RANGE;
-    for (const sh of wrapShifts(lo, hi, wrap, BAND)) {
+    for (const sh of wrapShifts(lo, hi, wrap, nearEnd ? WEAK_BAND : BAND)) {
       const ox = sh * scale;
       // 海岸断头:断头外面(过了端点、沿线的方向再往前)BAND 以内的像素保持原样。方向取最后几个点,抖动不影响
       const back = Math.min(segs, 4);
@@ -464,10 +601,12 @@ export function bandLabels(label: Int16Array, W: number, H: number, f: number, s
       const e1y = p[segs * 2 + 1] * scale;
       const d1x = p[segs * 2] - p[(segs - back) * 2];
       const d1y = p[segs * 2 + 1] - p[(segs - back) * 2 + 1];
-      const beyond = (px: number, py: number) =>
-        (l.end0 && (px - e0x) * d0x + (py - e0y) * d0y > 0 && (px - e0x) ** 2 + (py - e0y) ** 2 <= band2) ||
-        (l.end1 && (px - e1x) * d1x + (py - e1y) * d1y > 0 && (px - e1x) ** 2 + (py - e1y) ** 2 <= band2);
+      const beyond = (px: number, py: number, lim: number) =>
+        (l.end0 && (px - e0x) * d0x + (py - e0y) * d0y > 0 && (px - e0x) ** 2 + (py - e0y) ** 2 <= lim) ||
+        (l.end1 && (px - e1x) * d1x + (py - e1y) * d1y > 0 && (px - e1x) ** 2 + (py - e1y) ** 2 <= lim);
       for (let i = 0; i < segs; i++) {
+        const wideHere = nearEnd !== null && nearEnd[i] === 1;
+        const reach = wideHere ? wide : band;
         const ax = p[i * 2] * scale + ox;
         const ay = p[i * 2 + 1] * scale;
         const bx = p[i * 2 + 2] * scale + ox;
@@ -484,10 +623,10 @@ export function bandLabels(label: Int16Array, W: number, H: number, f: number, s
         const n1x = nx[i] + nx[next];
         const n1y = ny[i] + ny[next];
         // 工作像素范围:采样点 = x·f + off
-        const x0 = Math.max(0, Math.ceil((Math.min(ax, bx) - band - off) / f));
-        const x1 = Math.min(W - 1, Math.floor((Math.max(ax, bx) + band - off) / f));
-        const y0 = Math.max(0, Math.ceil((Math.min(ay, by) - band - off) / f));
-        const y1 = Math.min(H - 1, Math.floor((Math.max(ay, by) + band - off) / f));
+        const x0 = Math.max(0, Math.ceil((Math.min(ax, bx) - reach - off) / f));
+        const x1 = Math.min(W - 1, Math.floor((Math.max(ax, bx) + reach - off) / f));
+        const y0 = Math.max(0, Math.ceil((Math.min(ay, by) - reach - off) / f));
+        const y1 = Math.min(H - 1, Math.floor((Math.max(ay, by) + reach - off) / f));
         for (let y = y0; y <= y1; y++) {
           const py = y * f + off;
           const row = y * W;
@@ -513,20 +652,34 @@ export function bandLabels(label: Int16Array, W: number, H: number, f: number, s
               side = dx * (py - ay) - dy * (px - ax);
             }
             const d2 = qx * qx + qy * qy;
-            if (d2 > band2) continue;
+            const lim = wideHere && weak![k] === 1 ? wide2 : band2;
+            if (d2 > lim) continue;
             if (stamp[k] === st && d2 >= best[k]) continue;
             if (stamp[k] !== st) {
               stamp[k] = st;
               touched.push(k);
             }
             best[k] = d2;
-            lab[k] = (l.end0 || l.end1) && beyond(px, py) ? KEEP : side > 0 ? l.left : l.right;
+            lab[k] = (l.end0 || l.end1) && beyond(px, py, lim) ? KEEP : side > 0 ? l.left : l.right;
           }
         }
       }
     }
   }
   for (const k of touched) if (lab[k] !== KEEP) label[k] = lab[k];
+}
+
+/** 海岸断头附近放宽范围的那一截:沿线离断头多远以内(世界单位,够盖住接到岸线上的那一截) */
+const COAST_SPAN = COAST_REACH + WEAK_BAND;
+
+/** 折线的每一段是不是在海岸断头附近(沿线离断头 COAST_SPAN 以内) */
+function endSegments(p: Float32Array, end0: boolean, end1: boolean): Uint8Array {
+  const segs = p.length / 2 - 1;
+  const out = new Uint8Array(segs);
+  const seg = (i: number) => Math.hypot(p[i * 2 + 2] - p[i * 2], p[i * 2 + 3] - p[i * 2 + 1]);
+  if (end0) for (let i = 0, d = 0; i < segs && d <= COAST_SPAN; d += seg(i), i++) out[i] = 1;
+  if (end1) for (let i = segs - 1, d = 0; i >= 0 && d <= COAST_SPAN; d += seg(i), i--) out[i] = 1;
+  return out;
 }
 
 // ---------------------------------------------------------------------------

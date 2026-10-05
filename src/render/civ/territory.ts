@@ -105,8 +105,11 @@ function grain(): Float32Array {
   return g;
 }
 
-/** 每个像素属于哪个州(水 = −1)。陆地像素最近的地块若是水(海岸细节),就借一个相邻陆地块的州 */
-export function pixelRegions(mesh: Mesh, raster: Raster, regionOf: Int32Array): Int16Array {
+/**
+ * 每个像素属于哪个州(水 = −1)。陆地像素最近的地块若是水(海岸细节),就借一个相邻陆地块的州;
+ * 给了 weak 就把这些借来的像素记成 1(它们的归属不可靠,按界线重新判时放宽范围,见 bandLabels)
+ */
+export function pixelRegions(mesh: Mesh, raster: Raster, regionOf: Int32Array, weak?: Uint8Array): Int16Array {
   const { w, h, cell, water } = raster;
   const out = new Int16Array(w * h);
   const { adjStart, adj } = mesh;
@@ -119,6 +122,7 @@ export function pixelRegions(mesh: Mesh, raster: Raster, regionOf: Int32Array): 
     let r = regionOf[c];
     if (r < 0) {
       for (let q = adjStart[c]; q < adjStart[c + 1] && r < 0; q++) r = regionOf[adj[q]];
+      if (weak) weak[k] = 1;
     }
     out[k] = r;
   }
@@ -659,19 +663,31 @@ export function labelImage(
   out: Int16Array,
   /** 世界东西相连的周期(世界宽度;0 = 不相连):伸出主图左右边的界线在另一边也判 */
   wrap = 0,
+  /** 全分辨率:1 = 这个像素的州是从邻块借来的(见 pixelRegions) */
+  weak: Uint8Array | null = null,
 ): Int16Array {
   const W = Math.ceil(w / f);
   const H = Math.ceil(h / f);
   const off = f >> 1;
+  const wk = weak ? weakScratch(W * H) : null;
   for (let y = 0; y < H; y++) {
     const row = Math.min(h - 1, y * f + off) * w;
     for (let x = 0; x < W; x++) {
-      const r = pixRegion[row + Math.min(w - 1, x * f + off)];
+      const k = row + Math.min(w - 1, x * f + off);
+      const r = pixRegion[k];
       out[y * W + x] = r < 0 ? -2 : owner[r];
+      if (wk) wk[y * W + x] = weak![k];
     }
   }
-  if (lines) bandLabels(out, W, H, f, scale, lines, wrap);
+  if (lines) bandLabels(out, W, H, f, scale, lines, wrap, wk);
   return out;
+}
+
+const weakScratches = new Map<number, Uint8Array>();
+function weakScratch(n: number): Uint8Array {
+  let a = weakScratches.get(n);
+  if (!a) weakScratches.set(n, (a = new Uint8Array(n)));
+  return a;
 }
 
 // ---- 画到叠加层上 ----
@@ -696,6 +712,8 @@ interface LayerLook {
 interface Cache {
   raster: Raster;
   pix: Int16Array;
+  /** 像素的州是从邻块借来的(见 pixelRegions) */
+  weak: Uint8Array;
   own: Owners;
   looks: [LayerLook, LayerLook];
   bufs: Map<number, Buf>;
@@ -715,9 +733,11 @@ function cacheOf(p: CivDrawParams): Cache {
   let c = caches.get(civ);
   if (!c || c.raster !== raster) {
     const R = civ.regions.count;
+    let weak: Uint8Array;
     c = {
       raster,
-      pix: pixelRegions(world.mesh, raster, civ.regions.of),
+      pix: pixelRegions(world.mesh, raster, civ.regions.of, (weak = new Uint8Array(raster.w * raster.h))),
+      weak,
       own: { culture: new Int16Array(R), polity: new Int16Array(R) },
       looks: [lookOf(civ.cultures, R), lookOf(civ.polities, R)],
       bufs: new Map(),
@@ -810,7 +830,7 @@ export function washFields(p: CivDrawParams, f: number): WashFields | null {
   const wrap = meshWrap(p.world.mesh);
   const lines = borderLines(p, layer);
   const label = old && old.label.length === W * H ? old.label : new Int16Array(W * H);
-  labelImage(raster.w, raster.h, f, raster.scale, c.pix, owner, lines, label, wrap);
+  labelImage(raster.w, raster.h, f, raster.scale, c.pix, owner, lines, label, wrap, c.weak);
   const edge = edgeField({ w: raster.w, h: raster.h, f, pixRegion: c.pix, owner, colors: look.colors, style: p.style, label, wrap: wrap > 0 }, old?.edge ?? {
     G: 0,
     GW: 0,
