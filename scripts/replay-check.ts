@@ -2531,7 +2531,14 @@ for (const style of ['realistic', 'fantasy']) {
     for (let i = 0; i < 6; i++) {
       const k = (await view()).k;
       if (k >= 2.9) break;
-      await page.mouse.wheel(0, -Math.log(3 / k) / 0.0015);
+      // 只差一点时一下不到 50 像素,会被当成触控板平移:按着 Ctrl 滚(当成捏合,倍数 = e^(−deltaY / 100))
+      const d = -Math.log(3 / k) / 0.0015;
+      if (Math.abs(d) >= 50) await page.mouse.wheel(0, d);
+      else {
+        await page.keyboard.down('Control');
+        await page.mouse.wheel(0, -Math.log(3 / k) * 100);
+        await page.keyboard.up('Control');
+      }
       await page.waitForTimeout(100);
     }
     await openOverview(page, 'chronicle');
@@ -2915,6 +2922,55 @@ for (const style of ['realistic', 'fantasy']) {
   await page.evaluate(() => localStorage.clear());
 }
 
+// 触控板和鼠标滚轮(平面地图):鼠标滚轮一格照旧缩放;触控板捏合跟着手指缩放(Chrome 把捏合报成按着 Ctrl 的滚轮);
+// 触控板两指滑动 = 平移、不缩放;手指在侧栏卡片上捏合,浏览器不放大整个网页
+{
+  const tp = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  tp.on('pageerror', (e) => errs.push(`触控板:${e.message}`));
+  const cdp = await tp.context().newCDPSession(tp);
+  await tp.goto(`${dev.url}/?seed=7`);
+  await tp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await tp.waitForTimeout(300);
+  const st = (await tp.locator('main.stage').boundingBox())!;
+  const x = Math.round(st.x + SIDE_ROOM + (st.width - SIDE_ROOM) / 2);
+  const y = Math.round(st.y + st.height / 2);
+  type V = { k: number; x: number; y: number; lon: number };
+  const view = () => tp.evaluate(() => ({ ...(window as any).__wfView })) as Promise<V>;
+  const wheel = (dx: number, dy: number) => cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: dx, deltaY: dy });
+  const pinch = (px: number, py: number, scaleFactor: number) =>
+    cdp.send('Input.synthesizePinchGesture', { x: Math.round(px), y: Math.round(py), scaleFactor, relativeSpeed: 400, gestureSourceType: 'mouse' });
+  const v0 = await view();
+  await wheel(0, -100);
+  await tp.waitForTimeout(400);
+  const v1 = await view();
+  await pinch(x, y, 2);
+  await tp.waitForTimeout(400);
+  const v2 = await view();
+  // 停一会儿再滑(和上面的滚轮不连成一串):往右上推,地图往左上走
+  await tp.waitForTimeout(400);
+  for (let i = 0; i < 20; i++) await wheel(6, 4);
+  await tp.waitForTimeout(400);
+  const v3 = await view();
+  const sb = (await tp.locator('.sidebar').boundingBox())!;
+  await pinch(sb.x + sb.width / 2, sb.y + sb.height / 2, 2);
+  await tp.waitForTimeout(400);
+  const pageScale = await tp.evaluate(() => window.visualViewport?.scale ?? 1);
+  const v4 = await view();
+  const dLon = ((v3.lon - v2.lon + 540) % 360) - 180;
+  console.log(
+    `触控板:滚轮一格 ${(v1.k / v0.k).toFixed(3)} 倍;捏合张开 2 倍 → ${(v2.k / v1.k).toFixed(3)} 倍;` +
+      `两指滑动 (120, 80) → 缩放 ${(v3.k / v2.k).toFixed(3)} 倍、中心经度 ${dLon.toFixed(1)}°、上下 ${(v3.y - v2.y).toFixed(0)};侧栏上捏合 → 网页 ${pageScale.toFixed(2)} 倍、地图 ${(v4.k / v3.k).toFixed(3)} 倍`,
+  );
+  if (!(Math.abs(v1.k / v0.k - Math.exp(0.15)) < 0.01)) errs.push(`鼠标滚轮:一格应该放大约 1.16 倍(${(v1.k / v0.k).toFixed(3)})`);
+  if (!(Math.abs(v2.k / v1.k - 2) < 0.05)) errs.push(`触控板:手指张开 2 倍,地图应该也放大 2 倍(${(v2.k / v1.k).toFixed(3)})`);
+  if (v3.k !== v2.k) errs.push('触控板:两指滑动不该缩放');
+  if (!(dLon > 5)) errs.push(`触控板:两指往右滑,地图应该往左走(中心经度 ${dLon.toFixed(1)}°)`);
+  if (!(Math.abs(v3.y - v2.y + 80) < 2)) errs.push(`触控板:两指往上推 80 像素,地图应该往上走 80 像素(${(v3.y - v2.y).toFixed(0)})`);
+  if (pageScale !== 1) errs.push(`触控板:侧栏上捏合,浏览器把整个网页放大了(${pageScale.toFixed(2)} 倍)`);
+  if (v4.k !== v3.k) errs.push('触控板:侧栏上捏合不该缩放地图');
+  await tp.close();
+}
+
 // 3D 地球仪:从平面主图打开的耗时(网址记下 proj=globe)、转动每帧耗时(无头浏览器是软件渲染,量一个上限);拖动转了、拖动不算单击;
 // 悬停有信息;单击一座城 → 详情是这座城;时间轴拖到早年 → 文明层贴图重新上传、球上画面变了;
 // 回放世界形成在球上放;导出菜单里的"导出地球仪这一面"、双击回正;切回平面地图时中心经度接上;没有 WebGL2(globe=cpu)时退回 CPU 画、不白屏
@@ -2973,6 +3029,26 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(`拖动 200 像素(转动时分辨率比例 ${g1.q?.toFixed(2)}):经度 ${g0.lon.toFixed(1)}° → ${g1.lon.toFixed(1)}°,纬度 ${g0.lat.toFixed(1)}° → ${g1.lat.toFixed(1)}°`);
   if (!(dLon > 10)) errs.push('地球仪:往左拖没有往东转');
   if (await gp.locator('.inspector').count()) errs.push('地球仪:拖动被当成了单击');
+
+  // 触控板两指往右滑:和往左拖一样往东转、不缩放;捏合张开 1.5 倍 → 球也放大 1.5 倍
+  {
+    const cdp = await gp.context().newCDPSession(gp);
+    await gp.waitForTimeout(400);
+    const a = await G();
+    for (let i = 0; i < 20; i++) await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(cx), y: Math.round(cy), deltaX: 10, deltaY: 0 });
+    await gp.waitForTimeout(400);
+    const b = await G();
+    await cdp.send('Input.synthesizePinchGesture', { x: Math.round(cx), y: Math.round(cy), scaleFactor: 1.5, relativeSpeed: 400, gestureSourceType: 'mouse' });
+    await gp.waitForTimeout(400);
+    const c = await G();
+    const swipe = ((b.lon - a.lon + 540) % 360) - 180;
+    console.log(`地球仪触控板:两指往右滑 200 像素 → 经度 ${swipe.toFixed(1)}°、缩放 ${(b.k / a.k).toFixed(3)} 倍;捏合张开 1.5 倍 → ${(c.k / b.k).toFixed(3)} 倍`);
+    if (!(swipe > 10) || b.k !== a.k) errs.push('地球仪:触控板两指往右滑应该往东转、不缩放');
+    if (!(Math.abs(c.k / b.k - 1.5) < 0.05)) errs.push(`地球仪:手指张开 1.5 倍,球应该也放大 1.5 倍(${(c.k / b.k).toFixed(3)})`);
+    // 回到原来的大小,免得影响后面的单击、回正
+    await cdp.send('Input.synthesizePinchGesture', { x: Math.round(cx), y: Math.round(cy), scaleFactor: 1 / 1.5, relativeSpeed: 400, gestureSourceType: 'mouse' });
+    await gp.waitForTimeout(400);
+  }
 
   // 悬停
   await gp.mouse.move(cx + 30, cy - 20);

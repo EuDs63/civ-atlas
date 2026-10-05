@@ -116,6 +116,7 @@ import { AVOID_MS, measureAvoid, type Box } from './uiAvoid';
 import type { GlobeTexRequest, GlobeTexResponse } from '../globeWorker';
 import { fileBaseName } from '../gen/savefile';
 import { currentWorld } from './saveStore';
+import { createWheelReader, inGesturePinch, wheelSample } from './wheel';
 import './globe.css';
 
 const D = Math.PI / 180;
@@ -175,6 +176,11 @@ export interface GlobeApi {
   centerLon(): number;
   /** 回正:北在上、赤道居中、整个球(和双击一样;手指点两下时 App 调它) */
   reset(): void;
+  /**
+   * 以屏幕上 (cx, cy)(clientX / clientY)为中心缩放 f 倍(右下角的 + −、Safari 的触控板捏合);
+   * live = 连着来的一串(捏合):按在动画,停下再画全分辨率
+   */
+  zoomBy(f: number, cx: number, cy: number, live?: boolean): void;
   /** 世界坐标(主图坐标,和 App 的 worldToClient 一样)→ 屏幕坐标(clientX / clientY);在球的背面(或贴着边缘)= null */
   worldToClient(wx: number, wy: number): [number, number] | null;
   /** 经纬度(度)→ 屏幕坐标(clientX / clientY);在球的背面(或贴着边缘)= null */
@@ -682,6 +688,9 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     cpuSrc: { terrain: null as RgbaImage | null, civ: null as RgbaImage | null, sel: null as RgbaImage | null, replay: null as RgbaImage | null },
     cpuImg: null as ImageData | null,
     cpuIdle: 0,
+    /** 滚轮 / 触控板(转动、缩放、捏合)最后一下的时刻:之后 SETTLE_MS 以内也算在动;停下后补画一帧的定时器 */
+    wheelAt: -Infinity,
+    wheelIdle: 0,
     /** 转动时的分辨率比例(按帧间隔自动调)、帧间隔的滑动平均、上一帧的时刻、上一帧是不是在动 */
     q: 1,
     frameEma: 16,
@@ -1102,7 +1111,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     s.hlA = hlA;
     const look: GlobeLook = { style: p.style, relief: s.relief, graticule: p.graticule, hl: hlA, replay: s.replayMix };
     const { w, h, dpr } = s.size;
-    const busy = !!(s.drag || s.fly || s.inertia || s.pinch || s.shiftAnim);
+    const busy = !!(s.drag || s.fly || s.inertia || s.pinch || s.shiftAnim) || now - s.wheelAt < SETTLE_MS;
     // 中心经度和弹层里的"中央经线"、平面地图互通:停下来时记下正对着的经度(转动中不记,免得整页跟着重排)
     if (!busy) {
       const lon = (((s.view.lon / D + 180) % 360) + 360) % 360 - 180;
@@ -1281,6 +1290,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       cancelAnimationFrame(s.raf);
       s.raf = 0;
       window.clearTimeout(s.cpuIdle);
+      window.clearTimeout(s.wheelIdle);
       s.gl?.dispose();
       for (const c of [s.hd.cache, s.lo.cache]) {
         for (const b of c.values()) b.bitmap.close();
@@ -1381,6 +1391,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     flyTo: (lon, lat) => flyTo(lon, lat),
     centerLon: () => s.view.lon / D,
     reset: () => reset(),
+    zoomBy: (f, cx, cy, live) => zoomBy(f, cx, cy, live),
     worldToClient,
     lonLatToClient: (lon, lat) => llToClient(lon * D, lat * D),
   };
@@ -1557,17 +1568,26 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     if (s.moved && performance.now() - dr.t < 80 && Math.hypot(dr.vx, dr.vy) > 0.05) s.inertia = { vx: dr.vx, vy: dr.vy, t: performance.now() };
     invalidate();
   };
+  const hoverRef = useRef(onHover);
+  hoverRef.current = onHover;
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
+    // 鼠标滚轮 / 捏合 = 缩放,触控板两指滑动 = 转动(方向和滑动网页一样;怎么分见 wheel.ts)
+    const read = createWheelReader();
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const r = el.getBoundingClientRect();
+      // Safari 的捏合 App 按 gesture 事件交给 zoomBy 了
+      if (e.ctrlKey && inGesturePinch()) return;
+      const a = read(wheelSample(e));
+      if (!a) return;
+      if (a.kind === 'zoom') return zoomBy(a.f, e.clientX, e.clientY, true);
       s.fly = null;
       s.inertia = null;
-      const k2 = Math.min(GLOBE_K_MAX, Math.max(GLOBE_K_MIN, s.view.k * Math.exp(-e.deltaY * 0.0015)));
-      s.view = zoomAt(s.view, s.size.w, s.size.h, e.clientX - r.left, e.clientY - r.top, k2, s.shift);
+      s.view = dragView(s.view, frameOf(s.view, s.size.w, s.size.h).R, -a.dx, -a.dy);
+      hoverRef.current(null);
+      wheeled();
       invalidate();
     };
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -1576,6 +1596,27 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   }, []);
   /** 回正:北在上、赤道居中、整个球 */
   const reset = () => flyTo(s.view.lon / D, 0, 1, 700);
+  /**
+   * 滚轮 / 触控板一下:接下来按"在动"画(低分辨率、文字只排大字、先不记中心经度),
+   * 停下 SETTLE_MS 后补画一帧全分辨率的
+   */
+  const wheeled = () => {
+    s.wheelAt = performance.now();
+    window.clearTimeout(s.wheelIdle);
+    s.wheelIdle = window.setTimeout(invalidate, SETTLE_MS + 10);
+  };
+  /** 以屏幕上 (cx, cy)(clientX / clientY)为中心缩放 f 倍;live = 滚轮、捏合这类连着来的(按在动画) */
+  const zoomBy = (f: number, cx: number, cy: number, live = false) => {
+    const el = rootRef.current;
+    if (!el || !(f > 0) || !Number.isFinite(f)) return;
+    const r = el.getBoundingClientRect();
+    s.fly = null;
+    s.inertia = null;
+    const k2 = Math.min(GLOBE_K_MAX, Math.max(GLOBE_K_MIN, s.view.k * f));
+    s.view = zoomAt(s.view, s.size.w, s.size.h, cx - r.left, cy - r.top, k2, s.shift);
+    if (live) wheeled();
+    invalidate();
+  };
 
   // ---- 导出当前视图(导出菜单里的"导出地球仪这一面",见 exportGlobeView) ----
   const exportView = async (): Promise<GlobeExport> => {

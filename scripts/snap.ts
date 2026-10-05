@@ -67,7 +67,14 @@ if (zoom) {
     const cur = await page.evaluate(() => (window as any).__wfLabels?.k ?? 1);
     if (Math.abs(Math.log(k / cur)) < 0.01) break;
     await page.evaluate(() => (((window as any).__wfLabels ??= {}).mark = 1));
-    await page.mouse.wheel(0, -Math.log(k / cur) / 0.0015);
+    // 差得多:滚轮(一下 ≥ 50 像素才认作鼠标滚轮);只差一点:按着 Ctrl 滚一小下,当成触控板捏合(倍数 = e^(−deltaY / 100))
+    const d = -Math.log(k / cur) / 0.0015;
+    if (Math.abs(d) >= 50) await page.mouse.wheel(0, d);
+    else {
+      await page.keyboard.down('Control');
+      await page.mouse.wheel(0, -Math.log(k / cur) * 100);
+      await page.keyboard.up('Control');
+    }
     await page.waitForFunction(() => !(window as any).__wfLabels?.mark, null, { timeout: 15000 }).catch(() => {});
   }
   // 鼠标移出地图,免得悬停信息挡住画面
