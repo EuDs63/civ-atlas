@@ -327,7 +327,7 @@ export function useAiName({ civ, raw, raster, target, compact, lazy, what }: AiN
             onClick={() => !s.expanded && patch(key, { expanded: true })}
             title={s.expanded ? undefined : '点一下看全文'}
           >
-            {note.text}
+            {cleanExplanation(note.text)}
           </p>
         ) : null}
         {s.explainErr && <ErrLine err={s.explainErr} retry={explain} />}

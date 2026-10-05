@@ -1122,15 +1122,22 @@ export function explainRequest(m: NameMaterial): AiRequest {
   return { feature: '释名', title: `${m.info.shown} · ${m.info.kindLabel}`, messages, temperature: 0.8, maxTokens: 800 };
 }
 
+/**
+ * 起名时给作者看几个候选;问 AI 时多要两个 —— 和已有的名字重复、太长、带了别的符号的会被丢掉
+ * (民族名常和国名撞),多要的补上去,作者看到的还是 5 个
+ */
+export const SUGGEST_SHOW = 5;
+const SUGGEST_ASK = SUGGEST_SHOW + 2;
+
 const SUGGEST_SYSTEM = `你是一个架空世界的起名顾问,按当地民族的"语感"给中文原创世界(OC)的作者起名字。
 
 只回一个 JSON 对象,不要别的文字:
 {"names":[{"name":"名字","meaning":"一句话含义"}]}
-names 里正好 5 个。
+names 里正好 ${SUGGEST_ASK} 个。
 
 要求:
 1. name 只写名字本身的中文写法。西幻语感(音译)的名字另加一个 "latin" 字段写拉丁字母原形(如 {"name":"阿尔多里亚","latin":"Aldoria"}),拼写要和中文读音对得上;中式名字不写 latin。
-2. 贴合语感说明和"同一语感的其他名字"的风格,贴合这个东西的种类、地理和历史;5 个名字彼此要有差别(字面、意象、音节、词尾都别重复)。
+2. 贴合语感说明和"同一语感的其他名字"的风格,贴合这个东西的种类、地理和历史;这些名字彼此要有差别(字面、意象、音节、词尾都别重复)。
 3. meaning 用一句 15–40 字的话讲字义或词源、取的是什么意象。音译名字讲"当地语里"的意思,不要提现实中的语言(拉丁语、突厥语、英语……),也不要按汉字字面去拆音译名。
 4. 不要和"同一语感的其他名字"、现在的名字重复,不要照搬现实中的国名、朝代名、城市名,也不要借用现成小说、游戏里的名字。
 5. 名字格式按下面"名字格式"的要求。作者有额外要求时优先满足。`;
@@ -1140,13 +1147,13 @@ export function cleanWish(wish: string | undefined): string {
   return (wish ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
 }
 
-/** 起名:5 个候选(json: true) */
+/** 起名:问 SUGGEST_ASK 个,留 SUGGEST_SHOW 个候选(json: true) */
 export function suggestRequest(m: NameMaterial, wish?: string): AiRequest {
   const style = m.info.style;
   const w = cleanWish(wish);
   const now = m.info.name ? `现在叫"${m.info.shown}",想换一个。` : '现在还没有名字,起一个。';
   const parts = [
-    `请给下面这个${m.info.kindLabel}起 5 个新名字。${now}`,
+    `请给下面这个${m.info.kindLabel}起 ${SUGGEST_ASK} 个新名字。${now}`,
     '',
     materialText(m, { chronicle: 4 }),
     '',
@@ -1158,7 +1165,7 @@ export function suggestRequest(m: NameMaterial, wish?: string): AiRequest {
     { role: 'system', content: SUGGEST_SYSTEM },
     { role: 'user', content: parts.join('\n').trim() },
   ];
-  return { feature: '起名', title: `${m.info.shown} · ${m.info.kindLabel}`, messages, temperature: 1, maxTokens: 800, json: true };
+  return { feature: '起名', title: `${m.info.shown} · ${m.info.kindLabel}`, messages, temperature: 1, maxTokens: 1000, json: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -1283,7 +1290,7 @@ export function parseSuggestions(text: string, info: NameInfo, taken: ReadonlySe
       // 中式名字不要拉丁字母(模型常顺手给个拼音);边塞风的音译名留着
       ...(latin && (!info.eastern || info.style?.id === 'frontier') && /^[A-Za-z][A-Za-z '’-]{0,40}$/.test(latin) ? { latin } : {}),
     });
-    if (list.length >= 5) break;
+    if (list.length >= SUGGEST_SHOW) break;
   }
   if (!list.length) {
     return {
@@ -1359,11 +1366,13 @@ export function defaultName(raw: Civ, t: NameTarget, info: NameInfo): string {
   }
 }
 
-/** 释名的正文:去掉 Markdown 记号、首尾空白 */
+/** 释名的正文:去掉 Markdown 记号(标题、加粗、*斜体*、行首的列表记号)、首尾空白 */
 export function cleanExplanation(text: string): string {
   return text
     .replace(/^#+\s*/gm, '')
+    .replace(/^\s*[*-]\s+/gm, '')
     .replace(/\*\*|__/g, '')
+    .replace(/\*([^*\n]+)\*/g, '$1')
     .replace(/\n{2,}/g, '\n')
     .trim();
 }

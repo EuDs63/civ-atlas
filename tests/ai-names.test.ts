@@ -14,6 +14,7 @@ import { aiChat, setActiveProvider, setMockResponder } from '../src/ai/client';
 import { AiError, type AiRequest } from '../src/ai/types';
 import {
   STYLE_GUIDES,
+  SUGGEST_SHOW,
   cleanExplanation,
   defaultName,
   explainRequest,
@@ -187,6 +188,23 @@ describe('起名 JSON 的解析与兜底', () => {
     expect(r.list.map((x) => x.name)).toEqual(['阿尔瑟维尔', '洛兰堡', '塞伦福德', '维斯特港', '卡雷诺纳']);
     expect(r.list[0].latin).toBe('Alsaville');
     expect(r.list[1].meaning).toBe('洛兰人的堡寨');
+  });
+
+  it('多要的两个补上被丢掉的:7 个里有 2 个和已有名字重复,作者看到的还是 5 个', () => {
+    const info = cityInfo();
+    const taken = new Set(['洛兰堡', '维斯特港']);
+    const names = ['阿尔瑟维尔', '洛兰堡', '塞伦福德', '维斯特港', '卡雷诺纳', '奥斯特伦', '米拉福德'];
+    const r = parseSuggestions(JSON.stringify({ names: names.map((name) => ({ name, meaning: '含义' })) }), info, taken);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.list.map((x) => x.name)).toEqual(['阿尔瑟维尔', '塞伦福德', '卡雷诺纳', '奥斯特伦', '米拉福德']);
+    expect(r.list).toHaveLength(SUGGEST_SHOW);
+    expect(userText(suggestRequest(nameMaterial(raw, { kind: 'settlement', id: westCity.id }, raster)!))).toContain(`起 ${SUGGEST_SHOW + 2} 个新名字`);
+  });
+
+  it('释名正文去掉 Markdown 记号:加粗、*斜体*、列表记号', () => {
+    expect(cleanExplanation('**萨尔斯坦**,源自 *Sāl-istān*,意为"河谷之民"。\n- 萨尔:河谷\n* 斯坦:人们')).toBe('萨尔斯坦,源自 Sāl-istān,意为"河谷之民"。\n萨尔:河谷\n斯坦:人们');
+    expect(cleanExplanation('3*4 不是强调')).toBe('3*4 不是强调');
   });
 
   it('宽松:代码围栏、直接一个数组、别的键名、"名字:含义"字符串', () => {
