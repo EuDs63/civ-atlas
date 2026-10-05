@@ -395,6 +395,14 @@
   color: var(--ink-2);
   text-align: center;
 }
+/* 这一年一个国家都没有:说一句为什么,下面一个跳到第一个国家立国的链接(手机上一样) */
+.sb-group .sb-empty.sb-no-polity {
+  padding: 16px 16px 14px;
+  line-height: 1.6;
+}
+.sb-no-polity-act {
+  margin-top: 6px;
+}
 
 /* ---- 弹出的小菜单(PopMenu) ---- */
 .pm {

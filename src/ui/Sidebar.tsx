@@ -36,7 +36,7 @@ import { APP_VERSION } from './version';
 import { useCoarse } from './device';
 import { keyLabel } from './shortcuts';
 import { openShortcuts } from './ShortcutsDialog';
-import { rgb } from './panelParts';
+import { jumpTo, rgb } from './panelParts';
 import { collapseSide, expandSide, useSide } from './sideStore';
 import './sidebar.css';
 
@@ -345,6 +345,13 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
     alive.sort((a, b) => (n.get(b.id) ?? 0) - (n.get(a.id) ?? 0));
     return { list: alive.slice(0, TOP_N).map((x) => ({ p: x, n: n.get(x.id) ?? 0 })), alive: alive.length };
   }, [ok, civ, year]);
+  // 一个国家都没有的年份(多半是早年各族还是部落):说一句,给出之后第一个立国的
+  const next = useMemo(() => {
+    if (!ok || top.alive) return null;
+    let first: Civ['polities'][number] | null = null;
+    for (const x of civ!.polities) if (x.founded > year && (!first || x.founded < first.founded)) first = x;
+    return first;
+  }, [ok, civ, year, top.alive]);
   const entries = useMemo(() => (ok ? filterChronicle(buildChronicle(civ!), { major: true }) : []), [ok, civ]);
   const k = countUpTo(entries, year);
   const recent = entries.slice(Math.max(0, k - RECENT_N), k).reverse();
@@ -356,11 +363,32 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
         <section className="sb-sec">
           <div className="sb-sec-head">
             <span>国家</span>
-            <button className="sb-link" data-act="all-countries" onClick={() => openOverview('countries')}>
-              全部 {top.alive} 国
-            </button>
+            {top.alive > 0 && (
+              <button className="sb-link" data-act="all-countries" onClick={() => openOverview('countries')}>
+                全部 {top.alive} 国
+              </button>
+            )}
           </div>
           <div className="sb-group">
+            {!top.alive && (
+              <div className="sb-empty sb-no-polity">
+                {next ? (
+                  <>
+                    这一年还没有国家，各族还是部落。
+                    <br />
+                    第一个国家{polityName(next, next.founded)}在 {Math.floor(next.founded)} 年立国。
+                    <div className="sb-no-polity-act">
+                      {/* 立国在年中:往后取整到下一年,那一年列表里才有它(和别处"跳到 N 年"一样) */}
+                      <button className="sb-link" data-act="first-polity" onClick={() => jumpTo(Math.ceil(next.founded))}>
+                        跳到 {Math.ceil(next.founded)} 年
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  '这一年没有国家。'
+                )}
+              </div>
+            )}
             {top.list.map(({ p: x, n }) => {
               const cap = civ!.settlements[capitalAt(x, year)];
               return (
