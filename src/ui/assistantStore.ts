@@ -81,6 +81,8 @@ export interface AsCand {
   latin?: string;
   key: string;
   value: string | null;
+  /** 生成时的名字(挑回它时照样记成 AI 起的;旧对话里没有) */
+  fallback?: string;
 }
 
 export interface AsNames {
@@ -527,7 +529,7 @@ function uiTools(ctx: AskContext, turn: number, ui: { book: AsStep['book'] | nul
       const p = isMockReply(r.text) ? { ok: true as const, list: mockSuggestions(civ, t, info), dropped: 0 } : parseSuggestions(r.text, info, takenNames(civ, t));
       if (!p.ok) throw new Error(p.message);
       const fallback = defaultName(ctx.raw, t, info);
-      const list: AsCand[] = p.list.map((s) => ({ ...s, ...suggestionEdit(info, s.name, fallback) }));
+      const list: AsCand[] = p.list.map((s) => ({ ...s, ...suggestionEdit(info, s.name, fallback), fallback }));
       patch(turn, { names: { shown: info.shown, list } });
       const style = info.style ? `按${styleShort(info.style.label)}` : '';
       return {
@@ -766,7 +768,7 @@ export function pickName(id: number, i: number) {
   const t = state.turns.find((x) => x.id === id);
   const c = t?.names?.list[i];
   if (!t || !c || state.lock === 'history') return;
-  setName(c.key, c.value);
+  setName(c.key, c.value, 'ai', c.fallback);
   patch(id, { names: { ...t.names!, used: c.name } });
   save();
 }

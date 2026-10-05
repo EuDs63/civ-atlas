@@ -24,6 +24,7 @@ import { openOverview } from './overviewStore';
 import { layerDef, type MapLayer } from './mapLayers';
 import { toggleAssistant, useAstOpen } from './astPanel';
 import { useAssistant } from './assistantStore';
+import { useAiOn } from '../ai/client';
 import './book.css';
 
 /** 右上图层分段按钮里直接列出的几个图层(其余的在"更多图层"里) */
@@ -31,7 +32,7 @@ export const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'real
 /** 新建世界时(还没有历史) */
 export const DRAFT_SEG: MapLayer[] = ['terrain', 'realistic', 'elevation'];
 
-/** 宽屏右上:写作进度、图层分段按钮、导出、编年史、助手 */
+/** 宽屏右上:写作进度、图层分段按钮、导出、编年史、助手(「使用 AI 功能」关着时没有助手和写作进度) */
 export function MapBar({ layers, exp, civ, draft }: { layers: LayerPopoverProps; exp: ExportMenuProps; civ: Civ | null; draft?: boolean }) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   const seg = draft ? DRAFT_SEG : SEG_LAYERS;
@@ -72,6 +73,7 @@ export function MapBar({ layers, exp, civ, draft }: { layers: LayerPopoverProps;
 /** 「助手」:开 / 关右边的助手面板(世界第一次生成出来之前点不了) */
 function AssistantButton({ disabled }: { disabled: boolean }) {
   const open = useAstOpen();
+  if (!useAiOn()) return null;
   return (
     <button className={`glass mb-btn${open ? ' on' : ''}`} data-act="assistant" aria-pressed={open} disabled={disabled} onClick={toggleAssistant} title={open ? '收起助手' : '用一句话改世界、问问这个世界'}>
       <Icon name="bubble" size={16} />
@@ -89,8 +91,9 @@ function BookChip() {
   const { job } = useBook();
   const astOpen = useAstOpen();
   const ast = useAssistant();
+  const on = useAiOn();
   useSavesVersion();
-  if (!job || !(job.status === 'writing' || (job.status === 'done' && !job.seen))) return null;
+  if (!on || !job || !(job.status === 'writing' || (job.status === 'done' && !job.seen))) return null;
   if (astOpen && ast.turns.some((t) => t.steps.some((s) => s.book?.id === job.id))) return null;
   const name = bookTitleText(job.title, job.opts.scope, currentWorld()?.title);
   const writing = job.status === 'writing';
@@ -115,10 +118,11 @@ function BookChip() {
   );
 }
 
-/** 手机右上:竖排的毛玻璃按钮(图层与投影、地球 / 平面、助手);写史书时进度条在它们左边 */
+/** 手机右上:竖排的毛玻璃按钮(图层与投影、地球 / 平面、助手;「使用 AI 功能」关着时没有助手);写史书时进度条在它们左边 */
 export function PhoneButtons({ layers, globeOn, onToggleGlobe }: { layers: LayerPopoverProps; globeOn: boolean; onToggleGlobe: () => void }) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   const astOpen = useAstOpen();
+  const aiOn = useAiOn();
   return (
     <div className="phone-btns" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
       <BookChip />
@@ -134,17 +138,19 @@ export function PhoneButtons({ layers, globeOn, onToggleGlobe }: { layers: Layer
         >
           <Icon name={globeOn ? 'map' : 'globe'} size={19} />
         </button>
-        <button
-          className={`pb-btn${astOpen ? ' on' : ''}`}
-          data-act="assistant"
-          aria-pressed={astOpen}
-          disabled={layers.disabled}
-          onClick={toggleAssistant}
-          aria-label="助手"
-          title="用一句话改世界、问问这个世界"
-        >
-          <Icon name="bubble" size={22} />
-        </button>
+        {aiOn && (
+          <button
+            className={`pb-btn${astOpen ? ' on' : ''}`}
+            data-act="assistant"
+            aria-pressed={astOpen}
+            disabled={layers.disabled}
+            onClick={toggleAssistant}
+            aria-label="助手"
+            title="用一句话改世界、问问这个世界"
+          >
+            <Icon name="bubble" size={22} />
+          </button>
+        )}
       </div>
     </div>
   );

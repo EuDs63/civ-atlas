@@ -15,11 +15,13 @@ import { currentWorld, useSavesVersion } from './saveStore';
 import { getBook, resetBookForWorld, setBookContext } from './bookStore';
 import { BookDialog } from './BookDialog';
 import { BookReader } from './BookReader';
+import { useAiOn } from '../ai/client';
 
 export { closeHistoryBook, openHistoryBook } from './bookStore';
 
 export function HistoryBook({ civ }: { civ: Civ }) {
   useSavesVersion();
+  const aiOn = useAiOn();
   const world = currentWorld()?.id ?? null;
   setBookContext(civ, world);
   // 换了世界:停下正在写的(写到的存不进别的世界),右上的进度收起
@@ -27,6 +29,8 @@ export function HistoryBook({ civ }: { civ: Civ }) {
     const j = getBook().job;
     if (world && j && j.world !== world) resetBookForWorld();
   }, [world]);
+  // 「使用 AI 功能」关着:写史书的窗口、阅读页都不显示(App 关开关时已经停下正在写的)
+  if (!aiOn) return null;
   return (
     <>
       <BookDialog civ={civ} />

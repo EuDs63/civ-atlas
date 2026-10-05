@@ -612,6 +612,10 @@ button.primary:hover {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+/* "AI 起的名字:带上 / 换回原名"(世界里有 AI 起的名字时才有) */
+.export-ainames {
+  margin-top: 6px;
+}
 .export-item {
   display: block;
   width: 100%;

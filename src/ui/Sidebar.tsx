@@ -30,7 +30,7 @@ import { openOverview } from './overviewStore';
 import { searchCiv, type SearchHit } from './searchIndex';
 import { countUpTo, evText } from './timelineLayout';
 import { Icon } from './icons';
-import { AiMenuItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
+import { AiMenuItem, AiSettingsItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
 import { APP_VERSION } from './version';
 import { useCoarse } from './device';
@@ -218,7 +218,7 @@ export function useWorldInfo(civ: Civ | null, data: SidebarProps['data']): { tit
   return { title: currentWorld()?.title || '未命名世界', sub };
 }
 
-/** "更多"菜单:写成史书、AI 设置、键盘快捷键(有鼠标时)、源代码和两份协议;最底下一行版本号 */
+/** "更多"菜单:写成史书(「使用 AI 功能」关着时没有)、AI 设置、键盘快捷键(有鼠标时)、源代码和两份协议;最底下一行版本号 */
 export function WorldMoreMenu({
   civ,
   onBook,
@@ -245,9 +245,7 @@ export function WorldMoreMenu({
       >
         把历史写成史书
       </AiMenuItem>
-      <MenuItem icon={<Icon name="sparkle" size={16} />} act="ai-settings" onClick={() => openAiSettings()}>
-        AI 设置
-      </MenuItem>
+      <AiSettingsItem onClick={() => openAiSettings()} />
       <MenuSep />
       {!coarse && (
         <MenuItem icon={<Icon name="keyboard" size={16} />} act="shortcuts" kbd={keyLabel('help')} onClick={openShortcuts}>

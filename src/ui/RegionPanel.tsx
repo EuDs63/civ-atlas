@@ -25,6 +25,7 @@ import { MineList, getPolityPick, nameAt, regionOrders, setPolityPick } from './
 import { NameEdit } from './NameEdit';
 import { AiMenuItem, MenuItem } from './PopMenu';
 import { Icon } from './icons';
+import { useAiOn } from '../ai/client';
 import { setSheet } from './panelStore';
 import { entriesUpTo, firstOwned, ownerSpans, ownersOf, regionEntries } from './panelData';
 import {
@@ -62,6 +63,7 @@ export function RegionPanel(props: DetailProps) {
   const po = civ.polities[own.polity[id]];
   const named = regionNamed(civ, id);
   const canAct = civ.viable && civ.polities.length > 0;
+  const aiOn = useAiOn();
   return (
     <div className="cp" data-region={id} data-page={page ?? 'info'}>
       <PanelHead color={po ? rgb(po.color) : undefined}>
@@ -113,12 +115,14 @@ export function RegionPanel(props: DetailProps) {
             <Act icon="rename" act="rename" onClick={() => setRenaming(true)}>
               改名
             </Act>
-            <MoreAct>
-              {canAct && <CenterItem world={world} civ={civ} sel={{ kind: 'region', id }} year={year} />}
-              <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
-                让 AI 讲名字由来
-              </AiMenuItem>
-            </MoreAct>
+            {(canAct || aiOn) && (
+              <MoreAct>
+                {canAct && <CenterItem world={world} civ={civ} sel={{ kind: 'region', id }} year={year} />}
+                <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
+                  让 AI 讲名字由来
+                </AiMenuItem>
+              </MoreAct>
+            )}
           </Acts>
           <RegionInfo {...props} ai={ai} aiRef={aiRef} />
         </>
@@ -136,6 +140,7 @@ function RegionInfo({ civ, raw, raster, id, year, names, ai, aiRef }: DetailProp
   const cid = own.culture[id];
   const cu = civ.cultures[cid];
   const culture = useRevealAi({ civ, raw, raster, target: cu ? { kind: 'culture', id: cid } : null, lazy: true, what: '族名' });
+  const aiOn = useAiOn();
   const score = habitatScore(civ.habitat.suitability[civ.regions.seat[id]]);
   const cities = civ.settlements.filter((s) => s.region === id && s.founded <= year);
   const city = cities.find((s) => s.ended === undefined || s.ended > year);
@@ -191,12 +196,16 @@ function RegionInfo({ civ, raw, raster, id, year, names, ai, aiRef }: DetailProp
         {cu && (
           <Row k="民族" className="cp-links">
             <span>{KIND_INFO[cu.kind].name}民族</span>
-            <button className="ins-link" data-act="culture-explain" disabled={culture.ai.busy} onClick={culture.ai.ask}>
-              族名由来
-            </button>
-            <button className="ins-link" data-act="culture-suggest" onClick={culture.ai.suggest}>
-              起族名
-            </button>
+            {aiOn && (
+              <>
+                <button className="ins-link" data-act="culture-explain" disabled={culture.ai.busy} onClick={culture.ai.ask}>
+                  族名由来
+                </button>
+                <button className="ins-link" data-act="culture-suggest" onClick={culture.ai.suggest}>
+                  起族名
+                </button>
+              </>
+            )}
           </Row>
         )}
       </Stats>

@@ -173,10 +173,10 @@ export function shortDate(iso: string): string {
 
 const PROVIDER_NAME: Record<string, string> = { official: '我们的 AI', deepseek: 'DeepSeek', bailian: '阿里云百炼', mock: '测试用假 AI' };
 
-/** 谁写的:"DeepSeek · deepseek-chat" */
-export function historyWriter(note: AiNote): string {
+/** 谁写的:"DeepSeek · deepseek-chat"(导出的文件里这样写;阅读页那行小字传 sep = "，") */
+export function historyWriter(note: AiNote, sep = ' · '): string {
   const who = PROVIDER_NAME[note.provider] ?? note.provider;
-  return [who, note.model && note.model !== note.provider ? note.model : ''].filter(Boolean).join(' · ');
+  return [who, note.model && note.model !== note.provider ? note.model : ''].filter(Boolean).join(sep);
 }
 
 /** 导出 Markdown:书名 + 一段说明(种子、年份、文体、谁写的)+ 正文。title:界面上显示的书名(世界起了名字时是"某某通史"),不给 = 存的书名 */

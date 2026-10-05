@@ -12,6 +12,8 @@
  *
  * 重活在后台线程(src/exportWorker.ts,每次导出临时开一个)里做,界面不卡;主线程只画文字(要用页面里加载好的字体)、编码 PNG。
  * 用的是 App 当前显示的 civ(套过改名等修改的那份),不重新生成。
+ * 世界里有从 AI 起名里挑的名字时,清晰度下面多一行"AI 起的名字:带上 / 换回原名":换回原名 = 地图、图例、编年史用 App 给的 plain
+ * (AI 起的名字换回挑之前的,见 gen/edits.ts 的 namesWithoutAi)。
  * 文件名带世界名(没起名 = 种子)、年份、画风:文明与地图-九州大陆-第3000年-手绘.png、文明与地图-种子7-第3000年-手绘.png(JPEG 是 .jpg)
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -229,15 +231,19 @@ export interface ExportMenuProps {
   data: { world: World; raster: Raster } | null;
   /** App 当前显示的文明(套过用户的修改) */
   civ: Civ | null;
+  /** 同一份文明,AI 起的名字换回原来的(没有 AI 起的名字 = null / 不给,菜单里不问) */
+  plain?: Civ | null;
   style: CivStyle;
   layer: LayerId;
   /** 按钮上文字前面的小图标 */
   icon?: ReactNode;
 }
 
-export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
+export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [scale, setScale] = useState<ExportScale>(1);
+  const [usePlain, setUsePlain] = useState(false);
+  const civ = usePlain && plain ? plain : shown;
   const busy = useExportStatus()?.kind === 'busy';
   const time = useCivTime();
   const globeOn = useGlobeOn();
@@ -405,6 +411,19 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
               ))}
             </div>
           </div>
+          {plain && (
+            <div className="export-scale export-ainames">
+              <span>AI 起的名字</span>
+              <div className="seg">
+                <button className={usePlain ? '' : 'on'} onClick={() => setUsePlain(false)}>
+                  带上
+                </button>
+                <button className={usePlain ? 'on' : ''} onClick={() => setUsePlain(true)} title="导出的地图、图例、编年史里用原来的名字">
+                  换回原名
+                </button>
+              </div>
+            </div>
+          )}
           {items.map((it) => (
             <button key={it.job} className="export-item" role="menuitem" data-job={it.job} disabled={busy || (it.need && !ok)} onClick={() => void run(it.job)}>
               <b>{it.title}</b>

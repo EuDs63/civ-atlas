@@ -11,7 +11,7 @@
  * - 回放 / 拖时间轴时:还没发生的事(在上面)淡显,"现在"线跟着走、列表跟着滚。这一步不经过 React
  *   (订阅时间轴,直接改行的 data-st 属性和 scrollTop),几千条也不会每帧重排。
  * - "复制全文":当前列出的纪事(含战争里的每一件事)复制成纯文本,给 OC 作者写设定用。
- * - "写成史书"(阶段 5):打开 HistoryBook 窗口;按国家看时默认写这一国的国史。
+ * - "写成史书"(阶段 5):打开 HistoryBook 窗口;按国家看时默认写这一国的国史。「使用 AI 功能」关着时没有这个按钮。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
@@ -20,6 +20,7 @@ import { polityName } from '../gen/civ/growth';
 import { getCivTime, pickChronicleEntry, setChronicle, subscribeCivTime, useChronicle, useChroniclePick, type CivTime } from './civView';
 import { evLabel, evText, evType } from './timelineLayout';
 import { openHistoryBook } from './HistoryBook';
+import { useAiOn } from '../ai/client';
 import { closeOverview } from './overviewStore';
 import { polityHistory } from './WorldOverviewCountries';
 import './timeline.css';
@@ -38,6 +39,7 @@ const ST = ['past', 'live', 'future'] as const;
 
 export function Chronicle({ civ }: { civ: Civ | null }) {
   const view = useChronicle();
+  const aiOn = useAiOn();
   const all = useMemo(() => (civ ? buildChronicle(civ) : []), [civ]);
   // 按国家筛过的"全部"和"大事"(两个按钮上各写条数),当前列出的是其中之一;只看一国时"全部"里并进这一国的君主继位
   const mine = useMemo(() => {
@@ -271,17 +273,19 @@ export function Chronicle({ civ }: { civ: Civ | null }) {
           <button className="ov-btn chron-copy" onClick={copy} disabled={!list.length} title="把列出的纪事(含战争里的每一件事)复制成纯文本">
             {copied ? '已复制' : '复制全文'}
           </button>
-          <button
-            className="ov-btn chron-ai"
-            onClick={() => {
-              closeOverview();
-              openHistoryBook({ polity: view.polity });
-            }}
-            disabled={!all.length}
-            title={focus ? `用 AI 把${focusName}的历史写成国史` : '用 AI 把推演出来的历史写成史书'}
-          >
-            {focus ? '写成国史' : '写成史书'}
-          </button>
+          {aiOn && (
+            <button
+              className="ov-btn chron-ai"
+              onClick={() => {
+                closeOverview();
+                openHistoryBook({ polity: view.polity });
+              }}
+              disabled={!all.length}
+              title={focus ? `用 AI 把${focusName}的历史写成国史` : '用 AI 把推演出来的历史写成史书'}
+            >
+              {focus ? '写成国史' : '写成史书'}
+            </button>
+          )}
         </span>
       </div>
       <div className="chron-list" ref={listRef}>

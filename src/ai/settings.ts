@@ -1,7 +1,7 @@
 /**
  * AI 设置与密钥的本地存储(阶段 5)。只存在用户自己的浏览器里,不上传。
  *
- *   设置(用哪家、模型、地域、深度思考、记不记密钥)→ localStorage 'civ-atlas:ai-settings'
+ *   设置(用不用 AI、用哪家、模型、地域、深度思考、记不记密钥)→ localStorage 'civ-atlas:ai-settings'
  *   密钥(DeepSeek / 百炼的 API 密钥、我们 AI 的登录令牌)→
  *       "记住密钥"开着:localStorage 'civ-atlas:ai-secrets'(下次打开还在)
  *       关着:只在内存里(这次打开的页面有效,刷新 / 关掉就忘),同时把存过的删掉
@@ -10,12 +10,14 @@
  * 规矩:密钥不进网址、不进调用记录、不打印到控制台。
  */
 import { useSyncExternalStore } from 'react';
-import { notifyAiChanged, setActiveProvider } from './client';
+import { notifyAiChanged, setActiveProvider, setAiOn } from './client';
 import type { AiProviderKind } from './types';
 
 export type BailianRegion = 'cn' | 'intl';
 
 export interface AiSettings {
+  /** 「使用 AI 功能」:关掉 = 界面上所有 AI 入口都不显示(只管这个浏览器;写过的史书、名字由来不删) */
+  enabled: boolean;
   /** 用哪家;null = 还没选 */
   provider: AiProviderKind | null;
   /** 在这个浏览器里记住密钥和登录 */
@@ -32,6 +34,7 @@ export interface AiSecrets {
 }
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
+  enabled: true,
   provider: null,
   remember: true,
   deepseek: { model: 'deepseek-flash', thinking: false },
@@ -80,6 +83,7 @@ export function sanitizeSettings(v: unknown): AiSettings {
   const ds = (o.deepseek && typeof o.deepseek === 'object' ? o.deepseek : {}) as Record<string, unknown>;
   const bl = (o.bailian && typeof o.bailian === 'object' ? o.bailian : {}) as Record<string, unknown>;
   return {
+    enabled: bool(o.enabled, d.enabled),
     provider: KINDS.includes(o.provider) ? o.provider : null,
     remember: bool(o.remember, d.remember),
     deepseek: { model: str(ds.model, d.deepseek.model), thinking: bool(ds.thinking, d.deepseek.thinking) },
@@ -116,6 +120,7 @@ function load() {
   if (settings && secrets) return;
   settings = sanitizeSettings(readJson(SETTINGS_KEY));
   secrets = settings.remember ? sanitizeSecrets(readJson(SECRETS_KEY)) : {};
+  setAiOn(settings.enabled);
 }
 
 export function getAiSettings(): AiSettings {
@@ -135,6 +140,7 @@ export function updateAiSettings(patch: Partial<Omit<AiSettings, 'deepseek' | 'b
     bailian: { ...cur.bailian, ...patch.bailian },
   });
   writeJson(SETTINGS_KEY, settings);
+  setAiOn(settings.enabled);
   if (patch.remember !== undefined) writeJson(SECRETS_KEY, settings.remember && hasAny(secrets!) ? secrets : null);
   emit();
 }
@@ -165,6 +171,11 @@ export function setSecret<K extends keyof AiSecrets>(slot: K, value: AiSecrets[K
 export function chooseProvider(kind: AiProviderKind | null): void {
   updateAiSettings({ provider: kind });
   setActiveProvider(kind);
+}
+
+/** 「使用 AI 功能」开 / 关 */
+export function setAiEnabled(on: boolean): void {
+  updateAiSettings({ enabled: on });
 }
 
 /** React:设置或密钥变了就重渲染 */

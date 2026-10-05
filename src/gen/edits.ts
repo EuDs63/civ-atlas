@@ -38,6 +38,10 @@
  * - 复国的国家("后昌")跟着故国的国号变("昌" 改成 "秦" → "后秦")
  * - 同族在故址上重建、沿用旧名的城,跟着旧城的名字变
  *
+ * WorldEdits.aiNames(可选):哪些名字是从 AI 起名里挑的。稳定键 → { name: 挑的那个名字, was: 挑之前的名字(没改过 = 不写) }。
+ * 只是记一笔来源:names 里这个键还是这个名字 = "AI 写"(之后自己再改、恢复默认、撤销都不算了);
+ * 导出时选"换回原名"就用 was(没有 = 生成时的名字)。不影响生成和推演。
+ *
  * ## 干预
  *
  * WorldEdits.interventions:作者在某一年给历史下的"命令"。改名只是换字,干预会改写历史 —— 带着干预从第 0 年整段重推
@@ -137,10 +141,18 @@ export interface TerrainOp {
 export interface WorldEdits {
   /** 改名:稳定键 → 新名字 */
   names: Record<string, string>;
+  /** 从 AI 起名里挑的名字(见文件头"改名");没有 = 一个也没有 */
+  aiNames?: Record<string, AiNameMark>;
   /** 干预(按下达的先后;见文件头"干预") */
   interventions: Intervention[];
   /** 地形修改(按先后;见文件头"地形修改") */
   terrain: TerrainOp[];
+}
+
+/** 一个从 AI 起名里挑的名字:挑的那个名字、挑之前的名字(没改过 = 不写) */
+export interface AiNameMark {
+  name: string;
+  was?: string;
 }
 
 export const EMPTY_EDITS: WorldEdits = Object.freeze({
@@ -382,6 +394,46 @@ function bare(root: string): string {
 
 /** 名字最长几个字 */
 export const NAME_MAX = 16;
+
+/** 这个键现在的名字是不是从 AI 起名里挑的(之后自己改过、恢复过默认的不算) */
+export function isAiName(edits: WorldEdits, key: string): boolean {
+  const m = edits.aiNames?.[key];
+  return !!m && edits.names[key] === m.name;
+}
+
+/** 现在用着的 AI 起的名字有哪几个(稳定键) */
+export function aiNameKeys(edits: WorldEdits): string[] {
+  return Object.keys(edits.aiNames ?? {}).filter((k) => isAiName(edits, k));
+}
+
+/**
+ * 记下 key 的名字换成了 name 以后的 aiNames:从 AI 起名里挑的(ai = true)记一笔,挑之前的名字留着
+ * (上一个也是 AI 起的就沿用它的 was);别的改名(自己改、恢复默认)把这一笔去掉。一笔都不剩 = undefined
+ */
+export function markAiName(edits: WorldEdits, key: string, name: string | null, ai: boolean): Record<string, AiNameMark> | undefined {
+  const cur = edits.aiNames;
+  if (ai && name) {
+    const was = isAiName(edits, key) ? cur![key].was : edits.names[key];
+    return { ...cur, [key]: was === undefined ? { name } : { name, was } };
+  }
+  if (!cur || !(key in cur)) return cur;
+  const next = { ...cur };
+  delete next[key];
+  return Object.keys(next).length ? next : undefined;
+}
+
+/** 导出时"换回原名"用的改名表:AI 起的名字换回挑之前的(没改过 = 去掉,用生成时的名字) */
+export function namesWithoutAi(edits: WorldEdits): Record<string, string> {
+  const keys = aiNameKeys(edits);
+  if (!keys.length) return edits.names;
+  const out = { ...edits.names };
+  for (const k of keys) {
+    const was = edits.aiNames![k].was;
+    if (was === undefined) delete out[k];
+    else out[k] = was;
+  }
+  return out;
+}
 
 /** 国名词根末尾常被顺手打上的国号(打"索拉特王国"就当是"索拉特";长的在前) */
 const POLITY_SUFFIXES = ['共和国', '大汗国', '王朝', '皇朝', '帝国', '王国', '汗国', '城邦', '国', '部'];

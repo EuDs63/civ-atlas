@@ -17,6 +17,7 @@ import { areaText, kmText, metersText, ownersOf, placeFacts } from './panelData'
 import { Act, Acts, AiBox, CenterAct, Link, MoreAct, PanelHead, Row, Stats, SubLine, rgb, type DetailProps, type Stat, useRevealAi } from './panelParts';
 import { AiMenuItem, MenuItem } from './PopMenu';
 import { Icon } from './icons';
+import { useAiOn } from '../ai/client';
 
 const PLACE_KIND: Record<Place['kind'], string> = {
   sea: '海',
@@ -39,6 +40,7 @@ export function PlacePanel({ civ, raw, raster, world, id, year, names }: DetailP
   const key = placeKeyOf(civ, id);
   const [renaming, setRenaming] = useState(false);
   const { ai, aiRef } = useRevealAi({ civ, raw, raster, target: { kind: 'place', id }, lazy: true });
+  const aiOn = useAiOn();
   const f = useMemo(() => placeFacts(civ, world, raster, id), [civ, world, raster, id]);
   const kind = placeKindName(p);
   const namer = p.culture >= 0 ? civ.cultures[p.culture] : undefined;
@@ -109,14 +111,17 @@ export function PlacePanel({ civ, raw, raster, world, id, year, names }: DetailP
         <Act icon="rename" act="rename" onClick={() => setRenaming(true)}>
           改名
         </Act>
-        <MoreAct>
-          <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
-            让 AI 讲名字由来
-          </AiMenuItem>
-          <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="suggest" disabled={ai.busy} onClick={ai.suggestNow}>
-            让 AI 起名
-          </AiMenuItem>
-        </MoreAct>
+        {/* 「更多」里只有 AI 的两项:「使用 AI 功能」关着时整个不放 */}
+        {aiOn && (
+          <MoreAct>
+            <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
+              让 AI 讲名字由来
+            </AiMenuItem>
+            <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="suggest" disabled={ai.busy} onClick={ai.suggestNow}>
+              让 AI 起名
+            </AiMenuItem>
+          </MoreAct>
+        )}
       </Acts>
       <div className="cp-body">
         {(stats.length > 0 || where) && (

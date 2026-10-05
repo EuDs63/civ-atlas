@@ -1,5 +1,6 @@
 /**
  * AI 设置窗口(阶段 5):选用哪家 AI、填密钥、选模型、测试连接;"调用记录"页签看每一次调用(AiCallLog.tsx)。
+ * 最上面是「使用 AI 功能」总开关(默认开):关掉以后这一页只剩这一行,界面上的 AI 入口都不显示(client.ts 的 useAiOn)。
  *
  *   openAiSettings(tab?)  打开它(成书窗口的"AI 设置"、提示条的"去设置"、别的面板要打开 AI 设置时都用这个)
  *   AiSettingsHost        窗口本身,App 里一直挂着(所以不管从哪儿打开都在)
@@ -12,9 +13,9 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { aiChat, getActiveProvider, setAiSettingsOpener, useAiStatus } from '../ai/client';
+import { aiChat, getActiveProvider, setAiSettingsOpener, useAiOn, useAiStatus } from '../ai/client';
 import { AiError, type AiProviderKind } from '../ai/types';
-import { chooseProvider, cleanKey, getAiSettings, getSecrets, setSecret, updateAiSettings, useAiSettingsVersion } from '../ai/settings';
+import { chooseProvider, cleanKey, getAiSettings, getSecrets, setAiEnabled, setSecret, updateAiSettings, useAiSettingsVersion } from '../ai/settings';
 import { DEEPSEEK_MODELS } from '../ai/providers/deepseek';
 import { BAILIAN_MODELS, BAILIAN_REGIONS } from '../ai/providers/bailian';
 import {
@@ -109,7 +110,7 @@ function AiDialog({ tab, onTab, onClose }: { tab: Tab; onTab: (t: Tab) => void; 
             调用记录{log.calls.length ? <em>{log.calls.length}</em> : null}
           </button>
         </nav>
-        <div className="ai-body">{tab === 'settings' ? <SettingsTab /> : <AiCallLog />}</div>
+        <div className="ai-body">{tab === 'settings' ? <SettingsPage /> : <AiCallLog />}</div>
       </div>
     </div>,
     document.body,
@@ -118,6 +119,23 @@ function AiDialog({ tab, onTab, onClose }: { tab: Tab; onTab: (t: Tab) => void; 
 
 // ---------------------------------------------------------------------------
 // 设置页签
+
+/** 最上面「使用 AI 功能」开关;关着时下面的都收起来 */
+function SettingsPage() {
+  const on = useAiOn();
+  return (
+    <>
+      <div className={`ai-master${on ? '' : ' off'}`}>
+        <div className="ai-master-text">
+          <b>使用 AI 功能</b>
+          <span>关掉以后，助手、写史书、名字由来、AI 起名这些入口都不显示。写过的史书和名字由来不会删，再打开就回来。</span>
+        </div>
+        <button className={`ai-switch${on ? ' on' : ''}`} role="switch" aria-checked={on} aria-label="使用 AI 功能" data-act="ai-master" onClick={() => setAiEnabled(!on)} />
+      </div>
+      {on && <SettingsTab />}
+    </>
+  );
+}
 
 interface Choice {
   kind: AiProviderKind;

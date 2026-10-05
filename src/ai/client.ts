@@ -5,6 +5,7 @@
  * - 当前用哪家 = setActiveProvider(...)(设置面板改);网址带 `ai=mock` 时一律用假 AI(冒烟测试、开发用)
  * - 每次调用(成功或失败)都交给"调用记录器"(setCallRecorder,启动时换成 callLog.ts 里存本地的那个);默认只在内存里留最近 50 条
  * - 失败一律抛 AiError(中文说明),功能里 catch 了直接给用户看
+ * - 「使用 AI 功能」总开关(AI 设置最上面,存在 settings.ts):关着时界面上所有 AI 入口都不显示(useAiOn),aiChat 也不调
  *
  * 类型见 types.ts。
  */
@@ -70,6 +71,29 @@ export function setActiveProvider(kind: AiProviderKind | null): void {
   if (kind === active) return;
   active = kind;
   emit();
+}
+
+// 总开关:settings.ts 读到设置、改了设置时同步过来(这个文件不读设置,免得互相引用)
+let aiOff = false;
+export function setAiOn(on: boolean): void {
+  if (aiOff === !on) return;
+  aiOff = !on;
+  emit();
+}
+/** 「使用 AI 功能」开着吗(默认开) */
+export function aiOn(): boolean {
+  return !aiOff;
+}
+/** React:总开关开着吗;关着时各处的 AI 入口(助手、写史书、名字由来、AI 起名……)都不显示 */
+export function useAiOn(): boolean {
+  return useSyncExternalStore(
+    (f) => {
+      subs.add(f);
+      return () => subs.delete(f);
+    },
+    aiOn,
+    aiOn,
+  );
 }
 
 /** 服务商的状态变了(比如填了密钥、积分变了)时,设置面板调一下,让界面刷新 */
@@ -170,6 +194,11 @@ export async function aiChat(req: AiRequest, opts: AiCallOptions = {}): Promise<
     messages: req.messages.map((m) => ({ ...m, content: clip(m.content) })),
     world: worldOf(),
   };
+  if (aiOff) {
+    const err = new AiError('not-configured', 'AI 功能已关(AI 设置里可以打开)');
+    recorder({ ...base, provider: kind ?? 'none', model: '', ok: false, error: { code: err.code, message: err.message }, ms: 0 });
+    throw err;
+  }
   if (!p) {
     const err = new AiError('not-configured', getAiStatus().reason ?? '还没有设置 AI');
     recorder({ ...base, provider: kind ?? 'none', model: '', ok: false, error: { code: err.code, message: err.message }, ms: 0 });

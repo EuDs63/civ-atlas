@@ -9,7 +9,7 @@
  * 读档、换世界(setEdits / clearEdits)、创建世界(clearEditHistory)清空。地形修改不记:只在新建世界时能改,改地形工具有自己的"撤销一笔"。
  */
 import { useSyncExternalStore } from 'react';
-import { EMPTY_EDITS, cleanIntervention, type Intervention, type TerrainOp, type WorldEdits } from '../gen/edits';
+import { EMPTY_EDITS, cleanIntervention, markAiName, type Intervention, type TerrainOp, type WorldEdits } from '../gen/edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from '../gen/terrainEdits';
 import { showToast } from './toastStore';
 
@@ -100,16 +100,28 @@ export function replaceEdits(next: WorldEdits) {
  * 列表变了一律换成新数组(App 按数组是不是读档套上的那一份来认"自动恢复",撤销回去不能被当成恢复)
  */
 export function revertEdits(now: WorldEdits, from: WorldEdits, to: WorldEdits): WorldEdits {
-  let names = now.names;
-  for (const k of new Set([...Object.keys(from.names), ...Object.keys(to.names)])) {
-    if (from.names[k] === to.names[k] || now.names[k] !== from.names[k]) continue;
-    if (names === now.names) names = { ...names };
-    if (k in to.names) names[k] = to.names[k];
-    else delete names[k];
-  }
+  const names = moveMap(now.names, from.names, to.names) ?? {};
+  const aiNames = moveMap(now.aiNames, from.aiNames, to.aiNames);
   const interventions = moveList(now.interventions, from.interventions, to.interventions);
   const terrain = moveList(now.terrain, from.terrain, to.terrain);
-  return names === now.names && interventions === now.interventions && terrain === now.terrain ? now : { names, interventions, terrain };
+  if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain) return now;
+  return aiNames && Object.keys(aiNames).length ? { names, aiNames, interventions, terrain } : { names, interventions, terrain };
+}
+
+/** 键值表那一半(改名、AI 起名的记号):from 到 to 变了的键,现在还是 from 那样的才换成 to 那样;都没动 = 原对象 */
+function moveMap<T>(now: Record<string, T> | undefined, from: Record<string, T> | undefined, to: Record<string, T> | undefined): Record<string, T> | undefined {
+  const N = now ?? {};
+  const F = from ?? {};
+  const T = to ?? {};
+  const same = (a: T | undefined, b: T | undefined) => a === b || JSON.stringify(a) === JSON.stringify(b);
+  let out = now;
+  for (const k of new Set([...Object.keys(F), ...Object.keys(T)])) {
+    if (same(F[k], T[k]) || !same(N[k], F[k])) continue;
+    if (out === now) out = { ...N };
+    if (k in T) out![k] = T[k];
+    else delete out![k];
+  }
+  return out;
 }
 
 /** 列表那一半:from 有 to 没有的从 now 去掉(各去一次);to 有 from 没有、now 里也没有的放回它在 to 里的位置 */
@@ -183,19 +195,27 @@ export function interventionKeys(v: Intervention): string[] {
   return [o.a, o.b, o.city, o.region].filter((k): k is string => typeof k === 'string');
 }
 
-/** 改名:name 为空(或 null)= 恢复默认(从 names 里去掉这个键)。现在不能改(editBlock)= 提示条说原因,不改 */
-export function setName(key: string, name: string | null) {
+/**
+ * 改名:name 为空(或 null)= 恢复默认(从 names 里去掉这个键)。现在不能改(editBlock)= 提示条说原因,不改。
+ * from = 'ai':从 AI 起名里挑的,记一笔(名字旁标"AI 写",见 gen/edits.ts 的 aiNames);别的改名把这一笔去掉。
+ * fallback = 生成时的名字:之前自己改过名、又从 AI 候选里挑回了生成时的名字,照样算 AI 起的(改名表里写明这个名字),
+ * 导出"换回原名"时回到自己改的那个
+ */
+export function setName(key: string, name: string | null, from?: 'ai', fallback?: string) {
   const why = editBlock([key]);
   if (why) {
     showToast({ id: 'edit-block', kind: 'warn', text: why });
     return;
   }
+  if (from === 'ai' && !name && fallback && key in state.names) name = fallback;
   const names = { ...state.names };
   if (name) names[key] = name;
   else if (key in names) delete names[key];
   else return;
-  if (names[key] === state.names[key] && Object.keys(names).length === Object.keys(state.names).length) return;
-  commitEdits({ ...state, names });
+  const aiNames = markAiName(state, key, name, from === 'ai');
+  if (aiNames === state.aiNames && names[key] === state.names[key] && Object.keys(names).length === Object.keys(state.names).length) return;
+  const { aiNames: _, ...rest } = state;
+  commitEdits(aiNames ? { ...rest, names, aiNames } : { ...rest, names });
 }
 
 /**

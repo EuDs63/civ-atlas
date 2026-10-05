@@ -1,11 +1,31 @@
 /**
  * 面板里可以改的名字(国家、城、地理实体、州、民族):点名字(或面板底部的"改名")变输入框,回车 / 点别处确定,Esc 取消;
  * 输入时下面一行预览(国家:国号变迁"昌部 → 昌国 → 大昌 → 大昌王朝");改过的名字旁边有"恢复默认"。
+ * 从 AI 起名里挑的名字(还没再改过的)后面标"AI 写"。
  * 改名记在 editsStore(稳定键 → 新名字),App 套到 civ 上,地图、面板、编年史立刻跟着变。
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { cleanName, type KeyKind } from '../gen/edits';
-import { setName } from './editsStore';
+import { cleanName, isAiName, type KeyKind } from '../gen/edits';
+import { setName, useEdits } from './editsStore';
+import { AiTag } from './aiTag';
+
+/** 鼠标 / 手指是不是正按着(改名框失焦时用:按着 = 正在点别的东西,等松开再收起) */
+let pressing = false;
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', () => (pressing = true), true);
+  for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, () => (pressing = false), true);
+}
+
+/** 等这一下点完(松开、点击都派发过了)再做。在捕获阶段听:地球仪之类自己拦下 pointerup 的,也照样收得到 */
+function afterPress(f: () => void) {
+  const go = () => {
+    window.removeEventListener('pointerup', go, true);
+    window.removeEventListener('pointercancel', go, true);
+    setTimeout(f);
+  };
+  window.addEventListener('pointerup', go, true);
+  window.addEventListener('pointercancel', go, true);
+}
 
 export interface NameEditProps {
   /** 稳定键 */
@@ -60,6 +80,7 @@ export function NameEdit({ k, kind, eastern, shown, current, fallback, names, pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [k]);
   const renamed = typeof names[k] === 'string' && names[k] !== '';
+  const byAi = isAiName(useEdits(), k);
   const commit = () => {
     if (done.current) return;
     done.current = true;
@@ -73,6 +94,7 @@ export function NameEdit({ k, kind, eastern, shown, current, fallback, names, pr
       <div className={`ins-name-row${big ? ' big' : ''}`}>
         <button className="ins-name" onClick={() => setEditing(true)} title={hint ?? '点一下改名'}>
           {shown}
+          {byAi && <AiTag />}
           <span className="nm-pen" aria-hidden="true" />
         </button>
         {renamed && (
@@ -100,7 +122,8 @@ export function NameEdit({ k, kind, eastern, shown, current, fallback, names, pr
             setEditing(false);
           }
         }}
-        onBlur={commit}
+        // 点改名框下面的按钮(如 AI 起名的"起 5 个")时:等这一下点完再收起;不然输入框先收起、按钮往上挪,这一下就落空了
+        onBlur={() => (pressing ? afterPress(commit) : commit())}
       />
       <div className="ins-preview">{v ? (preview ? preview(v) : v) : `留空 = 恢复默认(${fallback})`}</div>
       {hint && <div className="ins-hint">{hint}</div>}

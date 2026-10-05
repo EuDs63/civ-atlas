@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Civ } from '../gen/civ/types';
 import type { Raster } from '../gen/raster';
-import { aiChat, getProvider } from '../ai/client';
+import { aiChat, getProvider, useAiOn } from '../ai/client';
 import { openAiSettings } from './AiSettings';
 import { AiError, type AiErrorCode, type AiProviderKind } from '../ai/types';
 import { getNote, putNote, useNotesVersion, type AiNote } from '../ai/library';
@@ -41,6 +41,7 @@ import {
 } from '../ai/prompts/names';
 import { setName } from './editsStore';
 import { currentWorld } from './saveStore';
+import { AiTag } from './aiTag';
 
 /** 存下的释名:AiNote 再记上写的时候的名字、叫法和历史指纹(过时检查用) */
 interface NameNote extends AiNote {
@@ -149,7 +150,7 @@ export interface AiNameProps {
   compact?: boolean;
   /** 写好的释名要点过"名字由来"(ask)才显示(国家面板) */
   lazy?: boolean;
-  /** 框上的叫法:"族名" → "族名由来 · AI""AI 起族名"(不给 = "名字由来""AI 起名") */
+  /** 框上的叫法:"族名" → "族名由来""AI 起族名"(不给 = "名字由来""AI 起名");由来那一段标"AI 写" */
   what?: string;
 }
 
@@ -170,18 +171,23 @@ export interface AiName {
 
 export function useAiName({ civ, raw, raster, target, compact, lazy, what }: AiNameProps): AiName {
   useNotesVersion();
+  const on = useAiOn();
   const info = target ? nameInfo(civ, target) : null;
   const key = info?.key ?? '';
   const [st, setSt] = useState<State>(() => fresh(key));
   const ctl = useRef<AbortController | null>(null);
   // 选中别的东西(或卸载):停掉进行中的调用
   useEffect(() => () => ctl.current?.abort(), [key]);
+  // 「使用 AI 功能」关了:停掉进行中的调用(写过的名字由来留着,只是不显示)
+  useEffect(() => {
+    if (!on) ctl.current?.abort();
+  }, [on]);
   // 换了对象:状态从头来
   const s = st.key === key ? st : fresh(key);
   if (st.key !== key) setSt(s);
   const patch = (k: string, p: Partial<State>) => setSt((prev) => (prev.key === k ? { ...prev, ...p } : prev));
 
-  if (!info || !target) return { bar: null, panel: null, ask: () => {}, suggest: () => {}, suggestNow: () => {}, busy: false };
+  if (!on || !info || !target) return { bar: null, panel: null, ask: () => {}, suggest: () => {}, suggestNow: () => {}, busy: false };
   const world = worldId(civ);
   const note = getNote(world, explainNoteKey(key)) as NameNote | undefined;
   const renamed = !!note && typeof note.name === 'string' && note.name !== info.name;
@@ -251,8 +257,9 @@ export function useAiName({ civ, raw, raster, target, compact, lazy, what }: AiN
   };
 
   const apply = (c: Suggestion) => {
-    const e = suggestionEdit(info, c.name, defaultName(raw, target, info));
-    setName(e.key, e.value);
+    const fallback = defaultName(raw, target, info);
+    const e = suggestionEdit(info, c.name, fallback);
+    setName(e.key, e.value, 'ai', fallback);
     patch(key, { picked: -1, applied: c.name });
   };
 
@@ -296,7 +303,10 @@ export function useAiName({ civ, raw, raster, target, compact, lazy, what }: AiN
     s.writing || s.explainErr || (note && (!lazy || s.asked)) ? (
       <div className={`ain-box ain-note${s.writing ? ' writing' : ''}`}>
         <div className="ain-head">
-          <span className="ain-title">{lazy ? `${what ? `${what}由来` : '名字由来'} · AI` : '✦ 名字由来'}</span>
+          <span className="ain-title">
+            {what ? `${what}由来` : '名字由来'}
+            <AiTag />
+          </span>
           {s.writing ? (
             <span className="ain-status">AI 正在写…</span>
           ) : (
@@ -345,7 +355,7 @@ export function useAiName({ civ, raw, raster, target, compact, lazy, what }: AiN
                   <button onClick={() => patch(key, { expanded: !s.expanded })}>{s.expanded ? '收起' : '展开'}</button>
                   <span className="ain-by">
                     {providerLabel(note.provider, note.model)}
-                    {dateLabel(note.createdAt) && ` · ${dateLabel(note.createdAt)}`}
+                    {dateLabel(note.createdAt) && `，${dateLabel(note.createdAt)}`}
                   </span>
                 </>
               )

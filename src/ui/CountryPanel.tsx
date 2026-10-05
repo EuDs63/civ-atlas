@@ -38,6 +38,7 @@ import { openOverview } from './overviewStore';
 import { Act, Acts, AiBox, AiSuggestLink, CenterAct, EventList, Link, MoreAct, PanelHead, Row, Spark, Stats, SubLine, rgb, useRevealAi } from './panelParts';
 import { AiMenuItem, MenuItem, MenuSep } from './PopMenu';
 import { Icon } from './icons';
+import { useAiOn } from '../ai/client';
 import './countryPanel.css';
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,7 @@ function CountryHead({ civ, raw, id, year, names, shared }: CountryPanelProps & 
 
 function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanelProps & { p: Polity; shared: Shared }) {
   const { ai } = shared;
+  const aiOn = useAiOn();
   const shownYear = shownYearOf(p, year, civ.endYear);
   const alive = polityAlive(p, year);
   // 这一年的州数、人口(境内的城)、各民族的州数
@@ -215,7 +217,7 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
           <MenuItem icon={<Icon name="scroll" size={16} />} act="chronicle" disabled={!allCount} onClick={() => openOverview('chronicle', { polity: id, major: false })}>
             在编年史中查看
           </MenuItem>
-          <MenuSep />
+          {aiOn && <MenuSep />}
           <AiMenuItem icon={<Icon name="book" size={16} />} act="book" onClick={() => openHistoryBook({ polity: id })}>
             让 AI 写国史
           </AiMenuItem>

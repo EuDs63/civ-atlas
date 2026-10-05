@@ -1173,7 +1173,7 @@ export function mergeRewrite(edits: WorldEdits, changes: readonly RewriteChange[
       terrain = [...terrain, op];
     }
   }
-  return names === edits.names && interventions === edits.interventions && terrain === edits.terrain ? edits : { names, interventions, terrain };
+  return names === edits.names && interventions === edits.interventions && terrain === edits.terrain ? edits : { ...edits, names, interventions, terrain };
 }
 
 /** 去掉 list 里和 drop 一样的那几条(各去一次) */
@@ -1206,7 +1206,7 @@ export function unmergeRewrite(now: WorldEdits, before: WorldEdits, after: World
   const terrain = addedT.length ? without(now.terrain, addedT) : now.terrain;
   return names === now.names && interventions.length === now.interventions.length && terrain.length === now.terrain.length
     ? now
-    : { names, interventions, terrain };
+    : { ...now, names, interventions, terrain };
 }
 
 // ---------------------------------------------------------------------------

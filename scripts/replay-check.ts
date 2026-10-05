@@ -2306,7 +2306,7 @@ for (const style of ['realistic', 'fantasy']) {
   const stoppedLeft = await hp.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('civ-atlas:ai-notes:')).length);
   await hp.click('[data-act=book-redo]').catch(() => null);
   const redone = await hp
-    .waitForFunction(() => /\d+ 字 · 测试用假 AI/.test(document.querySelector('.bk-reader .bk-info')?.textContent ?? ''), null, { timeout: 20000 })
+    .waitForFunction(() => /\d+ 字，测试用假 AI/.test(document.querySelector('.bk-reader .bk-info')?.textContent ?? ''), null, { timeout: 20000 })
     .then(() => true, () => false);
   await hp.keyboard.press('Escape');
   console.log(

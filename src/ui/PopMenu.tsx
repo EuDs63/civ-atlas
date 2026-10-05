@@ -3,8 +3,9 @@
  * 点菜单项、点外面、按 Esc 收起。样式在 sidebar.css(.pm-*)。
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useAiStatus } from '../ai/client';
+import { useAiOn, useAiStatus } from '../ai/client';
 import { noteDismiss } from './dismissClick';
+import { Icon } from './icons';
 
 export function PopMenu({
   label,
@@ -143,10 +144,22 @@ export function MenuItem({
   );
 }
 
-/** 要用 AI 的一项:还没设置 AI 时右边的小字是"需设置" */
+/** 要用 AI 的一项:还没设置 AI 时右边的小字是"需设置";「使用 AI 功能」关着时不显示 */
 export function AiMenuItem(props: Parameters<typeof MenuItem>[0]) {
   const ai = useAiStatus();
+  const on = useAiOn();
+  if (!on) return null;
   return <MenuItem {...props} note={ai.ready ? props.note : '需设置'} />;
+}
+
+/** "AI 设置"那一项:「使用 AI 功能」关着时右边写"已关"(要再打开就从这里进) */
+export function AiSettingsItem({ onClick }: { onClick: () => void }) {
+  const on = useAiOn();
+  return (
+    <MenuItem icon={<Icon name="sparkle" size={16} />} act="ai-settings" note={on ? undefined : '已关'} onClick={onClick}>
+      AI 设置
+    </MenuItem>
+  );
 }
 
 export function MenuSep() {

@@ -21,7 +21,7 @@ import { useEdits } from './editsStore';
 import { TerrainPanel, setTerrainTool, useTerrainTool } from './TerrainTools';
 import { ParamSlider, SLIDERS, paramsSide } from './WorldOverviewGenesis';
 import { openAiSettings } from './AiSettings';
-import { MenuItem, MenuSep, PopMenu } from './PopMenu';
+import { AiSettingsItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
 import { APP_VERSION } from './version';
 import { Icon } from './icons';
@@ -224,9 +224,7 @@ export function NewWorld(p: NewWorldProps) {
   const moreMenu = (
     <div className="nw-more-wrap">
       <PopMenu className="sb-pill sb-more" icon={<Icon name="more" size={17} />} title="更多" act="world-more" align="right">
-        <MenuItem icon={<Icon name="sparkle" size={16} />} act="ai-settings" onClick={() => openAiSettings()}>
-          AI 设置
-        </MenuItem>
+        <AiSettingsItem onClick={() => openAiSettings()} />
         <MenuSep />
         <MenuItem icon={<Icon name="info" size={16} />} href={SOURCE_URL} act="source">
           源代码

@@ -19,6 +19,8 @@
  * - generator:生成器版本(edits.ts 的 GENERATOR_VERSION);和当前的不同 = 同样的参数可能生成不同的世界
  * - check:地形的短哈希(worldCheck);读档生成完再算一遍,对不上也说明地形变了。两种情况都照样打开,
  *   提示"改过的名字会尽量套上"(稳定键按州、地块定位,地形变化不大时大多还能对上)
+ * - edits.aiNames(可选):哪些名字是从 AI 起名里挑的(edits.ts 文件头"改名"),`{ "polity:c4567#0": { "name": "青渊", "was": "渊" } }`;
+ *   只存现在还用着的那几个,旧存档没有 = 一个也没有
  * - edits.interventions:干预(具体种类见 edits.ts 文件头"干预");这里当成不透明的数组原样存、原样读回
  * - edits.terrain:地形修改(edits.ts 文件头"地形修改");读档时逐处过 cleanTerrainOp,格式不对的跳过。
  *   旧存档没有这个字段 = 没改地形。check 是**改过地形以后**的地形哈希(读档时带着地形修改生成,再核对)
@@ -29,7 +31,7 @@
  * 纯计算,不碰 DOM(Node 里可测)。
  */
 import { DEFAULT_PARAMS, type World, type WorldParams } from './world';
-import { GENERATOR_VERSION, NAME_MAX, type Intervention, type TerrainOp, type WorldEdits } from './edits';
+import { GENERATOR_VERSION, NAME_MAX, aiNameKeys, type AiNameMark, type Intervention, type TerrainOp, type WorldEdits } from './edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from './terrainEdits';
 
 export const SAVE_APP = '文明与地图';
@@ -159,6 +161,9 @@ export function makeSave(params: WorldParams, edits: WorldEdits, check: string, 
     check,
     savedAt,
   };
+  // AI 起的名字:只存现在还用着的
+  const ai = aiNameKeys(edits);
+  if (ai.length) save.edits.aiNames = Object.fromEntries(ai.map((k) => [k, { ...edits.aiNames![k] }]));
   const t = cleanTitle(title);
   if (t) save.title = t;
   const v = view ? cleanView(view) : null;
@@ -246,6 +251,14 @@ export function parseSave(text: string): ParseResult {
     }
   } else if (E.names !== undefined) dropped++;
   if (dropped) warnings.push(`有 ${dropped} 处改名格式不对,已跳过`);
+  // AI 起的名字的记号:只收和改名对得上的(格式不对的悄悄跳过,只是少了"AI 写"的标记)
+  const aiNames: Record<string, AiNameMark> = {};
+  if (isObj(E.aiNames)) {
+    for (const [k, v] of Object.entries(E.aiNames)) {
+      if (!isObj(v) || typeof v.name !== 'string' || names[k] !== v.name) continue;
+      aiNames[k] = typeof v.was === 'string' && v.was.trim() && [...v.was].length <= NAME_MAX ? { name: v.name, was: v.was } : { name: v.name };
+    }
+  }
   const interventions: Intervention[] = [];
   let droppedI = 0;
   if (Array.isArray(E.interventions)) {
@@ -273,7 +286,7 @@ export function parseSave(text: string): ParseResult {
     generator,
     seed: params.seed,
     params,
-    edits: { names, interventions, terrain },
+    edits: Object.keys(aiNames).length ? { names, aiNames, interventions, terrain } : { names, interventions, terrain },
     check: typeof raw.check === 'string' ? raw.check.slice(0, 64) : '',
     savedAt: typeof raw.savedAt === 'string' && !Number.isNaN(Date.parse(raw.savedAt)) ? raw.savedAt : '',
   };
@@ -513,6 +526,8 @@ export function editsLost(local: SaveFile, incoming: SaveFile): number {
   const I = incoming.edits as unknown as Record<string, unknown>;
   let n = 0;
   for (const [k, lv] of Object.entries(L)) {
+    // AI 起名的记号跟着改名走,丢没丢已经按改名算过了
+    if (k === 'aiNames') continue;
     const iv = I[k];
     if (Array.isArray(lv)) {
       const has = new Set(Array.isArray(iv) ? iv.map((x) => JSON.stringify(x)) : []);

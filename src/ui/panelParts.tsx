@@ -28,6 +28,7 @@ import { requestMapCenter } from './mapWrap';
 import { evLabel, evText, evType } from './timelineLayout';
 import { Icon, type IconName } from './icons';
 import { MenuItem, PopMenu } from './PopMenu';
+import { useAiOn } from '../ai/client';
 import './countryPanel.css';
 
 /** 四种面板共同的参数 */
@@ -445,8 +446,9 @@ export function AiBox({ ai, aiRef }: { ai: AiName; aiRef: RefObject<HTMLDivEleme
   );
 }
 
-/** 改名时输入框下面的"AI 起名" */
+/** 改名时输入框下面的"AI 起名"(「使用 AI 功能」关着时没有) */
 export function AiSuggestLink({ ai }: { ai: AiName }) {
+  if (!useAiOn()) return null;
   return (
     <div className="cp-rename-more">
       <button className="ins-link" data-ain="suggest" onMouseDown={(e) => e.preventDefault()} onClick={ai.suggest}>
