@@ -3,7 +3,8 @@
  */
 import { registerProvider, setActiveProvider } from './client';
 import { initCallLog } from './callLog';
-import { getAiSettings, getSecrets } from './settings';
+import { getAiSettings } from './settings';
+import { getSession } from '../account/session';
 import { deepseekProvider } from './providers/deepseek';
 import { bailianProvider } from './providers/bailian';
 import { officialProvider, officialServer, refreshOfficialAccount } from './providers/official';
@@ -25,5 +26,6 @@ export function setupAi(): void {
   const saved = getAiSettings().provider;
   setActiveProvider(saved === 'mock' && !mockSelectable() ? null : saved);
   void initCallLog();
-  if (officialServer() && getSecrets().official) void refreshOfficialAccount();
+  // 登录着网站账号:查一下积分(令牌过期的话顺便清掉)
+  if (officialServer() && getSession()) void refreshOfficialAccount();
 }

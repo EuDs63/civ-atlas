@@ -1,15 +1,17 @@
 /**
  * 我们提供的 AI(按次扣积分)—— 客户端。服务器是另一个独立程序,不在本仓库里;下面是客户端依赖的接口要点,客户端照这份约定实现。
+ * 登录用的是网站账号(account/session.ts,和云同步、分享短链接同一个账号);这里只管积分和调 AI。
  * 开发时用本地假服务器(scripts/lib/fakeAiServer.ts,dev 模式下挂在 /__fake-ai,网址加 aiServer=fake 启用)跑通整条流程。
  *
  * ─── 服务器接口约定 v1 ─────────────────────────────────────────────────────────────
  * 基址:构建变量 VITE_AI_SERVER(如 https://ai.example.com)。没配置 = 未开放,界面显示"还在内测,暂未开放"。
  * 格式:请求、回复都是 JSON(UTF-8);登录后的接口带请求头 Authorization: Bearer <令牌>。
- * 跨域:网页直接调,服务器要回 CORS 头(允许 Authorization、Content-Type;GET / POST / OPTIONS)。
+ * 跨域:网页直接调,服务器要回 CORS 头(允许 Authorization、Content-Type;GET / POST / PUT / DELETE / OPTIONS)。
  *
- *   POST /v1/auth/code    { account }                   发验证码(account = 邮箱或手机号)
- *                         → 200 { ok: true, resendAfter?: 秒 }
- *   POST /v1/auth/login   { account, code }             登录
+ *   GET  /v1/auth/options                               登录窗选项 → { accountKinds, inviteOnly, codeTtlSec }
+ *   POST /v1/auth/code    { account, invite? }          发验证码(account = 邮箱或手机号;邀请制下新邮箱要带邀请码,没带:403 need-invite)
+ *                         → 200 { ok: true, resendAfter?: 秒, expiresIn?: 秒 }
+ *   POST /v1/auth/login   { account, code, invite? }    登录
  *                         → 200 { token, expiresAt?: ISO 时间, user: { id, account, name? }, credits: 余额 }
  *   GET  /v1/me                                         查积分余额(令牌过期回 401)
  *                         → 200 { user, credits, pricing?: { note: 计费说明(原样显示) } }
@@ -24,6 +26,7 @@
  *   错误码(error.code / HTTP 状态):
  *     auth 401(没登录 / 令牌过期:客户端清掉令牌,请用户重新登录)   quota 402(积分不够;带 balance 余额、need 这次要多少)
  *     rate-limit 429(太频繁;可带 retryAfter 秒)                  bad-code 400(验证码不对或过期)
+ *     need-invite 403(新邮箱要邀请码)                            bad-invite 400(邀请码不对 / 用完 / 过期)
  *     bad-request 400(参数不对,比如内容太长)                     content-filter 400(内容没通过审核)
  *     unavailable 503(上游 AI 暂时不可用)                         server 500(服务器出错)
  *   message 是给用户看的中文,客户端原样显示。
@@ -41,29 +44,23 @@
 import { useSyncExternalStore } from 'react';
 import { notifyAiChanged, type AiProvider } from '../client';
 import { AiError, type AiUsage } from '../types';
-import { getSecrets, scrubSecrets, setSecret } from '../settings';
+import { scrubSecrets } from '../settings';
 import { idleTimer, readSse } from '../sse';
+import { ServerError, onServerChange, serverBase, setServerForTest } from '../../account/server';
+import { authToken, getSession, login, logout, onSessionChange, sendCode, sessionExpired, updateUser } from '../../account/session';
 import { ToolCallAcc, wireMessage } from './compat';
 
 // ---------------------------------------------------------------------------
-// 服务器地址
-
-let serverOverride: string | null | undefined;
+// 服务器地址(和网站账号、云同步同一台,见 account/server.ts)
 
 /** 我们的服务器地址;null = 未开放 */
 export function officialServer(): string | null {
-  if (serverOverride !== undefined) return serverOverride;
-  const env = (import.meta.env?.VITE_AI_SERVER as string | undefined)?.trim();
-  if (env) return env.replace(/\/+$/, '');
-  // 开发时:网址加 aiServer=fake 用本地假服务器(vite.config.ts 里挂的);正式构建里这段不生效
-  if (import.meta.env?.DEV && typeof location !== 'undefined' && new URLSearchParams(location.search).get('aiServer') === 'fake') return '/__fake-ai';
-  return null;
+  return serverBase();
 }
 
 /** 单测用:指定服务器地址(null = 未开放;undefined = 恢复按构建变量) */
 export function setOfficialServerForTest(url: string | null | undefined): void {
-  serverOverride = url;
-  notifyAiChanged();
+  setServerForTest(url);
 }
 
 // ---------------------------------------------------------------------------
@@ -91,15 +88,23 @@ function setAcct(patch: Partial<OfficialAccount>, replace = false) {
   for (const f of subs) f();
   notifyAiChanged();
 }
+// 网站账号登录 / 退出了、换了服务器:跟着变
+onSessionChange(() => {
+  const s = getSession();
+  if (!s) setAcct({}, true);
+  else if (acct.account !== undefined && acct.account !== s.user.account) setAcct({ account: s.user.account, name: s.user.name }, true);
+  else setAcct({});
+});
+onServerChange(() => setAcct({}));
 
 function token(): string | undefined {
-  return getSecrets().official?.token;
+  return authToken();
 }
 
 export function getOfficialAccount(): OfficialAccount {
-  const t = getSecrets().official;
-  if (!t) return { loggedIn: false };
-  return { ...acct, loggedIn: true, account: acct.account ?? t.account };
+  const s = getSession();
+  if (!s) return { loggedIn: false };
+  return { ...acct, loggedIn: true, account: acct.account ?? s.user.account, name: acct.name ?? s.user.name };
 }
 
 let snap: { a: OfficialAccount; t: string | undefined; s: OfficialAccount } | null = null;
@@ -124,21 +129,26 @@ export function useOfficialAccount(): OfficialAccount {
 // ---------------------------------------------------------------------------
 // 请求与错误
 
-interface ServerError {
+interface ErrorBody {
   code?: string;
   message?: string;
   balance?: number;
   need?: number;
 }
 
-function toAiError(status: number, e: ServerError | undefined): AiError {
+/** usedToken = 这次请求带的令牌(没带、或者已经在 call() 里处理过的不传) */
+function toAiError(status: number, e: ErrorBody | undefined, usedToken?: string): AiError {
   const code = e?.code ?? '';
   const msg = e?.message ? scrubSecrets(String(e.message)).slice(0, 200) : '';
-  if (typeof e?.balance === 'number') setAcct({ credits: e.balance });
+  // 只认这次请求用的令牌:退出后换了账号,旧账号的请求晚回来的余额、401 都不算
+  const same = usedToken === undefined || usedToken === token();
+  if (same && typeof e?.balance === 'number') setAcct({ credits: e.balance });
   if (status === 401 || code === 'auth') {
     // 令牌过期:清掉,请用户重新登录
-    if (token()) setSecret('official', undefined);
-    setAcct({}, true);
+    if (same) {
+      if (usedToken) sessionExpired(usedToken);
+      setAcct({}, true);
+    }
     return new AiError('auth', msg || '登录过期了,请在"AI"设置里重新登录');
   }
   if (status === 402 || code === 'quota') {
@@ -158,10 +168,11 @@ async function api<T>(path: string, init: { method?: string; body?: unknown; aut
   if (!base) throw new AiError('not-configured', '我们的 AI 还在内测,暂未开放');
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (init.body !== undefined) headers['Content-Type'] = 'application/json';
+  let used: string | undefined;
   if (init.auth) {
-    const t = token();
-    if (!t) throw new AiError('not-configured', '还没登录我们的 AI');
-    headers.Authorization = `Bearer ${t}`;
+    used = token();
+    if (!used) throw new AiError('not-configured', '还没登录我们的 AI');
+    headers.Authorization = `Bearer ${used}`;
   }
   let res: Response;
   try {
@@ -181,7 +192,7 @@ async function api<T>(path: string, init: { method?: string; body?: unknown; aut
   } catch {
     /* 不是 JSON */
   }
-  if (!res.ok) throw toAiError(res.status, j?.error);
+  if (!res.ok) throw toAiError(res.status, j?.error, used);
   if (res.status !== 204 && (j === null || typeof j !== 'object')) throw new AiError('bad-response', '我们的服务器返回的内容看不懂');
   return j as T;
 }
@@ -192,44 +203,54 @@ interface UserInfo {
   name?: string;
 }
 
-/** 发验证码。开发假服务器会把验证码直接返回(devCode),正式服务器发到邮箱 / 手机 */
-export async function sendLoginCode(account: string): Promise<{ devCode?: string; resendAfter?: number }> {
-  const r = await api<{ devCode?: string; resendAfter?: number }>('/v1/auth/code', { method: 'POST', body: { account: account.trim() } });
-  return { devCode: typeof r.devCode === 'string' ? r.devCode : undefined, resendAfter: typeof r.resendAfter === 'number' ? r.resendAfter : undefined };
+/** 网站账号那边的错 → AI 的错(设置面板、单测按 AI 的错处理) */
+function fromServer(e: unknown): AiError {
+  if (e instanceof AiError) return e;
+  if (e instanceof ServerError) {
+    if (e.code === 'network') return new AiError('network', '连不上我们的服务器:请检查网络后再试');
+    if (e.code === 'not-configured') return new AiError('not-configured', '我们的 AI 还在内测,暂未开放');
+    return toAiError(e.status, { code: e.code, message: e.message, ...(e.data as { balance?: number; need?: number }) });
+  }
+  return new AiError('other', String(e));
 }
 
-export async function loginOfficial(account: string, code: string): Promise<void> {
-  const r = await api<{ token?: string; user?: UserInfo; credits?: number }>('/v1/auth/login', {
-    method: 'POST',
-    body: { account: account.trim(), code: code.trim() },
-  });
-  if (typeof r.token !== 'string' || !r.token) throw new AiError('bad-response', '登录失败:服务器没给令牌');
-  setSecret('official', { token: r.token, account: r.user?.account ?? account.trim() });
-  setAcct({ loggedIn: true, account: r.user?.account ?? account.trim(), name: r.user?.name, credits: num(r.credits) }, true);
+/** 发验证码。开发假服务器会把验证码直接返回(devCode),正式服务器发到邮箱 */
+export async function sendLoginCode(account: string, invite?: string): Promise<{ devCode?: string; resendAfter?: number }> {
+  try {
+    const r = await sendCode(account, invite);
+    return { devCode: r.devCode, resendAfter: r.resendAfter };
+  } catch (e) {
+    throw fromServer(e);
+  }
+}
+
+export async function loginOfficial(account: string, code: string, invite?: string): Promise<void> {
+  try {
+    const r = await login(account, code, invite);
+    setAcct({ loggedIn: true, account: r.session.user.account, name: r.session.user.name, credits: num(r.credits) }, true);
+  } catch (e) {
+    throw fromServer(e);
+  }
   void refreshOfficialAccount();
 }
 
 export async function logoutOfficial(): Promise<void> {
-  const had = token();
-  if (had) {
-    // 先在本地忘掉(断网也能退出),再告诉服务器作废令牌
-    const base = officialServer();
-    setSecret('official', undefined);
-    setAcct({}, true);
-    if (base) {
-      await fetch(base + '/v1/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${had}` }, credentials: 'omit' }).catch(() => {});
-    }
-  }
+  await logout();
+  setAcct({}, true);
 }
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
 /** 查积分余额和登录状态 */
 export async function refreshOfficialAccount(): Promise<void> {
-  if (!officialServer() || !token()) return;
+  const used = token();
+  if (!officialServer() || !used) return;
   setAcct({ checking: true, error: undefined });
   try {
     const r = await api<{ user?: UserInfo; credits?: number; pricing?: { note?: string } }>('/v1/me', { auth: true });
+    // 等回话的工夫退出、换了账号:查到的是原来那个账号的,不用
+    if (token() !== used) return;
+    updateUser(r.user, used);
     setAcct({
       checking: false,
       loggedIn: true,
@@ -239,7 +260,7 @@ export async function refreshOfficialAccount(): Promise<void> {
       pricing: typeof r.pricing?.note === 'string' ? r.pricing.note : undefined,
     });
   } catch (e) {
-    setAcct({ checking: false, error: e instanceof AiError ? e.message : String(e) });
+    setAcct(token() === used ? { checking: false, error: e instanceof AiError ? e.message : String(e) } : { checking: false });
   }
 }
 
@@ -252,6 +273,7 @@ function requestId(): string {
 }
 
 const IDLE_MS = 90_000;
+const ACCOUNT_CHANGED = '写的工夫退出或换了账号,这次没写完';
 
 export const officialProvider: AiProvider = {
   kind: 'official',
@@ -312,7 +334,7 @@ export const officialProvider: AiProvider = {
         } catch {
           /* 不是 JSON */
         }
-        throw toAiError(res.status, j?.error);
+        throw toAiError(res.status, j?.error, t);
       }
       let text = '';
       let done: { model?: string; usage?: AiUsage; charged?: number; balance?: number; tool_calls?: unknown } | null = null;
@@ -324,6 +346,8 @@ export const officialProvider: AiProvider = {
           } catch {
             throw new AiError('bad-response', '我们的服务器返回的内容看不懂');
           }
+          // 写的工夫退出、换了账号:不再往下交(写出来的是原来那个账号付的,不能存进新账号的世界里)
+          if (t !== token()) throw new AiError('auth', ACCOUNT_CHANGED);
           if (ev.event === 'delta' && typeof j?.text === 'string') {
             text += j.text;
             if (j.text) opts.onDelta?.(j.text, text);
@@ -331,19 +355,20 @@ export const officialProvider: AiProvider = {
             done = j ?? {};
             break;
           } else if (ev.event === 'error') {
-            throw toAiError(j?.code === 'quota' ? 402 : j?.code === 'auth' ? 401 : 500, j);
+            throw toAiError(j?.code === 'quota' ? 402 : j?.code === 'auth' ? 401 : 500, j, t);
           }
         }
       } catch (e) {
         throw fail(e, 'read');
       }
       if (!done) throw new AiError('network', '和我们服务器的连接中途断了,请再试一次');
+      if (t !== token()) throw new AiError('auth', ACCOUNT_CHANGED);
       const usage =
         done.usage && typeof done.usage === 'object'
           ? { inputTokens: num(done.usage.inputTokens) ?? 0, outputTokens: num(done.usage.outputTokens) ?? 0 }
           : undefined;
       const model = typeof done.model === 'string' && done.model ? done.model : '我们的 AI';
-      setAcct({ credits: num(done.balance) ?? acct.credits, model });
+      if (t === token()) setAcct({ credits: num(done.balance) ?? acct.credits, model });
       const acc = new ToolCallAcc();
       acc.add(done.tool_calls);
       const toolCalls = acc.calls();

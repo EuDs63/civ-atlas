@@ -39,6 +39,12 @@ export function setStage(stage: Stage, base: DraftBase | null = null) {
   for (const f of subs) f();
 }
 
+/** 换了阶段时调 f(返回取消函数) */
+export function subscribeStage(f: () => void): () => void {
+  subs.add(f);
+  return () => void subs.delete(f);
+}
+
 export function useStage(): StageState {
   return useSyncExternalStore(
     (f) => (subs.add(f), () => subs.delete(f)),

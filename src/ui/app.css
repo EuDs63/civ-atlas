@@ -1181,3 +1181,9 @@ body.terrain-pan .stage.terrain-on:active {
 }
 
 
+/* 登录了网站账号:同步状态前面一个小云朵 */
+.save-status .icon {
+  flex: none;
+  vertical-align: -2px;
+  margin-right: 4px;
+}

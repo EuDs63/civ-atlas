@@ -661,3 +661,12 @@
     flex-wrap: wrap;
   }
 }
+/* 我们的 AI 没登录:「登录」按钮(弹出网站账号的登录窗) */
+.ai-mini.ai-signin {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-weight: 500;
+}

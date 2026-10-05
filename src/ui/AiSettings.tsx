@@ -5,7 +5,8 @@
  *   openAiSettings(tab?)  打开它(成书窗口的"AI 设置"、提示条的"去设置"、别的面板要打开 AI 设置时都用这个)
  *   AiSettingsHost        窗口本身,App 里一直挂着(所以不管从哪儿打开都在)
  *
- *   我们的 AI(积分):登录后按次扣积分;服务器还没上线时显示"还在内测,暂未开放"(src/ai/providers/official.ts)
+ *   我们的 AI(积分):登录网站账号后按次扣积分(登录窗和「我的世界」那个是同一个,AccountDialogs.tsx);
+ *                   服务器还没上线时显示"还在内测,暂未开放"(src/ai/providers/official.ts)
  *   DeepSeek / 阿里云百炼:用户自己的 API 密钥,只存在这个浏览器里,请求直接从浏览器发给那一家
  *   测试用假 AI:开发时、或网址带 ai=mock 时才出现(不联网)
  *
@@ -18,14 +19,9 @@ import { AiError, type AiProviderKind } from '../ai/types';
 import { chooseProvider, cleanKey, getAiSettings, getSecrets, setAiEnabled, setSecret, updateAiSettings, useAiSettingsVersion } from '../ai/settings';
 import { DEEPSEEK_MODELS } from '../ai/providers/deepseek';
 import { BAILIAN_MODELS, BAILIAN_REGIONS } from '../ai/providers/bailian';
-import {
-  loginOfficial,
-  logoutOfficial,
-  officialServer,
-  refreshOfficialAccount,
-  sendLoginCode,
-  useOfficialAccount,
-} from '../ai/providers/official';
+import { officialServer, refreshOfficialAccount, useOfficialAccount } from '../ai/providers/official';
+import { openAccount, openLogin } from './AccountDialogs';
+import { Icon } from './icons';
 import { mockSelectable } from '../ai/setup';
 import { useCallLog } from '../ai/callLog';
 import { AiCallLog } from './AiCallLog';
@@ -238,7 +234,7 @@ function SettingsTab() {
           ) : acct.loggedIn ? (
             <OfficialAccountView />
           ) : (
-            <LoginForm />
+            <SignInRow />
           )}
           {server && acct.loggedIn && <TestRow disabled={false} sig={`official|${acct.account}`} />}
         </div>
@@ -251,7 +247,7 @@ function SettingsTab() {
 
       <label className="ai-check ai-remember" title="关掉:只在这次打开的页面里有效,刷新就忘">
         <input type="checkbox" checked={s.remember} onChange={(e) => updateAiSettings({ remember: e.target.checked })} />
-        <span>下次打开时记住密钥和登录</span>
+        <span>下次打开时记住密钥</span>
       </label>
 
       <p className="ai-foot">
@@ -443,65 +439,21 @@ function TestRow({ disabled, sig }: { disabled: boolean; sig: string }) {
 // ---------------------------------------------------------------------------
 // 我们的 AI:登录 / 账户
 
-function LoginForm() {
-  const [account, setAccount] = useState('');
-  const [code, setCode] = useState('');
-  const [sent, setSent] = useState<{ devCode?: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const act = async (f: () => Promise<void>) => {
-    setBusy(true);
-    setErr('');
-    try {
-      await f();
-    } catch (e) {
-      setErr(e instanceof AiError ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+/** 没登录:一个「登录」按钮,弹出和「我的世界」同一个登录窗 */
+function SignInRow() {
   return (
     <div className="ai-login">
       <div className="ai-row">
-        <label className="ai-label" htmlFor="ai-account">
-          账号
-        </label>
-        <input
-          id="ai-account"
-          className="ai-input"
-          placeholder="邮箱或手机号"
-          autoComplete="off"
-          value={account}
-          onChange={(e) => setAccount(e.target.value)}
-        />
-        <button
-          className="ai-mini"
-          data-act="ai-send-code"
-          disabled={busy || !account.trim()}
-          onClick={() =>
-            act(async () => {
-              const r = await sendLoginCode(account);
-              setSent(r);
-              if (r.devCode) setCode(r.devCode);
-            })
-          }
-        >
-          {sent ? '重发验证码' : '发验证码'}
+        <label className="ai-label">账号</label>
+        <span className="ai-val" style={{ color: 'var(--ink-2)' }}>
+          没登录
+        </span>
+        <button className="ai-mini primary ai-signin" data-act="ai-login" onClick={() => openLogin()}>
+          <Icon name="personc" size={16} />
+          登录
         </button>
       </div>
-      {sent && (
-        <div className="ai-row">
-          <label className="ai-label" htmlFor="ai-code">
-            验证码
-          </label>
-          <input id="ai-code" className="ai-input ai-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
-          <button className="ai-mini primary" data-act="ai-login" disabled={busy || !code.trim()} onClick={() => act(() => loginOfficial(account, code))}>
-            登录
-          </button>
-        </div>
-      )}
-      {sent?.devCode && <p className="ai-note sub">开发用假服务器:验证码是 {sent.devCode},已经替你填好</p>}
-      {err && <p className="ai-note err">{err}</p>}
+      <p className="ai-note sub">和「我的世界」云同步用同一个账号，用邮箱收验证码就能登录。</p>
     </div>
   );
 }
@@ -513,8 +465,8 @@ function OfficialAccountView() {
       <div className="ai-row">
         <label className="ai-label">账号</label>
         <span className="ai-val">{acct.name && acct.name !== acct.account ? `${acct.name}(${acct.account})` : acct.account}</span>
-        <button className="ai-mini" data-act="ai-logout" onClick={() => void logoutOfficial()}>
-          退出登录
+        <button className="ai-mini" data-act="ai-account" onClick={() => openAccount()}>
+          账号
         </button>
       </div>
       <div className="ai-row">

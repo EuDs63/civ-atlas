@@ -349,6 +349,7 @@
 /* 我的世界开着时:提示条在整页居中(宽屏不再偏到地图那一块;手机放到底下,不压右上的新建) */
 .app.has-side.home .toast {
   left: 50%;
+  top: 24px;
 }
 .app.phone.home .toast {
   top: auto;

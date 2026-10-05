@@ -5,6 +5,7 @@
  *   存成文件:下载 .json(文明与地图-九州大陆.json;格式见 gen/savefile.ts)
  *   复制分享链接:整份存档压缩进网址的 # 后面(gen/savefile.ts 的 encodeShare),复制到剪贴板;
  *     没有修改 = 普通网址(只带种子、参数);剪贴板用不了:菜单留着,里面多一行选中了链接的输入框,让用户自己复制
+ *   登录了网站账号:当前世界那一行写同步到账号了没有;"复制分享链接"换成"分享…"(短链接,随时能停,AccountDialogs.tsx 的分享窗)
  *
  * 存、读、列都在 saveStore.ts。存储满了之类的提示(saveStore 的 notify)显示在顶部的提示条上。
  * ⌘S 打开这个菜单(openSaveMenu;世界本来就自动存着,菜单上写着存没存好)。
@@ -15,6 +16,11 @@ import { useEdits } from './editsStore';
 import { addFileSaver, currentSave, currentWorld, loadWorld, notify, persistent, storageIsFull, useSavesVersion } from './saveStore';
 import { Icon } from './icons';
 import { noteDismiss } from './dismissClick';
+import { copyText } from './clipboard';
+import { openShareDialog } from './AccountDialogs';
+import { when } from './worldParts';
+import { useSession } from '../account/session';
+import { useSyncView, worldSync } from '../account/sync';
 
 export interface SaveMenuProps {
   /** 世界生成完了(能存) */
@@ -38,33 +44,6 @@ interface ShareDebug {
   withData: boolean;
   count: number;
   copied: boolean;
-}
-
-/** 复制到剪贴板:先用剪贴板接口,不行(没权限、不是 https)再用老办法;都不行 = false */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    /* 换老办法 */
-  }
-  const focused = document.activeElement as HTMLElement | null;
-  const ta = document.createElement('textarea');
-  try {
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    Object.assign(ta.style, { position: 'fixed', left: '-9999px', top: '0', opacity: '0' });
-    document.body.appendChild(ta);
-    ta.select();
-    return document.execCommand('copy');
-  } catch {
-    return false;
-  } finally {
-    ta.remove();
-    focused?.focus?.();
-  }
 }
 
 const LONG_HINT = '链接较长,可能打不开,建议存成文件';
@@ -108,11 +87,12 @@ function Thumb({ src }: { src: string | null }) {
   return src ? <img className="save-thumb" src={src} alt="" draggable={false} /> : <div className="save-thumb empty" />;
 }
 
-/** 分享链接的网址部分:种子、参数、图层……照当前网址;去掉只在这个浏览器里有意义的世界编号 */
+/** 分享链接的网址部分:种子、参数、图层……照当前网址;去掉只在这个浏览器里有意义的世界编号、别人的分享短链接的码(那个分享停了,链接就打不开了) */
 function shareBase(): string {
   const q = new URLSearchParams(location.search);
   q.delete('w');
   q.delete('new');
+  q.delete('s');
   const s = q.toString();
   return location.origin + location.pathname + (s ? `?${s}` : '');
 }
@@ -148,6 +128,9 @@ export function SaveMenu({ ready, icon }: SaveMenuProps) {
   const count = editCount(edits);
   const keep = persistent();
   const full = storageIsFull();
+  const session = useSession();
+  const syncView = useSyncView();
+  const synced = useMemo(() => (open && session && cur && curStored ? worldSync(cur.id) : null), [open, session, cur, curStored, syncView]);
 
   // 点菜单外面就收起(在捕获阶段听:地图上的按钮条拦了冒泡,点旁边的按钮照样收起)
   useEffect(() => {
@@ -211,13 +194,24 @@ export function SaveMenu({ ready, icon }: SaveMenuProps) {
   const title = cur?.title;
   const nTerrain = edits.terrain.length;
   // 存没存住:浏览器不让存 / 存不下 / 已经在"我的世界"里 / 打开的链接还没动过
-  const status = !keep
+  const status: { cls: string; text: string; icon?: 'cloudok' | 'cloudup' | 'cloudoff' } = !keep
     ? { cls: 'warn', text: '浏览器不让网页存数据，关掉前请存成文件' }
     : full
       ? { cls: 'warn', text: '浏览器存储已满，没能自动存' }
-      : curStored
-        ? { cls: 'ok', text: '已自动存在这个浏览器里' }
-        : { cls: '', text: '还没存进我的世界；改了名字或历史就会自动存' };
+      : curStored && synced
+        ? synced.state === 'synced'
+          ? { cls: 'ok', icon: 'cloudok', text: `已同步到你的账号${synced.at ? `，${when(synced.at)}` : ''}` }
+          : synced.state === 'busy'
+            ? { cls: 'ok', icon: 'cloudup', text: '正在同步到你的账号' }
+            : { cls: 'warn', icon: 'cloudoff', text: '还没同步上，联网后会自动同步' }
+        : curStored
+          ? { cls: 'ok', text: '已自动存在这个浏览器里' }
+          : { cls: '', text: '还没存进我的世界；改了名字或历史就会自动存' };
+  const share = () => {
+    if (!cur) return;
+    setOpen(false);
+    openShareDialog(cur.id, title ?? '');
+  };
   return (
     <div className="save" ref={rootRef}>
       <button className={`save-btn${open ? ' on' : ''}`} onClick={() => setOpen((o) => !o)} data-tip="存档" data-tip-key="save">
@@ -235,7 +229,10 @@ export function SaveMenu({ ready, icon }: SaveMenuProps) {
                   种子 {cur.params.seed}
                   {nTerrain ? `，地形改过 ${nTerrain} 处` : ''}
                 </small>
-                <small className={`save-status ${status.cls}`}>{status.text}</small>
+                <small className={`save-status ${status.cls}`} data-testid="save-status">
+                  {status.icon && <Icon name={status.icon} size={14} />}
+                  {status.text}
+                </small>
               </div>
             </div>
           ) : (
@@ -245,16 +242,26 @@ export function SaveMenu({ ready, icon }: SaveMenuProps) {
             <Icon name="save" size={17} />
             <span>
               <b>存成文件（.json）</b>
-              <small>换台电脑、换个浏览器也能打开</small>
+              <small>{session ? '留一份备份，或者发给别人' : '换台电脑、换个浏览器也能打开'}</small>
             </span>
           </button>
-          <button className="save-it" data-act="share-link" disabled={!cur} onClick={shareLink}>
-            <Icon name="link" size={17} />
-            <span>
-              <b>复制分享链接</b>
-              <small>{count || title ? '对方打开看到同一个世界、同样的修改' : '还没有修改，只带种子和参数'}</small>
-            </span>
-          </button>
+          {session ? (
+            <button className="save-it" data-act="share" disabled={!cur} onClick={share}>
+              <Icon name="link" size={17} />
+              <span>
+                <b>分享…</b>
+                <small>生成一个链接，别人打开就能看；随时能停止</small>
+              </span>
+            </button>
+          ) : (
+            <button className="save-it" data-act="share-link" disabled={!cur} onClick={shareLink}>
+              <Icon name="link" size={17} />
+              <span>
+                <b>复制分享链接</b>
+                <small>{count || title ? '对方打开看到同一个世界、同样的修改' : '还没有修改，只带种子和参数'}</small>
+              </span>
+            </button>
+          )}
           {manual !== null && <ManualCopy url={manual} />}
         </div>
       )}

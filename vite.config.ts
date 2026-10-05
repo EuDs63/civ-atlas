@@ -11,12 +11,19 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   plugins: [
     react(),
-    // 开发时的假"我们的 AI"服务器(接口约定见 src/ai/providers/official.ts 文件头):网址加 aiServer=fake 使用;正式构建里没有
+    // 开发时的假网站服务器(账号、云同步、分享、我们的 AI;接口约定见 src/ai/providers/official.ts、src/account/cloud.ts 文件头):
+    // 网址加 aiServer=fake 使用;正式构建里没有。分享短链接 /s/<码> 照正式网站的做法转到 /?s=<码>(开发时带上 aiServer=fake)
     {
       name: 'fake-ai-server',
       apply: 'serve',
       configureServer(server) {
-        server.middlewares.use('/__fake-ai', fakeAiMiddleware());
+        server.middlewares.use('/__fake-ai', fakeAiMiddleware({ inviteOnly: true }));
+        server.middlewares.use((req, res, next) => {
+          const m = /^\/s\/([A-Za-z0-9]+)\/?(?:\?.*)?$/.exec(req.url ?? '');
+          if (!m) return next();
+          res.writeHead(302, { Location: `/?s=${m[1]}&aiServer=fake` });
+          res.end();
+        });
       },
     },
   ],
