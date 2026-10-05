@@ -6,13 +6,12 @@
  *
  * 往上拖 / 点拖动条 / 点搜索框 → 拉到顶;往下拖 / 点拖动条 → 收起(拖着的时候下面的内容跟着露出来)。搜索框里有字时下面换成搜索结果。
  * 选中了东西:详情卡片(Inspector)从屏幕底升起盖住这张(App 这时不渲染它)。
- * 时间轴胶囊浮在卡片上面(拉到顶时藏起来);右上竖着两个毛玻璃按钮(图层、地球),见 Corners.tsx 的 PhoneButtons。
+ * 时间轴胶囊浮在卡片上面(拉到顶时藏起来);右上竖着三个毛玻璃按钮(图层、地球、助手),见 Corners.tsx 的 PhoneButtons。
  * 零件(搜索、世界名、"更多"菜单、整个世界)和宽屏的侧栏共用,见 Sidebar.tsx。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SaveMenu } from './SaveMenu';
 import { ExportMenu, type ExportMenuProps } from './ExportMenu';
-import { RewriteBox } from './Rewrite';
 import { openOverview } from './overviewStore';
 import { setSheetDrag, setWorldSheet, usePanel } from './panelStore';
 import { VELOCITY_MS, releaseVelocity, worldSnap } from './gestures';
@@ -31,15 +30,12 @@ export function PhoneSheet(p: PhoneSheetProps) {
   const { world: snap } = usePanel();
   const s = useSearch(p.civ);
   const { title, sub } = useWorldInfo(p.civ, p.data);
-  const [rewriting, setRewriting] = useState(false);
-  const closeRewrite = useCallback(() => setRewriting(false), []);
   const d = useWorldDrag(snap);
   const full = snap === 'full';
   // 搜索框里有字时卡片拉到顶(结果有地方放;手机键盘弹出来也不挡)
   useEffect(() => {
     if (s.searching) setWorldSheet('full');
   }, [s.searching]);
-  const canRewrite = !!p.civ && !!p.data;
   const ready = !!p.data && !p.generating;
   return (
     <>
@@ -92,13 +88,7 @@ export function PhoneSheet(p: PhoneSheetProps) {
                     </button>
                     <WorldMoreMenu
                       civ={p.civ}
-                      data={p.data}
                       className="ps-more"
-                      onRewrite={() => {
-                        // 改写的框在屏幕上方,卡片收起来让出地图(改完马上看得到)
-                        setRewriting(true);
-                        setWorldSheet('peek');
-                      }}
                       onBook={() => {
                         // 写史书在后台进行,进度在右上(卡片拉到顶时右上的按钮藏着)
                         setWorldSheet('peek');
@@ -130,11 +120,6 @@ export function PhoneSheet(p: PhoneSheetProps) {
           </div>
         )}
       </section>
-      {rewriting && canRewrite && (
-        <div className="ps-rewrite">
-          <RewriteBox civ={p.civ!} world={p.data!.world} busy={p.rewriteBusy} onClose={closeRewrite} lock="terrain" />
-        </div>
-      )}
     </>
   );
 }

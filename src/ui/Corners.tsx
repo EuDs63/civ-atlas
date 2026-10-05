@@ -1,12 +1,13 @@
 /**
  * 浮在地图上的按钮(宽屏的主体界面在左边的侧栏里,见 Sidebar.tsx):
  *
- *   右上 MapBar       图层分段按钮(政区 / 民族 / 地形 / 实景 / 更多图层)、导出、编年史;写史书时最前面是写作进度
- *                     新建世界这一步还没有历史:只有地形 / 实景 / 高程 / 更多图层(没有政区、民族,不放导出、编年史)
+ *   右上 MapBar       图层分段按钮(政区 / 民族 / 地形 / 实景 / 更多图层)、导出、编年史、助手;写史书时最前面是写作进度
+ *                     新建世界这一步还没有历史:只有地形 / 实景 / 高程 / 更多图层、助手(没有政区、民族,不放导出、编年史)
+ *                     「助手」开关右边的助手面板(Assistant.tsx),开着时按钮是按下去的样子
  *   右下 MapControls  "地球 / 平面"切换、放大、缩小(触屏不放 + −,窄屏整个不放)
  *   窄屏(手机):
- *   右上 PhoneButtons 竖排的毛玻璃按钮:图层与投影(弹层从底部升起)、地球 / 平面;写史书时进度条在它们左边。
- *                     世界名、搜索、存档、改写、成书都在底部的世界卡片里(PhoneSheet.tsx)
+ *   右上 PhoneButtons 竖排的毛玻璃按钮:图层与投影(弹层从底部升起)、地球 / 平面、助手;写史书时进度条在它们左边。
+ *                     世界名、搜索、存档、成书都在底部的世界卡片里(PhoneSheet.tsx)
  *   底部 FirstHint    第一次打开时的一行操作提示,第一次拖动 / 缩放 / 点击之后不再出现(触屏换成"双指缩放"的说法)
  *   跟随鼠标 HoverCard 悬停小卡片(内容见 hoverInfo.ts)
  * 地图上的文字按钮不加底、只带描边(--halo),悬停出现浅灰底。
@@ -21,6 +22,8 @@ import { LayerPopover, type LayerPopoverProps } from './LayerPopover';
 import { ExportMenu, type ExportMenuProps } from './ExportMenu';
 import { openOverview } from './overviewStore';
 import { layerDef, type MapLayer } from './mapLayers';
+import { toggleAssistant, useAstOpen } from './astPanel';
+import { useAssistant } from './assistantStore';
 import './book.css';
 
 /** 右上图层分段按钮里直接列出的几个图层(其余的在"更多图层"里) */
@@ -28,7 +31,7 @@ export const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'real
 /** 新建世界时(还没有历史) */
 export const DRAFT_SEG: MapLayer[] = ['terrain', 'realistic', 'elevation'];
 
-/** 宽屏右上:写作进度、图层分段按钮、导出、编年史 */
+/** 宽屏右上:写作进度、图层分段按钮、导出、编年史、助手 */
 export function MapBar({ layers, exp, civ, draft }: { layers: LayerPopoverProps; exp: ExportMenuProps; civ: Civ | null; draft?: boolean }) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   const seg = draft ? DRAFT_SEG : SEG_LAYERS;
@@ -61,15 +64,33 @@ export function MapBar({ layers, exp, civ, draft }: { layers: LayerPopoverProps;
           <span className="mb-label">编年史</span>
         </button>
       )}
+      <AssistantButton disabled={!civ} />
     </div>
   );
 }
 
-/** 右上的写作进度:"正在撰写《某某通史》"+ 80px 细进度条;写完"《某某通史》已完成 · 打开",点开读过就收起 */
+/** 「助手」:开 / 关右边的助手面板(世界第一次生成出来之前点不了) */
+function AssistantButton({ disabled }: { disabled: boolean }) {
+  const open = useAstOpen();
+  return (
+    <button className={`glass mb-btn${open ? ' on' : ''}`} data-act="assistant" aria-pressed={open} disabled={disabled} onClick={toggleAssistant} title={open ? '收起助手' : '用一句话改世界、问问这个世界'}>
+      <Icon name="bubble" size={16} />
+      <span className="mb-label">助手</span>
+    </button>
+  );
+}
+
+/**
+ * 右上的写作进度:"正在撰写《某某通史》"+ 80px 细进度条;写完"《某某通史》已完成 · 打开",点开读过就收起。
+ * 助手开着、这本书是助手写的:进度在助手里那一行,这里不再重复
+ */
 function BookChip() {
   const { job } = useBook();
+  const astOpen = useAstOpen();
+  const ast = useAssistant();
   useSavesVersion();
   if (!job || !(job.status === 'writing' || (job.status === 'done' && !job.seen))) return null;
+  if (astOpen && ast.turns.some((t) => t.steps.some((s) => s.book?.id === job.id))) return null;
   const name = bookTitleText(job.title, job.opts.scope, currentWorld()?.title);
   const writing = job.status === 'writing';
   const pct = Math.round(bookProgress(job) * 100);
@@ -88,9 +109,10 @@ function BookChip() {
   );
 }
 
-/** 手机右上:竖排的毛玻璃按钮(图层与投影、地球 / 平面);写史书时进度条在它们左边 */
+/** 手机右上:竖排的毛玻璃按钮(图层与投影、地球 / 平面、助手);写史书时进度条在它们左边 */
 export function PhoneButtons({ layers, globeOn, onToggleGlobe }: { layers: LayerPopoverProps; globeOn: boolean; onToggleGlobe: () => void }) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
+  const astOpen = useAstOpen();
   return (
     <div className="phone-btns" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
       <BookChip />
@@ -105,6 +127,17 @@ export function PhoneButtons({ layers, globeOn, onToggleGlobe }: { layers: Layer
           title={globeOn ? '回到平面地图' : '显示成可以转动的地球仪'}
         >
           <Icon name={globeOn ? 'map' : 'globe'} size={19} />
+        </button>
+        <button
+          className={`pb-btn${astOpen ? ' on' : ''}`}
+          data-act="assistant"
+          aria-pressed={astOpen}
+          disabled={layers.disabled}
+          onClick={toggleAssistant}
+          aria-label="助手"
+          title="用一句话改世界、问问这个世界"
+        >
+          <Icon name="bubble" size={22} />
         </button>
       </div>
     </div>

@@ -10,21 +10,18 @@
  *   底部     创建世界(正在生成时点不了)
  * 以某个世界为底稿新建(世界设定页的"以它为底稿新建…"):种子锁住;多一组"跟过去的修改"(改过的名字、干预几处);
  * 名字先填好"原名(二)";左上返回原来那个世界。
- * 右上"···":用一句话改地形(AI)、AI 设置、源代码、两份协议、版本号。
+ * 右上"···":AI 设置、源代码、两份协议、版本号(用一句话改地形在右上「助手」打开的助手面板里)。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { World, WorldParams } from '../gen/world';
+import { useEffect, useState } from 'react';
+import type { WorldParams } from '../gen/world';
 import { DEFAULT_PARAMS } from '../gen/world';
-import type { Civ } from '../gen/civ/types';
-import type { Raster } from '../gen/raster';
 import { TITLE_MAX } from '../gen/savefile';
 import type { DraftBase } from './stageStore';
 import { useEdits } from './editsStore';
 import { TerrainPanel, setTerrainTool, useTerrainTool } from './TerrainTools';
 import { ParamSlider, SLIDERS, paramsSide } from './WorldOverviewGenesis';
-import { RewriteBox } from './Rewrite';
 import { openAiSettings } from './AiSettings';
-import { AiMenuItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
+import { MenuItem, MenuSep, PopMenu } from './PopMenu';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
 import { APP_VERSION } from './version';
 import { Icon } from './icons';
@@ -51,10 +48,6 @@ export interface NewWorldProps {
   onReplay: () => void;
   /** 这颗星球长不出文明 */
   noCiv: boolean;
-  /** 用一句话改地形要的东西 */
-  data: { world: World; raster: Raster } | null;
-  civ: Civ | null;
-  rewriteBusy: boolean;
 }
 
 const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
@@ -69,9 +62,6 @@ export function NewWorld(p: NewWorldProps) {
   useEffect(() => setSeedText(String(p.params.seed)), [p.params.seed]);
   /** 种子框刚才敲进了数字以外的字(没进框):在「种子」下面提示一行 */
   const [seedBad, setSeedBad] = useState(false);
-  const [rewriting, setRewriting] = useState(false);
-  const closeRewrite = useCallback(() => setRewriting(false), []);
-  const more = useRef<HTMLDivElement>(null);
   // 手机:点拖动条收起 / 展开(回放世界形成时自动收起,让出地图)
   const [collapsed, setCollapsed] = useState(false);
   const down = collapsed || (p.phone && p.replay.on);
@@ -90,7 +80,6 @@ export function NewWorld(p: NewWorldProps) {
   };
   const intro = base ? `设定都带过来了，改完存成一个新世界，${base.title}本身不变。` : '先定下这颗星球的样子，再推演它三千年的历史。';
   const isDefault = SLIDERS.every((s) => p.params[s.key] === DEFAULT_PARAMS[s.key]);
-  const canRewrite = !!p.civ && !!p.data;
 
   const seedRow = base ? (
     <div className="sb-row nw-seed locked" data-act="seed-locked">
@@ -233,11 +222,8 @@ export function NewWorld(p: NewWorldProps) {
     </>
   );
   const moreMenu = (
-    <div className="nw-more-wrap" ref={more}>
+    <div className="nw-more-wrap">
       <PopMenu className="sb-pill sb-more" icon={<Icon name="more" size={17} />} title="更多" act="world-more" align="right">
-        <AiMenuItem icon={<Icon name="terrain" size={16} />} act="rewrite" disabled={!canRewrite} onClick={() => setRewriting(true)} note="AI">
-          用一句话改地形
-        </AiMenuItem>
         <MenuItem icon={<Icon name="sparkle" size={16} />} act="ai-settings" onClick={() => openAiSettings()}>
           AI 设置
         </MenuItem>
@@ -263,11 +249,6 @@ export function NewWorld(p: NewWorldProps) {
       <Icon name="back" size={18} />
       {p.back.label}
     </button>
-  );
-  const rewrite = rewriting && canRewrite && (
-    <div className={p.phone ? 'ps-rewrite' : 'sb-rewrite'}>
-      <RewriteBox civ={p.civ!} world={p.data!.world} busy={p.rewriteBusy} onClose={closeRewrite} anchor={more} lock="history" />
-    </div>
   );
 
   if (p.phone)
@@ -313,7 +294,6 @@ export function NewWorld(p: NewWorldProps) {
               ))}
           </div>
         </section>
-        {rewrite}
       </>
     );
 
@@ -324,7 +304,6 @@ export function NewWorld(p: NewWorldProps) {
         <div className="nw-title-row">
           <div className="nw-title">{heading}</div>
           {moreMenu}
-          {rewrite}
         </div>
         <div className="nw-intro">{intro}</div>
       </header>

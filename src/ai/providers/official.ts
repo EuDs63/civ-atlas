@@ -28,6 +28,11 @@
  *     unavailable 503(上游 AI 暂时不可用)                         server 500(服务器出错)
  *   message 是给用户看的中文,客户端原样显示。
  *
+ *   工具调用(助手用,可选字段):请求里 tools 是 OpenAI 兼容的写法 [{ type: 'function', function: { name, description, parameters } }],
+ *     toolChoice = 'auto' | 'none' | 'required';messages 里带工具调用的 assistant 写成 { role, content, tool_calls },
+ *     工具结果写成 { role: 'tool', tool_call_id, content }(都和 OpenAI 兼容接口一样,服务器原样转给模型)。
+ *     模型要调用工具时,done 里多一个 tool_calls: [{ id, type: 'function', function: { name, arguments } }](这时正文可能是空的)。
+ *     一个助手任务会连着调好几次 /v1/chat(每轮一次)。
  *   扣积分:按次,扣多少由服务器定,每次在 done.charged 里告诉客户端,客户端记进调用记录。
  *   requestId:客户端每次调用生成一个,服务器对同一个 requestId 只扣一次(断线重试不重复扣)。
  *   隐私:服务器不保存调用正文,只留计费需要的(时间、功能、用量、扣了多少);调用记录在用户自己的浏览器里。
@@ -38,6 +43,7 @@ import { notifyAiChanged, type AiProvider } from '../client';
 import { AiError, type AiUsage } from '../types';
 import { getSecrets, scrubSecrets, setSecret } from '../settings';
 import { idleTimer, readSse } from '../sse';
+import { ToolCallAcc, wireMessage } from './compat';
 
 // ---------------------------------------------------------------------------
 // 服务器地址
@@ -283,10 +289,14 @@ export const officialProvider: AiProvider = {
             requestId: requestId(),
             feature: req.feature,
             title: req.title,
-            messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+            messages: req.messages.map(wireMessage),
             temperature: req.temperature,
             maxTokens: req.maxTokens,
             json: req.json || undefined,
+            tools: req.tools?.length
+              ? req.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
+              : undefined,
+            toolChoice: req.tools?.length ? req.toolChoice : undefined,
           }),
           signal: idle.signal,
           credentials: 'omit',
@@ -305,7 +315,7 @@ export const officialProvider: AiProvider = {
         throw toAiError(res.status, j?.error);
       }
       let text = '';
-      let done: { model?: string; usage?: AiUsage; charged?: number; balance?: number } | null = null;
+      let done: { model?: string; usage?: AiUsage; charged?: number; balance?: number; tool_calls?: unknown } | null = null;
       try {
         for await (const ev of readSse(res.body, idle.arm)) {
           let j: any;
@@ -334,7 +344,10 @@ export const officialProvider: AiProvider = {
           : undefined;
       const model = typeof done.model === 'string' && done.model ? done.model : '我们的 AI';
       setAcct({ credits: num(done.balance) ?? acct.credits, model });
-      return { text, model, usage, credits: num(done.charged) };
+      const acc = new ToolCallAcc();
+      acc.add(done.tool_calls);
+      const toolCalls = acc.calls();
+      return { text, model, usage, credits: num(done.charged), ...(toolCalls.length ? { toolCalls } : {}) };
     } finally {
       idle.dispose();
       // 中途取消:服务器可能按已生成的部分扣了,重新查一次余额

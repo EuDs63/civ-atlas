@@ -15,6 +15,7 @@ import { clampCurved, clampSphere, stageToWorld, type MapView, type StageBox } f
 import type { MapSelection } from './civView';
 import { NARROW_MAX, safeInsets } from './device';
 import { ABOVE_SHEET, sheetGeometry } from './gestures';
+import { astRoom } from './astPanel';
 import { sideShown } from './sideStore';
 
 /** 飞行时长(毫秒) */
@@ -169,8 +170,8 @@ export function freeArea(b: StageBox, panel: boolean): [number, number, number, 
     const [top, bottom] = phoneFree(b.sh, panel);
     return [0, top, b.sw, Math.max(top + 80, bottom)];
   }
-  // 宽屏:地图铺满窗口,左边被侧栏卡片挡住的那一截不算
-  return [sideRoom(b.sw), TOP_ROOM, b.sw, Math.max(TOP_ROOM + 80, b.sh - BOTTOM_ROOM)];
+  // 宽屏:地图铺满窗口,左边被侧栏卡片、右边被助手面板(开着、窗口够宽时)挡住的那一截不算
+  return [sideRoom(b.sw), TOP_ROOM, b.sw - astRoom(b.sw), Math.max(TOP_ROOM + 80, b.sh - BOTTOM_ROOM)];
 }
 
 /**

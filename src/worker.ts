@@ -6,6 +6,7 @@
  *
  * 改地形(阶段 4):世界 = 参数 + 地形修改(terrain)。改了地形就带着 terrain 重新 generate(连同当时的干预一起推文明);
  * 回放帧、重推文明也带着 terrain,线程被重开过时按"参数 + 地形修改"重新生成(同样的输入 = 同一个世界)。
+ * 试推演(助手)和重推一样算,只是结果单独交回,主线程不换上它。
  */
 import { generateWorld, type World, type WorldParams } from './gen/world';
 import { rasterize, type Raster } from './gen/raster';
@@ -34,7 +35,9 @@ export type WorkerRequest =
    * 阶段 4 干预:只重推文明(世界已在线程里,不重新生成地形;线程被重开过就按参数重新生成)。
    * seq = 第几次重推(主线程只认最新的一次)
    */
-  | { type: 'resim'; id: number; seq: number; params: WorldParams; terrain?: TerrainOp[]; interventions: Intervention[]; tempo?: TempoNote };
+  | { type: 'resim'; id: number; seq: number; params: WorldParams; terrain?: TerrainOp[]; interventions: Intervention[]; tempo?: TempoNote }
+  /** 试推演(助手用):和 resim 一样重推(同样带节拍),但只把结果交回去,主线程不换上它;tid = 第几次试推演 */
+  | { type: 'trial'; id: number; tid: number; params: WorldParams; terrain?: TerrainOp[]; interventions: Intervention[]; tempo?: TempoNote };
 
 export type WorkerResponse =
   | { type: 'progress'; id: number; stage: string; pct: number }
@@ -42,7 +45,9 @@ export type WorkerResponse =
   | { type: 'done'; id: number; world: World; raster: Raster; civ: Civ; ms: number; tempo?: TempoNote }
   | ({ type: 'history'; id: number } & HistoryFrames)
   /** 重推好的文明;ms = 线程里花的时间(含按参数重新生成世界);tempo 同 done */
-  | { type: 'civ'; id: number; seq: number; civ: Civ; ms: number; tempo?: TempoNote };
+  | { type: 'civ'; id: number; seq: number; civ: Civ; ms: number; tempo?: TempoNote }
+  /** 试推演的结果;tempo 同 done */
+  | { type: 'trial'; id: number; tid: number; civ: Civ; ms: number; tempo?: TempoNote };
 
 /** 上一个生成的世界(含回放快照),回放时直接用 */
 let last: { key: string; world: World } | null = null;
@@ -110,9 +115,12 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   } else if (m.type === 'history') {
     const h = buildHistoryFrames(worldOf(m.params, m.terrain));
     post({ type: 'history', id: m.id, ...h }, h.frames.map((f) => f.buffer));
-  } else if (m.type === 'resim') {
+  } else if (m.type === 'resim' || m.type === 'trial') {
     const t0 = performance.now();
     const civ = generateCiv(worldOf(m.params, m.terrain), { interventions: m.interventions, tempo: tempoOf(m.params, m.terrain) });
-    post({ type: 'civ', id: m.id, seq: m.seq, civ, ms: performance.now() - t0, tempo: noteOf(m.params) }, civTransferables(civ));
+    const ms = performance.now() - t0;
+    const tempo = noteOf(m.params);
+    if (m.type === 'resim') post({ type: 'civ', id: m.id, seq: m.seq, civ, ms, tempo }, civTransferables(civ));
+    else post({ type: 'trial', id: m.id, tid: m.tid, civ, ms, tempo }, civTransferables(civ));
   }
 };

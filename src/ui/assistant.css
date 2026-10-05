@@ -1,0 +1,590 @@
+/*
+ * 助手面板(Assistant.tsx)。尺寸照左边的世界卡片:宽 372、四周 14、圆角 14、实色底;内容是一组组白底圆角的行,
+ * 小标题、勾选框、蓝色主按钮、蓝字链接都和左边卡片、原来的改写框一样。
+ * 宽屏:右边一张卡片(窗口够宽时地图往左让,见 desktop.css 的 --ast-room);手机:拉到顶的底部卡片。
+ */
+.ast-panel {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  bottom: 14px;
+  z-index: 7;
+  width: 372px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--panel-solid);
+  border-radius: 14px;
+  box-shadow: var(--shadow-float);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  text-shadow: none;
+  cursor: default;
+}
+.ast-panel button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.ast-panel button:disabled {
+  cursor: default;
+}
+
+/* ---- 顶上 ---- */
+.ast-top {
+  flex: none;
+}
+.ast-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 10px;
+}
+.ast-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ast-title b {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.ast-title small {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ast-pill {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: var(--btn);
+}
+.ast-pill:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.ast-pill:disabled {
+  opacity: 0.45;
+}
+
+/* ---- 对话 ---- */
+.ast-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ast-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ast-turn + .ast-turn {
+  margin-top: 4px;
+}
+/* 作者说的话:右边一块浅灰底 */
+.ast-me {
+  align-self: flex-end;
+  max-width: 280px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: var(--btn);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* 助手说的话:直接写在卡片底上;说到的国家、城是蓝字 */
+.ast-say {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.ast-name {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link) !important;
+  line-height: inherit;
+}
+.ast-name:hover {
+  text-decoration: underline;
+}
+.ast-cant {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.ast-cant b {
+  color: var(--warn);
+  font-weight: 600;
+  margin-right: 4px;
+}
+.ast-hint {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+.ast-note,
+.ast-under {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.ast-unset {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.ast-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link) !important;
+  font-size: 13px;
+}
+.ast-link:hover {
+  text-decoration: underline;
+}
+
+/* 小标题(和左边卡片的"国家""最近大事"一样) */
+.ast-sec {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 4px 2px -4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.ast-sec .ast-link {
+  font-weight: 500;
+}
+
+/* 一组白底圆角的行 */
+.ast-grp {
+  flex: none;
+  background: var(--surface);
+  border-radius: var(--r-btn);
+  overflow: hidden;
+}
+.ast-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 11px;
+  border: 0;
+  border-bottom: 0.5px solid var(--line);
+  background: transparent;
+  text-align: left;
+}
+.ast-row:last-child {
+  border-bottom: 0;
+}
+.ast-row .tx {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+}
+.ast-row .tx b {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.ast-row .tx small {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin-top: 1px;
+}
+.ast-row .end {
+  flex: none;
+  align-self: center;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ast-row .end.ast-link {
+  color: var(--link) !important;
+}
+.ast-row .end.open .icon {
+  transform: rotate(90deg);
+}
+.ast-row .yr {
+  flex: none;
+  width: 36px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}
+.ast-row.link {
+  align-items: center;
+}
+button.ast-row.link:hover {
+  background: var(--hover-bg);
+}
+.ast-row.item.off .tx b,
+.ast-row.item.bad .tx b {
+  color: var(--ink-3);
+}
+.ast-row .was {
+  color: var(--ink-3);
+}
+.ast-row .arrow {
+  color: var(--ink-3);
+  margin: 0 3px;
+}
+
+/* 步骤的小图标:做完一个绿勾、正在做一个转圈、没做成一个灰叉 */
+.ast-st {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.ast-st.ok {
+  color: var(--ok);
+}
+.ast-st.no {
+  color: var(--ink-3);
+}
+.ast-st.run {
+  width: 15px;
+  height: 15px;
+  margin: 2px 1.5px 0;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: ast-spin 0.9s linear infinite;
+}
+@keyframes ast-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 勾选框 */
+.ast-ck {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-tag);
+  background: var(--accent);
+  color: #fff !important;
+}
+.ast-ck.off {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+}
+.ast-ck:disabled {
+  opacity: 0.6;
+}
+
+/* 写史书的进度条 */
+.ast-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--btn);
+  margin-top: 6px;
+  overflow: hidden;
+}
+.ast-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+/* 起名的候选 */
+.ast-row.cand .tx b {
+  font-size: 15px;
+  font-weight: 600;
+}
+.ast-row.cand .tx b em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin-left: 6px;
+}
+
+/* 按钮 */
+.ast-acts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ast-btn {
+  height: 32px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: var(--btn);
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+.ast-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.ast-btn.primary {
+  background: var(--accent);
+  color: var(--on-accent) !important;
+  font-weight: 600;
+}
+.ast-btn.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.06);
+}
+.ast-btn.on,
+.ast-btn.on:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent) !important;
+}
+.ast-btn.text {
+  background: transparent;
+  color: var(--link) !important;
+  padding: 0 6px;
+}
+.ast-btn:disabled {
+  opacity: 0.45;
+}
+.ast-done {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+/* ---- 底部的输入框 ---- */
+.ast-input {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 14px 14px;
+  border-top: 0.5px solid var(--line);
+}
+.ast-field {
+  position: relative;
+  border-radius: 10px;
+  background: var(--field);
+}
+.ast-field textarea {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  max-height: 160px;
+  field-sizing: content;
+  resize: none;
+  padding: 9px 46px 9px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  outline: none;
+}
+.ast-field textarea::placeholder {
+  color: var(--ink-3);
+}
+.ast-field:focus-within {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.ast-send {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff !important;
+}
+.ast-send.off {
+  background: var(--ink-3);
+}
+.ast-send.stop {
+  background: var(--ink);
+}
+.ast-send.stop i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--panel-solid);
+}
+
+/* ---- 地图上方的提示条(在地图上看试推演时;和推完历史的提示条同一种样子,在地图那一块里居中) ---- */
+.ast-banner {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  z-index: 6;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-radius: 12px;
+  box-shadow: var(--shadow-toast);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  text-shadow: none;
+  white-space: nowrap;
+}
+.ast-banner button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.ast-banner .ast-btn {
+  height: 30px;
+}
+.ast-banner-acts {
+  display: flex;
+  gap: 8px;
+}
+.app.has-side .ast-banner {
+  left: var(--map-mid);
+}
+/* 提示条和推完历史的提示条同一个位置:有提示条时它往下让 */
+.app.ast-preview .toast {
+  top: 116px;
+}
+
+/* ---- 手机:拉到顶的底部卡片(和世界卡片拉到顶一样高);往下拉收起 ---- */
+.ast-panel.phone {
+  position: absolute;
+  left: var(--safe-l, 0px);
+  right: var(--safe-r, 0px);
+  top: 8%;
+  bottom: 0;
+  z-index: 26;
+  width: auto;
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.18);
+  font-size: 15px;
+  transition: transform 0.2s ease;
+  touch-action: pan-y;
+}
+.ast-panel.phone.dragging {
+  transition: none;
+}
+.ast-panel.phone .ast-top {
+  touch-action: none;
+}
+.ast-grip {
+  display: block;
+  width: 100%;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.ast-grip i {
+  display: block;
+  width: 36px;
+  height: 5px;
+  margin: 7px auto 0;
+  border-radius: 3px;
+  background: var(--ink-3);
+  opacity: 0.5;
+}
+.ast-panel.phone .ast-head {
+  padding: 8px 16px;
+}
+.ast-panel.phone .ast-log {
+  gap: 9px;
+  padding: 2px 16px 12px;
+}
+.ast-panel.phone .ast-turn {
+  gap: 9px;
+}
+.ast-panel.phone .ast-input {
+  padding: 10px 16px calc(14px + max(var(--safe-b, 0px), 12px));
+}
+.ast-panel.phone .ast-me {
+  max-width: 270px;
+}
+.ast-panel.phone .ast-say {
+  font-size: 15px;
+}
+.ast-panel.phone .ast-row .tx b {
+  font-size: 14.5px;
+}
+.ast-panel.phone .ast-row .tx small {
+  font-size: 13px;
+}
+.ast-panel.phone .ast-btn {
+  height: 36px;
+  font-size: 15px;
+}
+.ast-panel.phone .ast-field textarea {
+  min-height: 44px;
+  font-size: 16px;
+}
+.ast-banner.phone {
+  top: calc(12px + var(--safe-t, 0px));
+  left: 12px;
+  right: 64px;
+  transform: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 8px 14px;
+  white-space: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ast-st.run {
+    animation-duration: 2.4s;
+  }
+  .ast-panel.phone {
+    transition: none;
+  }
+}

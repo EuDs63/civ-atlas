@@ -15,9 +15,9 @@ import type { Civ, Settlement } from '../gen/civ/types';
 import { cultureLabel, regionLabel } from '../gen/civ/display';
 import { SETTLEMENT_RANKS, capitalAt, polityAlive, populationAt, populationLabel, settlementRank } from '../gen/civ/growth';
 import { ownersAt } from '../gen/civ/timeline';
-import { polityKey, settlementKey } from '../gen/edits';
+import { polityKey, settlementKey, type Intervention } from '../gen/edits';
 import { setSelection } from './civView';
-import { addIntervention } from './editsStore';
+import { addIntervention, editBlock, interventionKeys } from './editsStore';
 import { NameEdit } from './NameEdit';
 import { nameAt } from './Interventions';
 import { endRun, startRun } from './panelStore';
@@ -100,10 +100,13 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
             : null;
   const move = () => {
     if (!moveOwner || moveWhy) return;
-    setMsg(null);
+    const v: Intervention = { kind: 'move', a: polityKey(civ, moveOwner.id), city: settlementKey(civ, id), from: y };
+    const blocked = editBlock(interventionKeys(v));
+    setMsg(blocked);
+    if (blocked) return;
     jumpTo(y);
     startRun({ self: moveOwner.id, target: { kind: 'settlement', id }, from: y });
-    if (!addIntervention({ kind: 'move', a: polityKey(civ, moveOwner.id), city: settlementKey(civ, id), from: y })) {
+    if (!addIntervention(v)) {
       endRun();
       setMsg('这条命令已经下过了');
     }

@@ -12,8 +12,30 @@
 export type AiProviderKind = 'official' | 'deepseek' | 'bailian' | 'mock';
 
 export interface AiMessage {
-  role: 'system' | 'user' | 'assistant';
+  /** tool = 工具执行的结果(回给模型看) */
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  /** assistant:这一轮模型要调用的工具 */
+  toolCalls?: AiToolCall[];
+  /** tool:回的是哪一次调用(AiToolCall.id) */
+  toolCallId?: string;
+}
+
+/**
+ * 给模型用的一个工具(助手用):名字、说明、参数(JSON Schema 的 object)。
+ * 模型想用时回 AiToolCall,由网页执行,结果作为 role = tool 的消息交回去
+ */
+export interface AiTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/** 模型要调用的一个工具;args = 参数的 JSON 原文(模型写的,可能不合法,执行前要解析、核对) */
+export interface AiToolCall {
+  id: string;
+  name: string;
+  args: string;
 }
 
 export interface AiRequest {
@@ -26,6 +48,10 @@ export interface AiRequest {
   maxTokens?: number;
   /** 要求模型只回一个 JSON 对象(起名这类要结构化结果的功能用) */
   json?: boolean;
+  /** 模型可以调用的工具(助手用);给了就关掉深度思考 */
+  tools?: AiTool[];
+  /** auto = 模型自己决定(默认);none = 这次不许调用,只回话;required = 必须调用 */
+  toolChoice?: 'auto' | 'none' | 'required';
 }
 
 export interface AiUsage {
@@ -34,7 +60,10 @@ export interface AiUsage {
 }
 
 export interface AiResult {
+  /** 正文;模型只调用工具、没说话时是空串 */
   text: string;
+  /** 模型要调用的工具(给了 tools 时才可能有) */
+  toolCalls?: AiToolCall[];
   provider: AiProviderKind;
   model: string;
   usage?: AiUsage;
@@ -91,6 +120,8 @@ export interface AiCallRecord {
   /** 发出去的消息和收到的全文(用户可在记录里展开看;太长的截断) */
   messages: AiMessage[];
   text?: string;
+  /** 模型要调用的工具 */
+  toolCalls?: AiToolCall[];
   /** 调用时在看哪颗星球(种子 + 参数,同 savefile 的 worldKey),可空 */
   world?: string;
 }

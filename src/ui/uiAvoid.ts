@@ -2,7 +2,7 @@
  * 地图上的字要让开的界面:平面主图(CivLayer.tsx)和地球仪(Globe.tsx)共用。
  *
  * 宽屏:左边浮着的侧栏卡片、右上图层分段按钮、导出、编年史(MapBar,含写作进度、打开的图层弹层);窄屏:底部的世界卡片 / 详情卡片、
- * 右上竖排的图层和地球按钮(含写作进度、打开的图层抽屉)、改写世界的框。
+ * 右上竖排的图层和地球按钮(含写作进度、打开的图层抽屉)。两边都有的还有助手面板和在地图上看试推演时的提示条。
  * 两边都有:顶部提示条、右下地球仪切换和缩放、底部时间轴、第一次打开的操作提示(新建时是"拖动地图看看这颗星球")、回放时的顶部说明。
  * 这些东西下面不放地名和城镇符号(压在按钮、面板底下的字读不清,还会被误点)。
  *
@@ -13,7 +13,7 @@ import { useEffect, useState, type RefObject } from 'react';
 
 /** 要让开的界面元素 */
 export const AVOID_UI =
-  '.sidebar, .psheet, .phone-btns, .ps-rewrite .rw-box, .corner-tl, .map-bar, .book-chip, .toast, .map-controls, .bottom-row, .lp-pop, .inspector:not(.hidden), .first-hint, .draft-tip, .civ-top';
+  '.sidebar, .psheet, .phone-btns, .ast-panel, .ast-banner, .corner-tl, .map-bar, .book-chip, .toast, .map-controls, .bottom-row, .lp-pop, .inspector:not(.hidden), .first-hint, .draft-tip, .civ-top';
 
 /** 让开的范围多久重新量一次(毫秒) */
 export const AVOID_MS = 200;

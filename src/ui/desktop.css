@@ -4,6 +4,8 @@
  * 浮在地图上的按钮都是毛玻璃(.glass):右上图层分段按钮、导出、编年史(MapBar);右下地球、缩放(MapControls);
  * 底部一条胶囊形的时间轴(CivTimeline)。提示条、操作提示、回放说明在地图那一块里居中。
  * 卡片能收起(.side-collapsed,见 Sidebar.tsx、sideStore.ts):卡片滑到左边外面,左上角留一个小按钮;--side-room 只剩左边距。
+ * 右边能开助手面板(.ast-open,见 Assistant.tsx、astPanel.ts):窗口够宽时右上按钮、右下地球和缩放、时间轴、提示条往左让 --ast-room;
+ * 窗口窄时面板盖在地图上(--ast-room 为 0)。
  * 窄屏(手机)的布局不受这里影响(没有 .has-side)。
  */
 .app.has-side {
@@ -11,8 +13,10 @@
   --side-gap: 14px;
   /* 卡片占掉的宽度(左边距 + 卡片 + 右边留空;flyTo.ts 的 sideRoom 和这里一致) */
   --side-room: calc(var(--side-w) + 2 * var(--side-gap));
-  /* 卡片右边那一块地图的水平中线 */
-  --map-mid: calc(var(--side-room) + (100% - var(--side-room)) / 2);
+  /* 右边助手面板占掉的宽度(面板 + 左边留空;astPanel.ts 的 astRoom 和这里一致) */
+  --ast-room: 0px;
+  /* 两张卡片中间那一块地图的水平中线 */
+  --map-mid: calc(var(--side-room) + (100% - var(--side-room) - var(--ast-room)) / 2);
 }
 @media (min-width: 1100px) {
   .app.has-side {
@@ -22,6 +26,11 @@
 /* 卡片收起了:时间轴、提示条拉到最左(flyTo.ts 的 sideRoom 同样只剩左边距) */
 .app.has-side.side-collapsed {
   --side-room: var(--side-gap);
+}
+@media (min-width: 1280px) {
+  .app.has-side.ast-open {
+    --ast-room: 386px;
+  }
 }
 /* 浮在地图上的侧栏卡片 */
 .app.has-side .sidebar {
@@ -48,13 +57,13 @@
 /* ---- 右上:写作进度、图层分段按钮、导出、编年史 ---- */
 .map-bar {
   position: absolute;
-  right: 14px;
+  right: calc(14px + var(--ast-room, 0px));
   top: 14px;
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - var(--side-room) - 14px);
+  max-width: calc(100% - var(--side-room) - 14px - var(--ast-room, 0px));
 }
 .map-bar button {
   font: inherit;
@@ -135,10 +144,17 @@
   opacity: 0.5;
   cursor: default;
 }
+/* 助手面板开着:按钮变蓝(和手机右上的按钮一样) */
+.mb-btn[data-act='assistant'].on {
+  color: var(--accent);
+}
 .map-bar .export {
   position: relative;
 }
+/* 放不下时写作进度先缩(书名省略成"…",进度条留着),按钮不被挤到助手面板底下 */
 .map-bar .book-chip {
+  min-width: 0;
+  flex: 0 1 auto;
   height: 36px;
   border-radius: 10px;
   background: var(--panel);
@@ -169,7 +185,7 @@
 
 /* ---- 右下:地球 / 平面、放大、缩小 ---- */
 .app.has-side .map-controls {
-  right: 14px;
+  right: calc(14px + var(--ast-room));
   bottom: 104px;
   gap: 10px;
 }
@@ -214,7 +230,7 @@
 /* ---- 底部:胶囊形的时间轴(卡片收起 / 展开时跟着卡片伸缩) ---- */
 .app.has-side .bottom-row {
   left: var(--side-room);
-  right: 14px;
+  right: calc(14px + var(--ast-room));
   bottom: 14px;
   text-shadow: none;
   transition: left 0.2s ease;

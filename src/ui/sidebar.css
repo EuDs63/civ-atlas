@@ -209,34 +209,9 @@
   top: calc(100% + 12px);
 }
 
-.sb-more-wrap {
-  display: contents;
-}
-/* "用一句话改写世界"的框:浮在侧栏卡片右边、和卡片顶对齐;面板里"更多"的菜单也弹到卡片右边(.pm-side,
-   位置由 PopMenu 按按钮算好)。这时侧栏压在地图按钮上面 */
-.sidebar:has(.sb-rewrite),
+/* 面板里"更多"的菜单弹到卡片右边(.pm-side,位置由 PopMenu 按按钮算好)。这时侧栏压在地图按钮上面 */
 .sidebar:has(.pm-side) {
   z-index: 8;
-}
-.sb-rewrite {
-  position: absolute;
-  top: -14px;
-  left: calc(100% + 28px);
-}
-.sb-rewrite .rw-box {
-  position: static;
-  max-width: calc(100vw - var(--side-room) - 14px);
-  border: 0;
-  border-radius: 12px;
-  background: var(--panel);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-float);
-  font-size: 13.5px;
-}
-.sb-rewrite .rw-unset .rw-link {
-  flex: none;
-  white-space: nowrap;
 }
 
 .sb-search {

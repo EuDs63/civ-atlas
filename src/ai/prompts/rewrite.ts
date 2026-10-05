@@ -2,7 +2,7 @@
  * AI 改写(阶段 5「对话式编辑」)的材料、提示词和结果核对:作者用一句话说想怎么改世界
  * ("让大昌多撑三百年""让索拉特和大昌结盟""在北边的海里放一座火山岛"),AI 把它翻成现有的修改 ——
  * 干预(gen/edits.ts 的 Intervention)、改名、改地形(TerrainOp)—— 列给作者确认,确认了才执行。
- * 纯函数,不碰 DOM、不调 AI(界面在 src/ui/Rewrite.tsx)。
+ * 纯函数,不碰 DOM、不调 AI(助手用它核对、合进修改,见 src/ui/assistantStore.ts)。
  *
  * - 材料(rewriteMaterial):这份历史里的陆块、国家、城、民族、山河,和已经做过的修改。实体一律用短编号
  *   (P3 国家、C12 城、R45 州、E2 民族、M7 山河湖海、L0 陆块;数字 = 这份历史里的编号),位置写成(经度, 纬度)。
@@ -18,7 +18,7 @@
 import type { World } from '../../gen/world';
 import { AdjKind, type Civ, type Place, type Polity } from '../../gen/civ/types';
 import { BIOMES } from '../../gen/biomes';
-import { KIND_INFO, regionLabel, regionNamed } from '../../gen/civ/display';
+import { KIND_INFO, cultureLabel, regionLabel, regionNamed } from '../../gen/civ/display';
 import { capitalAt, dynastyIndexAt, polityAlive, polityName, polityRootAt, polityRoots, polityTitleChain, populationAt, populationLabel } from '../../gen/civ/growth';
 import { ownersAt, type Owners } from '../../gen/civ/timeline';
 import { cnNumber } from '../../gen/civ/chronicle';
@@ -46,6 +46,8 @@ import type { AiRequest } from '../types';
 
 /** 调用记录里的功能名 */
 export const REWRITE_FEATURE = '改写';
+/** 立国给的是位置(at)时,离它多远以内的有人住的州才算"那一带"(公里) */
+const NEAR_KM = 1500;
 /** 一次最多几条修改(多出来的不要) */
 export const REWRITE_MAX_ITEMS = 12;
 /** 作者一句话最长多少字 */
@@ -140,13 +142,13 @@ function nearestCell(world: World, p: readonly [number, number]): number {
 // 历史的小工具
 
 /** 国家在 y 年的全称(还没立国 / 已亡:立国时 / 亡国前的国号) */
-function nameAt(p: Polity, y: number): string {
+export function nameAt(p: Polity, y: number): string {
   const t = y < p.founded ? p.founded : p.ended !== undefined && y >= p.ended ? p.ended - 1 / 512 : y;
   return polityName(p, t) || p.name || '某国';
 }
 
 /** 国家最后(或现在)的那一刻 */
-const lastYear = (civ: Civ, p: Polity) => Math.min(p.ended !== undefined ? p.ended - 1 / 512 : civ.endYear, civ.endYear);
+export const lastYear = (civ: Civ, p: Polity) => Math.min(p.ended !== undefined ? p.ended - 1 / 512 : civ.endYear, civ.endYear);
 
 /** 没写年份的命令从哪一年起:时间轴的年份,最晚是最后一年的前一年 */
 const defaultFrom = (civ: Civ, year: number) => Math.max(0, Math.min(civ.endYear - 1, Math.floor(Number.isFinite(year) ? year : civ.endYear)));
@@ -158,7 +160,7 @@ const stands = (civ: Civ, sid: number, y: number) => {
 };
 
 /** y 年和国家 id 接壤的国家(和国家面板的"宣战"同一口径:海洋国家隔海峡、航线也算) */
-function bordersAt(civ: Civ, own: Int16Array, id: number): Set<number> {
+export function bordersAt(civ: Civ, own: Int16Array, id: number): Set<number> {
   const reg = civ.regions;
   const near = new Set<number>();
   const sea = civ.polities[id]?.kind === 'sea';
@@ -174,7 +176,7 @@ function bordersAt(civ: Civ, own: Int16Array, id: number): Set<number> {
 }
 
 /** 国家怎么亡的:"第 2450 年被 P5 所灭""第 2450 年并入 P5""第 2450 年瓦解";还在 = 空串 */
-function endText(civ: Civ, p: Polity): string {
+export function endText(civ: Civ, p: Polity): string {
   if (p.ended === undefined) return '';
   const y = Math.floor(p.ended);
   const merge = civ.annals.find((e) => e.kind === 'merge' && e.b === p.id);
@@ -471,12 +473,8 @@ function ivText(civ: Civ, v: Intervention): string {
 const presetKm = (k: TerrainKind, i: number) => Math.round((2 * TERRAIN_PRESETS[k][i][0] * KM_PER_UNIT) / 50) * 50;
 const sizesKm = (k: TerrainKind) => [0, 1, 2].map((i) => `${['小', '中', '大'][i]}约 ${presetKm(k, i)}`).join('、');
 
-export const REWRITE_SYSTEM = [
-  '你是「文明与地图」里帮作者改世界的助手。这是一颗虚构的星球:地形由板块、侵蚀、气候生成,历史从第 0 年按规则推演到最后一年。',
-  '作者用一句话说想怎么改(历史、名字或地形),你把它翻成下面这些"修改",列给作者确认,作者点了执行才生效。',
-  '',
-  '## 能用的修改(op)',
-  '',
+/** 能用的修改(op)和各自的规矩:改写和助手的提示词共用 */
+export const REWRITE_OPS = [
   '### 历史命令:从 from 那一年的年初生效;那一年之前的历史一字不变,之后整段重新推演',
   '- protect 保护 country:国都攻不下,不会被灭、不会被并(国土照样会丢、会分裂、会改朝换代)。可给 until = 保护到哪一年为止,之后照常可能被灭',
   '- unity 禁止 country 分裂:不会有州叛离自立,也不会有遗民复国',
@@ -485,7 +483,8 @@ export const REWRITE_SYSTEM = [
   '- declare country 向 other 宣战:那一年两国必须接壤',
   '- move country 迁都到 city:那一年 city 必须在它的国土里',
   '- cede 把一州划给 country:用 region 指定州,或用 city 指定"这座城所在的州";permanent: true = 之后谁也夺不走',
-  '- found 在一州立一个新国家(用 region 或 city 指定;那一年州里要有人住);可给 name = 国名,只写名字本身,不带"国""王国""王朝"之类的国号',
+  '- found 在一州立一个新国家(用 region 或 city 指定;材料里没列那一带的州时用 at = [经度, 纬度],会挑离它最近、那一年有人住的一州,不要自己编 R 编号;那一年州里要有人住);' +
+    '可给 name = 国名,只写名字本身,不带"国""王国""王朝"之类的国号。作者没说年份时不要在最后几年立国(新国家来不及长大),挑一个早几百年、那一带有人住的年份',
   '命令下了就一直有效(给了 until 的到那一年为止)。后果由推演自己展开:你只能下命令,不能直接规定谁打赢、谁灭谁、哪年发生什么。',
   '',
   '### 改名:立即生效,历史不变',
@@ -501,6 +500,15 @@ export const REWRITE_SYSTEM = [
   `size = "小" / "中" / "大"(山脉是低 / 中 / 高),宽度(公里):火山山体 ${sizesKm('volcano')};湖 ${sizesKm('lake')};山脉 ${sizesKm('range')};画笔带子 ${sizesKm('raise')}。`,
   '气候不能直接改,只能借地形:纬度 0–30° 吹东风,30–60° 吹西风,60° 以上吹东风;水汽从海上顺风吹来,遇山在迎风坡下雨,翻过山就干(雨影)。',
   '所以"让某地更干旱"可以在它的上风一侧拉一道山脉挡住水汽;"更湿润"可以在它的上风一侧沉出一片海湾。用这种办法时在 why 里说清楚。',
+].join('\n');
+
+export const REWRITE_SYSTEM = [
+  '你是「文明与地图」里帮作者改世界的助手。这是一颗虚构的星球:地形由板块、侵蚀、气候生成,历史从第 0 年按规则推演到最后一年。',
+  '作者用一句话说想怎么改(历史、名字或地形),你把它翻成下面这些"修改",列给作者确认,作者点了执行才生效。',
+  '',
+  '## 能用的修改(op)',
+  '',
+  REWRITE_OPS,
   '',
   '## 规则',
   '1. 国家、城、州、民族、山河只能用材料里的编号(P3、C12、R45、E2、M7);作者说的名字对不上任何一个,写进 cannot,不要编。',
@@ -593,6 +601,8 @@ export interface RewriteItem {
   why?: string;
   /** 不能执行的原因 */
   problem?: string;
+  /** 给 AI 看的补充(立国:那一州在哪、多大、什么地貌、离给的位置多远),好让它核对是不是作者说的地方 */
+  where?: string;
 }
 
 export type RewriteParse = { ok: true; reply: string; items: RewriteItem[]; cannot: string[] } | { ok: false; message: string };
@@ -719,17 +729,83 @@ const OP_ALIAS: Record<string, string> = {
 
 const EDIT_KEYS = ['edits', 'changes', 'actions', '修改'];
 
+/** 英文的修改种类、工具名 → 中文(AI 回给作者的话里偶尔夹着) */
+const OP_WORDS: Record<string, string> = {
+  protect: '保护',
+  unity: '禁止分裂',
+  halt: '禁止扩张',
+  ally: '结盟',
+  declare: '宣战',
+  move: '迁都',
+  cede: '划州',
+  found: '立国',
+  rename: '改名',
+  volcano: '火山',
+  lake: '湖',
+  range: '山脉',
+  raise: '抬起陆地',
+  sink: '沉成海',
+  try_edits: '试推演',
+  propose_edits: '确认单',
+};
+
+/**
+ * AI 回给作者的话里的编号、英文种类名换成名字和中文(提示词里叫它只说名字,偶尔还是会漏):
+ * "保护 P9 到 2800 年" → "保护尼梅亚帝国到 2800 年";"尼梅亚帝国(P9)""P9 尼梅亚帝国" → "尼梅亚帝国";"protect" → "保护"。
+ * 认不出的编号(这份历史里没有)原样留着
+ */
+export function plainIds(text: string, ctx: Pick<RewriteContext, 'world' | 'civ' | 'year'>): string {
+  if (!text || !/[A-Za-z]/.test(text)) return text;
+  const { world, civ } = ctx;
+  const Y = Math.floor(Math.min(civ.endYear, Math.max(0, Number.isFinite(ctx.year) ? ctx.year : civ.endYear)));
+  const reg = civ.regions;
+  const nameOf = (tag: string, id: number): string => {
+    if (tag === 'P') return civ.polities[id] ? nameAt(civ.polities[id], Y) : '';
+    if (tag === 'C') return civ.settlements[id]?.name ?? '';
+    if (tag === 'R') return id < reg.count ? regionLabel(civ, id) : '';
+    if (tag === 'E') return civ.cultures[id] ? cultureLabel(civ.cultures[id]) : '';
+    if (tag === 'M') return civ.places[id]?.name ?? '';
+    // 陆块:和材料里一样叫"最大的大陆""小岛"……
+    let n = 0;
+    let lat = 0;
+    for (let r = 0; r < reg.count; r++) {
+      if (reg.landmass[r] !== id) continue;
+      n++;
+      lat += cellLL(world, reg.seat[r])[1];
+    }
+    return n ? landName(id, n, Math.abs(lat / n) >= 60) : '';
+  };
+  const ID = String.raw`[PCREML]\d{1,5}`;
+  return (
+    text
+      // 括号里只有编号:整个去掉
+      .replace(new RegExp(String.raw`\s*[(（]\s*${ID}(?:\s*[、,，/和与]\s*${ID})*\s*[)）]`, 'g'), '')
+      // 剩下的编号换成名字;紧挨着已经写了这个名字的,只去掉编号
+      .replace(new RegExp(String.raw`(?<![A-Za-z0-9_])([PCREML])(\d{1,5})(?![A-Za-z0-9_])`, 'g'), (m, tag: string, num: string, off: number, all: string) => {
+        const name = nameOf(tag, Number(num));
+        if (!name) return m;
+        const before = all.slice(0, off).replace(/[\s:：]+$/, '');
+        const after = all.slice(off + m.length).replace(/^[\s:：]+/, '');
+        return before.endsWith(name) || after.startsWith(name) ? '' : name;
+      })
+      .replace(/\b(protect|unity|halt|ally|declare|move|cede|found|rename|volcano|lake|range|raise|sink|try_edits|propose_edits)\b/gi, (w) => OP_WORDS[w.toLowerCase()] ?? w)
+      // 去掉编号以后留下的空格:汉字、标点和汉字之间的不要,连着几个的并成一个
+      .replace(/([\u3000-\u9fff\uff00-\uffef,;:!?)])[ \t]+(?=[\u3400-\u9fff\uff00-\uffef(])/g, '$1')
+      .replace(/[ \t]{2,}/g, ' ')
+  );
+}
+
 /** AI 回的 JSON → 能执行的修改(逐条核对;不合格的写明原因)。整段看不懂 = ok: false */
 export function parseRewrite(text: string, ctx: RewriteContext): RewriteParse {
   const v = looseJson(text);
   if (!v || typeof v !== 'object' || Array.isArray(v)) return { ok: false, message: 'AI 回的内容看不懂,再试一次' };
   const o = v as Record<string, unknown>;
-  const reply = str(o.reply ?? o.answer ?? o['回复'], 300);
+  const reply = plainIds(str(o.reply ?? o.answer ?? o['回复'], 300), ctx);
   let list: unknown[] = [];
   for (const k of EDIT_KEYS) if (Array.isArray(o[k])) list = o[k] as unknown[];
   const cannotRaw = o.cannot ?? o['做不到'];
   const cannot = (Array.isArray(cannotRaw) ? cannotRaw : typeof cannotRaw === 'string' ? [cannotRaw] : [])
-    .map((x) => str(x, 160))
+    .map((x) => plainIds(str(x, 160), ctx))
     .filter(Boolean)
     .slice(0, 6);
   if (!reply && !list.length && !cannot.length) return { ok: false, message: 'AI 没给出修改,换个说法再试一次' };
@@ -762,7 +838,7 @@ class Checker {
     const o = x as Record<string, unknown>;
     const raw = str(o.op ?? o.kind ?? o.type ?? o['种类'], 20);
     const op = OP_ALIAS[raw] ?? OP_ALIAS[raw.toLowerCase()] ?? raw.toLowerCase();
-    const why = str(o.why ?? o.reason ?? o['理由'], 80) || undefined;
+    const why = plainIds(str(o.why ?? o.reason ?? o['理由'], 80), this.ctx) || undefined;
     const r = this.check(op, o);
     return { op, why, ...r };
   }
@@ -824,17 +900,22 @@ class Checker {
       if (p.ended !== undefined && from >= p.ended) return `第 ${from} 年${name}已亡(亡于第 ${Math.floor(p.ended)} 年)`;
       return { id, name };
     };
-    /** 州:region 或 city 所在的州 */
-    const regionOf = (): { r: number; name: string } | string => {
+    /** 州:region 或 city 所在的州;立国也认 at(离这一点最近、那一年有人住的一州) */
+    const regionOf = (): { r: number; name: string; at?: [number, number] } | string => {
       const rid = handleOf(o.region, 'R');
       const cid = handleOf(o.city ?? o.region, 'C');
       const r = rid !== null ? rid : cid !== null ? (civ.settlements[cid]?.region ?? -1) : null;
+      if (r === null && kind === 'found') {
+        const at = pointOf(o.at ?? o.point ?? o.position);
+        if (at) return this.peopledNear(at, own);
+      }
       if (r === null) return '没说是哪一州';
       if (!(r >= 0 && r < civ.regions.count)) return '材料里没有这一州';
       return { r, name: regionLabel(civ, r) };
     };
     let v: Intervention;
     let text: string;
+    let where: string | undefined;
     const untilOk = untilRaw !== null && untilRaw > from ? Math.min(untilRaw, 65535) : undefined;
     const untilText = untilOk !== undefined ? `(至第 ${untilOk} 年)` : '';
     if (kind === 'found') {
@@ -842,7 +923,8 @@ class Checker {
       if (typeof R === 'string') return fail('立国', R);
       const name = typeof o.name === 'string' ? cleanName('polity', o.name) : '';
       text = `在${R.name}立国${name ? `,国名「${name}」` : ''}`;
-      if (own.culture[R.r] < 0) return fail(text, `第 ${from} 年${R.name}没人住,立不成`);
+      where = this.regionWhere(R.r, own, from, R.at);
+      if (own.culture[R.r] < 0) return { ...fail(text, `第 ${from} 年${R.name}没人住,立不成`), where };
       v = name ? { kind, region: regionKey(civ, R.r), from, name } : { kind, region: regionKey(civ, R.r), from };
     } else {
       const A = pol(o.country ?? o.a ?? o.polity ?? o['国家'], '国家');
@@ -889,9 +971,48 @@ class Checker {
     const c = cleanIntervention(v);
     if (!c) return fail(text, '格式不对');
     const k = JSON.stringify(c);
-    if (this.seen.has(k)) return fail(text, '已经下过这条命令');
+    if (this.seen.has(k)) return { ...fail(text, '已经下过这条命令'), ...(where ? { where } : {}) };
     this.seen.add(k);
-    return { change: { kind: 'intervention', v: c }, text, year: from };
+    return { change: { kind: 'intervention', v: c }, text, year: from, ...(where ? { where } : {}) };
+  }
+
+  /** 离 at 最近、那一年有人住的一州(at 落在有人住的州里 = 就是它);一千五百公里内都没有 = 说明原因 */
+  private peopledNear(at: [number, number], own: Owners): { r: number; name: string; at: [number, number] } | string {
+    const { world, civ } = this.ctx;
+    const reg = civ.regions;
+    const cell = nearestCell(world, at);
+    const r0 = cell >= 0 ? reg.of[cell] : -1;
+    if (r0 >= 0 && own.culture[r0] >= 0) return { r: r0, name: regionLabel(civ, r0), at };
+    let best = -1;
+    let bd = Infinity;
+    for (let r = 0; r < reg.count; r++) {
+      if (own.culture[r] < 0) continue;
+      const d = distKm(at, cellLL(world, reg.seat[r]));
+      if (d < bd) {
+        bd = d;
+        best = r;
+      }
+    }
+    const here = `${ll(at)} 一带`;
+    if (best < 0) return `${here}没人住,整个世界那一年也没有有人住的州`;
+    if (bd > NEAR_KM) return `${here}没人住;最近有人住的州是 R${best} ${regionLabel(civ, best)},在它${dirWord(at, cellLL(world, reg.seat[best]))}约 ${kmText(bd)}`;
+    return { r: best, name: regionLabel(civ, best), at };
+  }
+
+  /** 一州在哪(给 AI 核对):"R702 在 (−43.6, 31.8),一座小岛(2 块地),多为稀树草原,第 2999 年是部落地带;离给的位置约 300 公里" */
+  private regionWhere(r: number, own: Owners, year: number, at?: [number, number]): string {
+    const { world, civ } = this.ctx;
+    const reg = civ.regions;
+    const p = cellLL(world, reg.seat[r]);
+    let n = 0;
+    for (let q = 0; q < reg.count; q++) if (reg.landmass[q] === reg.landmass[r]) n++;
+    const owner = own.polity[r];
+    const who = own.culture[r] < 0 ? '没人住' : owner >= 0 ? `属 P${owner} ${nameAt(civ.polities[owner], year)}` : '是部落地带';
+    const far = at ? distKm(at, p) : 0;
+    return (
+      `R${r} 在 ${ll(p)},${landName(reg.landmass[r], n, Math.abs(p[1]) >= 60)}(这块陆地 ${n} 州)上,多为${BIOMES[reg.biome[r]]?.name ?? '?'},第 ${year} 年${who}` +
+      (at && far >= 50 ? `;离给的位置 ${ll(at)} 约 ${kmText(far)}` : '')
+    );
   }
 
   // ---- 改名 ----

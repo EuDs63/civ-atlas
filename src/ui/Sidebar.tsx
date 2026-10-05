@@ -1,8 +1,8 @@
 /**
  * 左边的侧栏(宽屏):界面的主体都在这里,地图在它右边。样子照常见的地图应用。
  *
- *   顶上   "‹ 我的世界";世界名、"种子 7，现存 14 国";存档、更多(用一句话改写世界、写成史书、AI 设置、关于);下面一个搜索框
- *          "改写"的框(Rewrite.tsx)浮在侧栏右边、地图的左上角
+ *   顶上   "‹ 我的世界";世界名、"种子 7，现存 14 国";存档、更多(写成史书、AI 设置、关于);下面一个搜索框
+ *          (用一句话改世界、问问题在右上「助手」打开的助手面板里,见 Assistant.tsx)
  *   下面   三选一 ——
  *          搜索框里有字:搜索结果(点一条 = 选中它,地图飞过去)
  *          地图上选中了东西:它的详情(Inspector:国家 / 城 / 地理实体 / 州的面板)
@@ -29,7 +29,6 @@ import { openHistoryBook } from './bookStore';
 import { openOverview } from './overviewStore';
 import { searchCiv, type SearchHit } from './searchIndex';
 import { countUpTo, evText } from './timelineLayout';
-import { RewriteBox } from './Rewrite';
 import { Icon } from './icons';
 import { AiMenuItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
@@ -55,8 +54,6 @@ export interface SidebarProps {
   onReplay: () => void;
   /** 回到"我的世界" */
   onHome: () => void;
-  /** 正在重推 / 按新地形重新生成 / 生成新世界(改写框里这时不能发话、不能执行) */
-  rewriteBusy: boolean;
   /** 详情面板放进来的空位(面板只挂一份,由 App 挪到这里;见 App 的 inspectorHost) */
   inspectorSlot: (el: HTMLElement | null) => void;
 }
@@ -221,30 +218,21 @@ export function useWorldInfo(civ: Civ | null, data: SidebarProps['data']): { tit
   return { title: currentWorld()?.title || '未命名世界', sub };
 }
 
-/** "更多"菜单:用一句话改写世界、写成史书、AI 设置、键盘快捷键(有鼠标时)、源代码和两份协议;最底下一行版本号 */
+/** "更多"菜单:写成史书、AI 设置、键盘快捷键(有鼠标时)、源代码和两份协议;最底下一行版本号 */
 export function WorldMoreMenu({
   civ,
-  data,
-  onRewrite,
   onBook,
   className = 'sb-pill sb-more',
 }: {
   civ: Civ | null;
-  data: SidebarProps['data'];
-  onRewrite: () => void;
   /** 点"写成史书"时先做的事(手机:世界卡片收起,写作进度在右上看得到) */
   onBook?: () => void;
   className?: string;
 }) {
-  // 改写不要求有文明:没长出文明的世界也能改地形
-  const canRewrite = !!civ && !!data;
   // 键盘快捷键只在有鼠标的设备上列出(手机、平板没有键盘)
   const coarse = useCoarse();
   return (
     <PopMenu className={className} icon={<Icon name="more" size={17} />} title="更多" act="world-more" align="right">
-      <AiMenuItem icon={<Icon name="rename" size={16} />} act="rewrite" disabled={!canRewrite} onClick={onRewrite} note="AI">
-        用一句话改写世界
-      </AiMenuItem>
       <AiMenuItem
         icon={<Icon name="book" size={16} />}
         act="book"
@@ -284,11 +272,6 @@ export function WorldMoreMenu({
 
 function WorldHead(p: SidebarProps) {
   const { title, sub } = useWorldInfo(p.civ, p.data);
-  const [rewriting, setRewriting] = useState(false);
-  /** "更多"菜单:点它不关改写框 */
-  const more = useRef<HTMLDivElement>(null);
-  const closeRewrite = useCallback(() => setRewriting(false), []);
-  const canRewrite = !!p.civ && !!p.data;
   return (
     <div className="sb-world">
       <button className="sb-title" data-act="overview" onClick={() => openOverview()} title="世界概览:国家、编年史、干预、世界参数">
@@ -297,15 +280,8 @@ function WorldHead(p: SidebarProps) {
       </button>
       <div className="sb-acts">
         <SaveMenu ready={!!p.data && !p.generating} icon={<Icon name="save" size={15} />} />
-        <div className="sb-more-wrap" ref={more}>
-          <WorldMoreMenu civ={p.civ} data={p.data} onRewrite={() => setRewriting(true)} />
-        </div>
+        <WorldMoreMenu civ={p.civ} />
       </div>
-      {rewriting && canRewrite && (
-        <div className="sb-rewrite">
-          <RewriteBox civ={p.civ!} world={p.data!.world} busy={p.rewriteBusy} onClose={closeRewrite} anchor={more} lock="terrain" />
-        </div>
-      )}
     </div>
   );
 }

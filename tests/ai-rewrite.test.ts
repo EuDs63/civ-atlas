@@ -1,5 +1,6 @@
 /**
- * AI 改写(阶段 5「对话式编辑」):材料、提示词、AI 回复的核对、合进 / 撤销修改、测试用假 AI 的完整流程。
+ * AI 改写(阶段 5「对话式编辑」):材料、提示词、AI 回复的核对、合进 / 撤销修改、测试用假 AI 的固定提议
+ * (在助手里执行 / 撤销的完整流程见 ai-assistant.test.ts)。
  * 全程用测试用假 AI,不联网。
  */
 import { afterEach, describe, expect, it } from 'vitest';
@@ -23,7 +24,6 @@ import {
   type WorldEdits,
 } from '../src/gen/edits';
 import { setActiveProvider, setMockResponder } from '../src/ai/client';
-import type { AiRequest } from '../src/ai/types';
 import {
   REWRITE_FEATURE,
   REWRITE_MAX_ITEMS,
@@ -41,17 +41,13 @@ import {
   type RewriteChange,
   type RewriteContext,
 } from '../src/ai/prompts/rewrite';
-import { clearEdits, getEdits, setEdits } from '../src/ui/editsStore';
-import { applyBlock, applyTurn, getRewrite, sendWish, syncRewriteWorld, takeRewriteNote, toggleItem, undoTurn } from '../src/ui/rewriteStore';
-import { redoLastEdit, undoLastEdit } from '../src/ui/undo';
+import { clearEdits } from '../src/ui/editsStore';
 
 const world = generateWorld({ ...DEFAULT_PARAMS, seed: 7 });
 const civ = generateCiv(world);
 const EMPTY: WorldEdits = { names: {}, interventions: [], terrain: [] };
 const Y = 2000;
 const ctx = (edits: WorldEdits = EMPTY, year = Y, c: Civ = civ, w: World = world): RewriteContext => ({ world: w, civ: c, year, edits });
-/** 界面上现在的情形:就是这份历史,没在重推 */
-const NOW = { civ };
 const json = (edits: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ reply: '好的', edits, ...extra });
 /** 只有一条修改的回复 → 那一条 */
 const one = (edit: Record<string, unknown>, c: RewriteContext = ctx()) => {
@@ -504,135 +500,5 @@ describe('改写 · 测试用假 AI', () => {
     const end = parseRewrite(mockRewrite(ctx(EMPTY, civ.endYear - 10), ''), ctx(EMPTY, civ.endYear - 10));
     expect(end.ok && end.items[0].change).toMatchObject({ kind: 'intervention', v: { kind: 'protect' } });
     expect(end.ok && (end.items[0].change as Extract<RewriteChange, { kind: 'intervention' }>).v).not.toHaveProperty('until');
-  });
-
-  it('完整流程:发一句话 → 列出提议 → 勾选 → 执行(一次合进修改,App 推完说"已按你说的改写")→ 撤销', async () => {
-    setActiveProvider('mock');
-    const start = getEdits();
-    const wctx = { world, civ, year: Y };
-    const id = await sendWish(wctx, '让最大的国家多撑三百年');
-    let t = getRewrite().turns.find((x) => x.id === id)!;
-    expect(t).toMatchObject({ status: 'done', mock: true, year: Y, wish: '让最大的国家多撑三百年' });
-    expect(t.items?.length).toBe(1);
-    expect(applyBlock(t, NOW)).toBeNull();
-    // 正在重推 / 界面上已经换成另一份历史:不能执行
-    expect(applyBlock(t, { civ, busy: true })).toMatch(/正在重推/);
-    expect(applyBlock(t, { civ: { ...civ } })).toMatch(/世界在这之后改过/);
-    // 不勾 → 没有能执行的;再勾上
-    toggleItem(id, 0);
-    t = getRewrite().turns.find((x) => x.id === id)!;
-    expect(applyBlock(t, NOW)).toMatch(/没有勾选/);
-    toggleItem(id, 0);
-    expect(applyTurn(id, NOW)).toBeNull();
-    const after = getEdits();
-    expect(after.interventions).toEqual([{ kind: 'protect', a: polityKey(civ, largest), from: Y, until: Y + 300 }]);
-    expect(takeRewriteNote(after)).toMatchObject({ kind: 'apply', turn: id, before: start, after });
-    expect(takeRewriteNote(after)).toBeNull();
-    // 执行过的不能再执行
-    expect(applyTurn(id, NOW)).toMatch(/执行过了/);
-    undoTurn(id);
-    expect(getEdits()).toBe(start);
-    expect(takeRewriteNote(getEdits())).toMatchObject({ kind: 'undo', turn: id });
-    expect(getRewrite().turns.find((x) => x.id === id)!.applied).toMatchObject({ undone: true });
-  });
-
-  it('⌘Z / ⇧⌘Z:执行过的一轮也能撤销、再做一遍(框里的"已执行 / 已撤销"跟着变,推完的提示和点撤销一样)', async () => {
-    setActiveProvider('mock');
-    const start = getEdits();
-    const id = await sendWish({ world, civ, year: Y }, '让最大的国家多撑三百年');
-    expect(applyTurn(id, NOW)).toBeNull();
-    const after = getEdits();
-    takeRewriteNote(after);
-    const applied = () => getRewrite().turns.find((x) => x.id === id)!.applied;
-    expect(undoLastEdit()).toBe(true);
-    expect(getEdits()).toBe(start);
-    expect(applied()).toMatchObject({ undone: true });
-    expect(takeRewriteNote(getEdits())).toMatchObject({ kind: 'undo', turn: id });
-    expect(redoLastEdit()).toBe(true);
-    expect(getEdits()).toEqual(after);
-    expect(applied()).toMatchObject({ undone: false });
-    expect(takeRewriteNote(getEdits())).toMatchObject({ kind: 'apply', turn: id });
-    // 点了提示条上的"撤销"也记一步:⌘Z 把它退回去 = 又执行了,⇧⌘Z 再撤销
-    undoTurn(id);
-    expect(getEdits().interventions).toEqual([]);
-    expect(undoLastEdit()).toBe(true);
-    expect(getEdits()).toEqual(after);
-    expect(applied()).toMatchObject({ undone: false });
-    expect(redoLastEdit()).toBe(true);
-    expect(getEdits().interventions).toEqual([]);
-    expect(applied()).toMatchObject({ undone: true });
-  });
-
-  it('新建时提的改地形:点了创建世界(锁从只改地形换成只改历史)以后对话清空,不能再执行、撤销', async () => {
-    setActiveProvider('mock');
-    const id = await sendWish({ world, civ, year: Y, lock: 'history' }, '在海上放一座火山');
-    expect(getRewrite().lock).toBe('history');
-    expect(applyTurn(id, NOW)).toBeNull();
-    const after = getEdits();
-    expect(after.terrain.length).toBe(1);
-    // 同一个世界、同一个锁:不动
-    syncRewriteWorld('history');
-    expect(getRewrite().turns.length).toBe(1);
-    syncRewriteWorld('terrain');
-    expect(getRewrite()).toMatchObject({ lock: 'terrain', turns: [] });
-    expect(takeRewriteNote(after)).toBeNull();
-    undoTurn(id);
-    expect(getEdits()).toBe(after);
-    expect(applyTurn(id, NOW)).toMatch(/找不到/);
-  });
-
-  it('只有最新的一轮能执行;发出去之后世界改过 = 要重说;空话不发', async () => {
-    setActiveProvider('mock');
-    const wctx = { world, civ, year: Y };
-    expect(await sendWish(wctx, '   ')).toBe(-1);
-    const a = await sendWish(wctx, '让它多撑三百年');
-    const b = await sendWish(wctx, '在海上放一座火山');
-    expect(applyTurn(a, NOW)).toMatch(/后面又说过话了/);
-    setEdits({ ...getEdits(), interventions: [{ kind: 'unity', a: polityKey(civ, big), from: 100 }] });
-    expect(applyTurn(b, NOW)).toMatch(/世界在这之后改过/);
-    // 再说一句:带上前几轮(执行了没有),材料按现在的世界重写
-    let seen: AiRequest | null = null;
-    setMockResponder((req) => ((seen = req), JSON.stringify({ mock: true })));
-    const c = await sendWish(wctx, '再保护一次');
-    expect(getRewrite().turns.find((x) => x.id === c)?.status).toBe('done');
-    const u = seen!.messages[1].content;
-    expect(u).toContain('作者:让它多撑三百年');
-    expect(u).toContain('作者:在海上放一座火山');
-    expect(u).toMatch(/—— 作者没有执行\n作者:在海上放一座火山/);
-    expect(u).toContain(`- 第 100 年起:P${big} 禁止分裂`);
-  });
-
-  it('执行时没勾的几条,之后的前情里注明"没执行"', async () => {
-    setActiveProvider('mock');
-    const two = [
-      { op: 'protect', country: `P${big}` },
-      { op: 'halt', country: `P${big}` },
-    ];
-    setMockResponder(() => JSON.stringify({ reply: '好', edits: two }));
-    const id = await sendWish({ world, civ, year: Y }, '保护它,别让它扩张');
-    toggleItem(id, 1);
-    expect(applyTurn(id, NOW)).toBeNull();
-    expect(getEdits().interventions.map((v) => v.kind)).toEqual(['protect']);
-    let seen: AiRequest | null = null;
-    setMockResponder((req) => ((seen = req), JSON.stringify({ mock: true })));
-    await sendWish({ world, civ, year: Y }, '再说一句');
-    const u = seen!.messages[1].content;
-    expect(u).toMatch(/列的修改:第 2000 年起 [^;]+:保护;第 2000 年起 [^;]+:禁止扩张\(作者没勾,没执行\)\)—— 作者执行了/);
-  });
-
-  it('真 AI 回的只改名:当场生效(不用重推);回的看不懂 = 这一轮出错,写明原因', async () => {
-    setActiveProvider('mock');
-    setMockResponder(() => JSON.stringify({ reply: '给国都换个名字', edits: [{ op: 'rename', target: `C${capital}`, name: '测试城' }] }));
-    const id = await sendWish({ world, civ, year: Y }, '给国都换个名字');
-    const t = getRewrite().turns.find((x) => x.id === id)!;
-    expect(t).toMatchObject({ status: 'done', mock: false, reply: '给国都换个名字' });
-    expect(applyTurn(id, NOW)).toBeNull();
-    expect(getEdits().names[settlementKey(civ, capital)]).toBe('测试城');
-    expect(takeRewriteNote(getEdits())).toBeNull();
-    undoTurn(id);
-    expect(getEdits().names[settlementKey(civ, capital)]).toBeUndefined();
-    setMockResponder(() => '我不知道');
-    const bad = await sendWish({ world, civ, year: Y }, '随便');
-    expect(getRewrite().turns.find((x) => x.id === bad)).toMatchObject({ status: 'error', error: { code: 'bad-response', message: expect.stringMatching(/看不懂/) } });
   });
 });

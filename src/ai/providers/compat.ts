@@ -2,14 +2,18 @@
  * OpenAI 兼容的 chat/completions 调用(DeepSeek、阿里云百炼共用):浏览器直接发给服务商,流式读回。
  *
  * - 请求:{ model, messages, stream: true, stream_options: { include_usage: true }, temperature?, max_tokens?,
- *          response_format?: { type: 'json_object' } } + 各家自己的字段(深度思考开关)
+ *          response_format?: { type: 'json_object' }, tools?, tool_choice? } + 各家自己的字段(深度思考开关)
  * - 回复:SSE,每条 data 是一个 JSON(choices[0].delta.content 是这段正文;深度思考的"想"在 reasoning_content 里,不算正文);
  *         最后一条带 usage(choices 为空),然后 data: [DONE]
+ * - 工具调用(助手用):tools = [{ type: 'function', function: { name, description, parameters } }];
+ *         模型要调用时 choices[0].delta.tool_calls 分好几段送来(按 index 拼:第一段带 id 和 function.name,
+ *         之后每段带一截 function.arguments),finish_reason = 'tool_calls';
+ *         交回结果:先把模型那一轮原样放回(assistant + tool_calls),再每个调用一条 { role: 'tool', tool_call_id, content }
  * - 出错:HTTP 状态码 + { error: { message, code, type } };流中途出错时 data 里是 { error: ... }
  *
  * 密钥只放在 Authorization 头里,只发给 cfg.url 这一家;不进网址、不进记录、不打印。
  */
-import { AiError, type AiCallOptions, type AiMessage, type AiRequest, type AiResult, type AiUsage } from '../types';
+import { AiError, type AiCallOptions, type AiMessage, type AiRequest, type AiResult, type AiToolCall, type AiUsage } from '../types';
 import { idleTimer, readSse } from '../sse';
 import { scrubSecrets } from '../settings';
 
@@ -52,14 +56,58 @@ export function withJsonHint(messages: AiMessage[]): AiMessage[] {
 export function compatBody(cfg: Pick<CompatConfig, 'model' | 'extra'>, req: AiRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: cfg.model,
-    messages: (req.json ? withJsonHint(req.messages) : req.messages).map((m) => ({ role: m.role, content: m.content })),
+    messages: (req.json ? withJsonHint(req.messages) : req.messages).map(wireMessage),
     stream: true,
     stream_options: { include_usage: true },
   };
   if (req.temperature !== undefined) body.temperature = req.temperature;
   if (req.maxTokens !== undefined) body.max_tokens = req.maxTokens;
   if (req.json) body.response_format = { type: 'json_object' };
+  if (req.tools?.length) {
+    body.tools = req.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
+    if (req.toolChoice) body.tool_choice = req.toolChoice;
+  }
   return { ...body, ...cfg.extra };
+}
+
+/** 一条消息 → OpenAI 兼容的写法(带工具调用的 assistant、工具结果) */
+export function wireMessage(m: AiMessage): Record<string, unknown> {
+  if (m.role === 'tool') return { role: 'tool', tool_call_id: m.toolCallId ?? '', content: m.content };
+  if (m.role === 'assistant' && m.toolCalls?.length) {
+    return {
+      role: 'assistant',
+      // 没说话时写空串:两家自己回的就是空串(写 null 有的兼容接口不认)
+      content: m.content ?? '',
+      tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } })),
+    };
+  }
+  return { role: m.role, content: m.content };
+}
+
+/** 流式送来的工具调用:按 index 一段段拼起来 */
+export class ToolCallAcc {
+  private parts: { id: string; name: string; args: string }[] = [];
+  add(list: unknown): void {
+    if (!Array.isArray(list)) return;
+    for (const raw of list as any[]) {
+      if (!raw || typeof raw !== 'object') continue;
+      const i = Number.isInteger(raw.index) ? raw.index : this.parts.length;
+      const p = (this.parts[i] ??= { id: '', name: '', args: '' });
+      if (typeof raw.id === 'string' && raw.id) p.id = raw.id;
+      const f = raw.function;
+      if (f && typeof f === 'object') {
+        if (typeof f.name === 'string' && f.name) p.name = f.name;
+        if (typeof f.arguments === 'string') p.args += f.arguments;
+        else if (f.arguments && typeof f.arguments === 'object') p.args += JSON.stringify(f.arguments);
+      }
+    }
+  }
+  /** 拼好的调用(没名字的丢掉;没 id 的补一个) */
+  calls(): AiToolCall[] {
+    return this.parts
+      .filter((p) => p && p.name)
+      .map((p, i) => ({ id: p.id || `call_${i}`, name: p.name, args: p.args.trim() || '{}' }));
+  }
 }
 
 function readUsage(u: any): AiUsage | undefined {
@@ -161,6 +209,7 @@ export async function compatChat(cfg: CompatConfig, req: AiRequest, opts: AiCall
     let usage: AiUsage | undefined;
     let model = cfg.model;
     let finish = '';
+    const tools = new ToolCallAcc();
     const take = (j: any) => {
       if (j?.error) {
         const info = errorInfo(Number(j.error.status ?? j.status ?? 500) || 500, JSON.stringify(j));
@@ -175,6 +224,7 @@ export async function compatChat(cfg: CompatConfig, req: AiRequest, opts: AiCall
         text += piece;
         opts.onDelta?.(piece, text);
       }
+      tools.add(ch?.delta?.tool_calls ?? ch?.message?.tool_calls);
       if (ch?.finish_reason) finish = String(ch.finish_reason);
     };
 
@@ -207,11 +257,15 @@ export async function compatChat(cfg: CompatConfig, req: AiRequest, opts: AiCall
       } catch (e) {
         throw fail(e, 'read');
       }
-      if (!done && !finish && !text) throw new AiError('bad-response', `${cfg.name} 没有返回任何内容,请再试一次`);
+      if (!done && !finish && !text && !tools.calls().length) throw new AiError('bad-response', `${cfg.name} 没有返回任何内容,请再试一次`);
     }
     if (finish === 'content_filter' || finish === 'sensitive') {
       throw new AiError('content-filter', `${cfg.name} 的内容安全审核拦下了这次回复,换个说法再试`);
     }
+    const toolCalls = tools.calls();
+    if (toolCalls.length) return { text, toolCalls, model, usage };
+    // 带着工具、刚交回工具结果:模型看结果已经摆在那儿,正常收尾不说话也行(要不要算空回复由助手循环定)
+    if (!text && finish === 'stop' && req.tools?.length && req.messages.some((m) => m.role === 'tool')) return { text, model, usage };
     if (!text) {
       throw new AiError(
         'bad-response',

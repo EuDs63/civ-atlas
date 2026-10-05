@@ -12,7 +12,7 @@ import type { Civ } from '../gen/civ/types';
 import { capitalAt, polityAlive, populationAt } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
 import { polityKey, settlementKey, type Intervention, type InterventionKind } from '../gen/edits';
-import { addIntervention, useEdits } from './editsStore';
+import { addIntervention, editBlock, interventionKeys, useEdits } from './editsStore';
 import { cityStands, defaultYear, nameAt, neighborsAt, polityOrders, setPolityPick, type PolityPick } from './Interventions';
 import { endRun, setPanelTab, startRun } from './panelStore';
 import { setCivTime } from './civView';
@@ -74,6 +74,8 @@ export function CommandPage({ civ, id, year }: { civ: Civ; id: number; year: num
 
   /** 下令:面板收起、后台重推;这条已经下过 = 原因 */
   const order = (v: Intervention, target: { kind: 'polity' | 'settlement'; id: number } | null): string | null => {
+    const blocked = editBlock(interventionKeys(v));
+    if (blocked) return blocked;
     startRun({ self: id, target, from: y, shown });
     if (!addIntervention(v)) {
       endRun();

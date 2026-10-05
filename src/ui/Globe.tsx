@@ -211,6 +211,8 @@ export interface GlobeProps {
   onHover: (p: [number, number] | null) => void;
   /** 左边被侧栏卡片挡住多宽(CSS 像素;没有 = 0):球心往右挪一半,落在剩下那一块的正中(宽度变了约 0.6 秒过渡) */
   leftRoom?: number;
+  /** 右边被助手面板挡住多宽(同上,球心往左挪一半) */
+  rightRoom?: number;
 }
 
 /** 调试 / 冒烟检查用 */
@@ -618,7 +620,7 @@ const sameKey = (a: readonly unknown[] | null, b: readonly unknown[]) => !!a && 
 
 // ---------------------------------------------------------------------------
 
-export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, startLon, apiRef, onHover, leftRoom = 0 }: GlobeProps) {
+export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, startLon, apiRef, onHover, leftRoom = 0, rightRoom = 0 }: GlobeProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const glRef = useRef<HTMLCanvasElement>(null);
   const ovRef = useRef<HTMLCanvasElement>(null);
@@ -715,11 +717,13 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   }).current;
 
   // 最新的 props(帧回调里读)
-  const props = useRef({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, hl });
-  props.current = { world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, hl };
+  const props = useRef({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, rightRoom, hl });
+  props.current = { world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, rightRoom, hl };
 
   /** 左边被侧栏卡片挡住的宽度(画布太窄就不让) */
   const leftOf = () => (s.size.w > 2 * props.current.leftRoom ? props.current.leftRoom : 0);
+  /** 右边被助手面板挡住的宽度(App 只在窗口够宽、面板让位时给;剩下的地方太窄就不让) */
+  const rightOf = () => (s.size.w - leftOf() - props.current.rightRoom >= s.size.w / 3 ? props.current.rightRoom : 0);
   /** 这一帧的球(w、h 是什么像素单位,unit = 一个 CSS 像素是几个那种像素:球心挪的量跟着换算) */
   const frameOf = (view: GlobeView, w: number, h: number, unit = 1) => globeFrame(view, w, h, s.shift * unit);
 
@@ -1078,9 +1082,9 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       else s.inertia = null;
     }
     const p = props.current;
-    // 宽屏:球心往右挪侧栏卡片宽的一半,落在卡片右边那一块的正中;卡片宽度变了(窗口拉宽拉窄)就挪过去,
-    // 和转到选中的国家同样的时长、缓动。窄屏不挪
-    const shiftTo = leftOf() / 2;
+    // 宽屏:球心往右挪侧栏卡片宽的一半(右边开着助手面板再往左挪它的一半),落在两边中间那一块的正中;
+    // 卡片宽度变了(窗口拉宽拉窄、开关面板)就挪过去,和转到选中的国家同样的时长、缓动。窄屏不挪
+    const shiftTo = (leftOf() - rightOf()) / 2;
     if (!s.frames) {
       // 打开地球仪时面板已经开着:直接在挪好的位置上画第一帧
       s.shift = shiftTo;
@@ -1306,7 +1310,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   }, []);
 
   // 贴图来源、开关变了:下一帧上传、重画
-  useEffect(invalidate, [terrain, terrainKey, replay, raster, graticule, style, civ, geo, sel, show, leftRoom, hl]);
+  useEffect(invalidate, [terrain, terrainKey, replay, raster, graticule, style, civ, geo, sel, show, leftRoom, rightRoom, hl]);
   useEffect(() => subscribeCivFeed(invalidate), []);
   // 时间轴一动:文明贴图、国界道路的矢量线换成那一年的
   useEffect(() => subscribeCivTime(invalidate), []);
@@ -1321,8 +1325,8 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     const { w, h } = s.size;
     const f = frameOf(s.view, w, h);
     const [x, y, d] = lonLatToScreen(s.view, f, lon, lat);
-    // 左边被侧栏卡片挡住的那一截不算看得见
-    if (d > 0.55 && x > 60 + leftOf() && x < w - 60 && y > 60 && y < h - 90) return;
+    // 左边被侧栏卡片、右边被助手面板挡住的那一截不算看得见
+    if (d > 0.55 && x > 60 + leftOf() && x < w - 60 - rightOf() && y > 60 && y < h - 90) return;
     s.inertia = null;
     s.fly = { from: s.view, to: clampView({ lon, lat: lat * 0.85, k: s.view.k }), t0: performance.now(), dur: 650 };
     invalidate();

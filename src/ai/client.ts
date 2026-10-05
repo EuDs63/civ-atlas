@@ -11,7 +11,7 @@
 import { useSyncExternalStore } from 'react';
 import { worldKey } from '../gen/savefile';
 import { currentWorld } from '../ui/saveStore';
-import { AiError, type AiCallOptions, type AiCallRecord, type AiProviderKind, type AiRequest, type AiResult } from './types';
+import { AiError, type AiCallOptions, type AiCallRecord, type AiProviderKind, type AiRequest, type AiResult, type AiToolCall } from './types';
 
 export interface AiProviderStatus {
   ready: boolean;
@@ -167,7 +167,7 @@ export async function aiChat(req: AiRequest, opts: AiCallOptions = {}): Promise<
     at: new Date().toISOString(),
     feature: req.feature,
     title: req.title,
-    messages: req.messages.map((m) => ({ role: m.role, content: clip(m.content) })),
+    messages: req.messages.map((m) => ({ ...m, content: clip(m.content) })),
     world: worldOf(),
   };
   if (!p) {
@@ -193,7 +193,17 @@ export async function aiChat(req: AiRequest, opts: AiCallOptions = {}): Promise<
   try {
     const r = await p.chat(req, tracked);
     const res: AiResult = { ...r, provider: p.kind, ms: Math.round(now()) };
-    recorder({ ...base, provider: p.kind, model: r.model, ok: true, usage: r.usage, credits: r.credits, ms: res.ms, text: clip(r.text) });
+    recorder({
+      ...base,
+      provider: p.kind,
+      model: r.model,
+      ok: true,
+      usage: r.usage,
+      credits: r.credits,
+      ms: res.ms,
+      text: clip(r.text),
+      ...(r.toolCalls?.length ? { toolCalls: r.toolCalls.map((c) => ({ ...c, args: clip(c.args) })) } : {}),
+    });
     return res;
   } catch (e) {
     const err =
@@ -218,7 +228,9 @@ export async function aiChat(req: AiRequest, opts: AiCallOptions = {}): Promise<
 // ---------------------------------------------------------------------------
 // 测试用假 AI(不联网):网址带 ai=mock 时启用;单测里可以 setMockResponder 定制回复
 
-type MockResponder = (req: AiRequest) => string;
+/** 假 AI 的回复:一段文字,或者(给了 tools 时)要调用的工具 + 可选的一段文字 */
+type MockReply = string | { text?: string; toolCalls?: AiToolCall[] };
+type MockResponder = (req: AiRequest) => MockReply;
 const defaultMockResponder: MockResponder = (req) => {
   if (req.json) return JSON.stringify({ mock: true, feature: req.feature });
   const last = [...req.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
@@ -235,13 +247,22 @@ function mockDelay(): number {
 export function setMockResponder(f: MockResponder | null): void {
   mockResponder = f ?? defaultMockResponder;
 }
+/** 各功能自己的假回复(助手要按世界走固定的步骤);setMockResponder 定制过的优先 */
+const featureMocks = new Map<string, MockResponder>();
+/** 给某个功能挂一个假回复;传 null 拿掉 */
+export function setFeatureMock(feature: string, f: MockResponder | null): void {
+  if (f) featureMocks.set(feature, f);
+  else featureMocks.delete(feature);
+}
 
 registerProvider({
   kind: 'mock',
   label: '测试用假 AI',
   status: () => ({ ready: true, model: 'mock' }),
   async chat(req, opts) {
-    const text = mockResponder(req);
+    const reply = (mockResponder === defaultMockResponder ? featureMocks.get(req.feature) : undefined)?.(req) ?? mockResponder(req);
+    const text = typeof reply === 'string' ? reply : (reply.text ?? '');
+    const toolCalls = typeof reply === 'string' ? undefined : reply.toolCalls?.length ? reply.toolCalls : undefined;
     // 模拟流式:切成几段,每段让出一次事件循环(网址带 mockms=N 时每段等 N 毫秒:冒烟、截图看"正在写"用)
     let full = '';
     const step = Math.max(8, Math.ceil(text.length / 6));
@@ -253,7 +274,13 @@ registerProvider({
       opts.onDelta?.(chunk, full);
       await new Promise((r) => setTimeout(r, wait));
     }
+    if (!text) {
+      // 只调用工具、不说话:同样让出一次事件循环、认取消
+      if (opts.signal?.aborted) throw new AiError('aborted', '已取消');
+      await new Promise((r) => setTimeout(r, wait));
+    }
     const input = req.messages.reduce((s, m) => s + m.content.length, 0);
-    return { text: full, model: 'mock', usage: { inputTokens: input, outputTokens: full.length } };
+    const out = full.length + (toolCalls?.reduce((s, c) => s + c.args.length, 0) ?? 0);
+    return { text: full, ...(toolCalls ? { toolCalls } : {}), model: 'mock', usage: { inputTokens: input, outputTokens: out } };
   },
 });

@@ -6,7 +6,7 @@
  *     国际(新加坡)  https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions
  *   模型:qwen-plus(均衡)、qwen3.8-max(最准)、qwen3.7-plus(居中)、qwen-flash(最便宜);以官方文档为准,也能手填
  *   深度思考:enable_thinking,每次都明说开或关(qwen3.7 / 3.8 系、百炼上的 deepseek-v4 等新模型不传就默认思考;
- *     开了要流式,我们一直是流式);json 模式时不开(思考模式不支持结构化输出)
+ *     开了要流式,我们一直是流式);json 模式时不开(思考模式不支持结构化输出);带工具的请求(助手)也不开,和 DeepSeek 一致
  *   json 模式:response_format { type: 'json_object' }(提示词里要有 "json" 字样,compat.ts 会补)
  *   错误码(官方文档):401 invalid_api_key、400 Arrearage(欠费)/ DataInspectionFailed(内容审核)/ InvalidParameter、
  *     403 AccessDenied(.Unpurchased)/ AllocationQuota.FreeTierOnly、404 model_not_found、429 Throttling / insufficient_quota(限流)
@@ -80,7 +80,7 @@ export const bailianProvider: AiProvider = {
         model: s.model,
         // 开关一律明说:新一代模型(qwen3.7 / 3.8、百炼上的 deepseek-v4 等)不传就默认思考 ——
         // 一句话的回复也要先想十几二十秒、多花几十倍的输出 token。老模型(qwen-plus / max / flash / turbo)传 false 也照常(2026-09 实测)
-        extra: { enable_thinking: s.thinking && !req.json },
+        extra: { enable_thinking: s.thinking && !req.json && !req.tools?.length },
         mapError: mapBailianError,
       },
       req,

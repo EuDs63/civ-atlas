@@ -397,3 +397,125 @@ describe('我们的 AI(开发假服务器,假 fetch 直连,不开端口)', () =>
     setOfficialServerForTest(undefined);
   });
 });
+
+describe('工具调用(助手用,假 fetch)', () => {
+  const TOOLS: AiRequest['tools'] = [
+    { name: 'country', description: '查一个国家', parameters: { type: 'object', properties: { country: { type: 'string' } }, required: ['country'] } },
+    { name: 'situation', description: '查某一年的格局', parameters: { type: 'object', properties: { year: { type: 'integer' } } } },
+  ];
+  /** 第二轮的请求:模型上一轮调了工具,结果交回去 */
+  const ROUND2: AiRequest = {
+    feature: '助手',
+    messages: [
+      { role: 'system', content: '你是助手' },
+      { role: 'user', content: '大昌后来怎么样了' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_a', name: 'country', args: '{"country":"P3"}' }] },
+      { role: 'tool', toolCallId: 'call_a', content: 'P3 大昌王朝 · 第 812—3000 年' },
+    ],
+    tools: TOOLS,
+    toolChoice: 'auto',
+  };
+  /** 一个工具调用拆成好几段送来(两个调用交错) */
+  const toolChunk = (calls: unknown[], finish?: string) => ({ id: 'x', model: 'deepseek-flash', choices: [{ index: 0, delta: { tool_calls: calls }, ...(finish ? { finish_reason: finish } : {}) }] });
+
+  it('DeepSeek:请求里带 tools、tool_choice,交回的消息按 OpenAI 写法;分段送来的调用拼回完整;深度思考开着也关掉', async () => {
+    setSecret('deepseek', KEY);
+    chooseProvider('deepseek');
+    updateAiSettings({ deepseek: { thinking: true } });
+    const calls = fakeFetch(() =>
+      sseResponse(
+        sseBody([
+          toolChunk([{ index: 0, id: 'call_1', type: 'function', function: { name: 'country', arguments: '' } }]),
+          toolChunk([{ index: 0, function: { arguments: '{"coun' } }]),
+          toolChunk([{ index: 1, id: 'call_2', type: 'function', function: { name: 'situation', arguments: '{"year":' } }]),
+          toolChunk([{ index: 0, function: { arguments: 'try":"P5"}' } }]),
+          toolChunk([{ index: 1, function: { arguments: '2850}' } }], 'tool_calls'),
+          { id: 'x', choices: [], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } },
+        ]),
+        9,
+      ),
+    );
+    const r = await aiChat(ROUND2);
+    expect(r.text).toBe('');
+    expect(r.toolCalls).toEqual([
+      { id: 'call_1', name: 'country', args: '{"country":"P5"}' },
+      { id: 'call_2', name: 'situation', args: '{"year":2850}' },
+    ]);
+    const body = calls[0].body;
+    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.tool_choice).toBe('auto');
+    expect(body.tools).toEqual(TOOLS!.map((t) => ({ type: 'function', function: t })));
+    expect(body.messages[2]).toEqual({
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'call_a', type: 'function', function: { name: 'country', arguments: '{"country":"P3"}' } }],
+    });
+    expect(body.messages[3]).toEqual({ role: 'tool', tool_call_id: 'call_a', content: 'P3 大昌王朝 · 第 812—3000 年' });
+    // 调用记录里记下了模型要调用的工具
+    expect(getCallLog().calls[0].toolCalls).toEqual(r.toolCalls);
+    // 没带工具的请求照旧按设置开深度思考
+    const calls2 = fakeFetch(() => sseResponse(sseBody([chunk('好')])));
+    await aiChat(REQ);
+    expect(calls2[0].body.thinking).toEqual({ type: 'enabled' });
+    expect(calls2[0].body.tools).toBeUndefined();
+    updateAiSettings({ deepseek: { thinking: false } });
+  });
+
+  it('百炼:带工具时不开深度思考;只回工具调用、没有正文不算出错', async () => {
+    setSecret('bailian', KEY);
+    chooseProvider('bailian');
+    updateAiSettings({ bailian: { thinking: true } });
+    const calls = fakeFetch(() =>
+      sseResponse(
+        sseBody([
+          { choices: [{ index: 0, delta: { role: 'assistant', content: '我先查一下。' } }], model: 'qwen-plus' },
+          { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_q', type: 'function', function: { name: 'country', arguments: '{"country":"P3"}' } }] }, finish_reason: 'tool_calls' }] },
+        ]),
+      ),
+    );
+    const r = await aiChat({ ...ROUND2, toolChoice: 'none' });
+    expect(calls[0].body.enable_thinking).toBe(false);
+    expect(calls[0].body.tool_choice).toBe('none');
+    expect(r.text).toBe('我先查一下。');
+    expect(r.toolCalls).toEqual([{ id: 'call_q', name: 'country', args: '{"country":"P3"}' }]);
+    updateAiSettings({ bailian: { thinking: false } });
+  });
+
+  it('交回工具结果以后正常收尾、不说话:不算出错(由助手循环判断);没有工具结果的照旧算空回复', async () => {
+    setSecret('deepseek', KEY);
+    chooseProvider('deepseek');
+    const end = [{ id: 'x', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }];
+    fakeFetch(() => sseResponse(sseBody(end)));
+    expect((await aiChat(ROUND2)).text).toBe('');
+    fakeFetch(() => sseResponse(sseBody(end)));
+    const e = (await aiChat({ ...ROUND2, messages: ROUND2.messages.slice(0, 2) }).catch((x) => x)) as AiError;
+    expect(e.code).toBe('bad-response');
+  });
+
+  it('我们的 AI:tools、toolChoice、带工具调用的消息原样转给服务器;done.tool_calls 读回', async () => {
+    const fake = createFakeAiServer({ chunkDelayMs: 0 });
+    const BASE = 'http://fake-ai.test';
+    const bodies: any[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (u: string, init?: RequestInit) => {
+        if (String(u).endsWith('/v1/chat') && init?.body) bodies.push(JSON.parse(String(init.body)));
+        return fake.handle(new Request(String(u), init));
+      }),
+    );
+    setOfficialServerForTest(BASE);
+    chooseProvider('official');
+    await loginOfficial('writer@example.com', FAKE_CODE);
+    const r = await aiChat({ ...ROUND2, messages: ROUND2.messages.slice(0, 2) });
+    expect(r.toolCalls).toEqual([{ id: 'call_fake_0', name: 'country', args: '{}' }]);
+    expect(bodies[0].tools).toEqual(TOOLS!.map((t) => ({ type: 'function', function: t })));
+    expect(bodies[0].toolChoice).toBe('auto');
+    const r2 = await aiChat(ROUND2);
+    expect(r2.toolCalls).toBeUndefined();
+    expect(r2.text).toContain('助手');
+    expect(bodies[1].messages[2].tool_calls[0]).toEqual({ id: 'call_a', type: 'function', function: { name: 'country', arguments: '{"country":"P3"}' } });
+    expect(bodies[1].messages[3]).toEqual({ role: 'tool', tool_call_id: 'call_a', content: 'P3 大昌王朝 · 第 812—3000 年' });
+    await logoutOfficial();
+    setOfficialServerForTest(undefined);
+  });
+});

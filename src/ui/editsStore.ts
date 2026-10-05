@@ -11,6 +11,7 @@
 import { useSyncExternalStore } from 'react';
 import { EMPTY_EDITS, cleanIntervention, type Intervention, type TerrainOp, type WorldEdits } from '../gen/edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from '../gen/terrainEdits';
+import { showToast } from './toastStore';
 
 let state: WorldEdits = EMPTY_EDITS;
 const subs = new Set<() => void>();
@@ -38,7 +39,7 @@ function put(next: WorldEdits) {
 // ---------------------------------------------------------------------------
 // 撤销 / 重做
 
-/** 记下的一步:改之前、改之后;AI 改写的一轮带上轮次(撤销 / 重做要经过改写那边,框里的"已执行 / 已撤销"跟着变) */
+/** 记下的一步:改之前、改之后;助手执行的一轮带上轮次(撤销 / 重做要经过助手那边,对话里的"已执行 / 已撤销"跟着变) */
 export interface EditStep {
   before: WorldEdits;
   after: WorldEdits;
@@ -162,8 +163,33 @@ export function subscribeEdits(f: (e: WorldEdits) => void): () => void {
   return () => subs.delete(g);
 }
 
-/** 改名:name 为空(或 null)= 恢复默认(从 names 里去掉这个键) */
+// ---- 能不能改(助手"先在地图上看看"时) ----
+
+/**
+ * 改名、下令之前问一声(App 在助手"先在地图上看看"时挂上):面板里这时是试推演的历史,那里的国家、城
+ * 不一定是现在这份历史里的同一个,用它的键改会落到别的东西上或者落空。gate 返回不能改的原因(能改 = null)
+ */
+let gate: ((keys: string[]) => string | null) | null = null;
+export function setEditGate(f: ((keys: string[]) => string | null) | null) {
+  gate = f;
+}
+/** 这几个键现在能不能改:不能 = 原因 */
+export function editBlock(keys: readonly string[]): string | null {
+  return gate ? gate(keys.filter(Boolean)) : null;
+}
+/** 一条干预点到的键(国家、对方、城、州) */
+export function interventionKeys(v: Intervention): string[] {
+  const o = v as Partial<Record<'a' | 'b' | 'city' | 'region', string>>;
+  return [o.a, o.b, o.city, o.region].filter((k): k is string => typeof k === 'string');
+}
+
+/** 改名:name 为空(或 null)= 恢复默认(从 names 里去掉这个键)。现在不能改(editBlock)= 提示条说原因,不改 */
 export function setName(key: string, name: string | null) {
+  const why = editBlock([key]);
+  if (why) {
+    showToast({ id: 'edit-block', kind: 'warn', text: why });
+    return;
+  }
   const names = { ...state.names };
   if (name) names[key] = name;
   else if (key in names) delete names[key];
@@ -173,12 +199,12 @@ export function setName(key: string, name: string | null) {
 }
 
 /**
- * 干预(阶段 4):加一条(清理过的;不合格的、和已有的一模一样的不加)。返回是否加上了。
+ * 干预(阶段 4):加一条(清理过的;不合格的、和已有的一模一样的、现在不能改的不加)。返回是否加上了(下令的面板先问 editBlock 说原因)。
  * App 看到干预列表变了就在后台从第 0 年重推文明
  */
 export function addIntervention(v: Intervention): boolean {
   const c = cleanIntervention(v);
-  if (!c) return false;
+  if (!c || editBlock(interventionKeys(c))) return false;
   const key = JSON.stringify(c);
   if (state.interventions.some((x) => JSON.stringify(x) === key)) return false;
   commitEdits({ ...state, interventions: [...state.interventions, c] });
