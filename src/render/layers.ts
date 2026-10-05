@@ -1,4 +1,4 @@
-/** 数据图层:板块 / 海拔 / 气温 / 降水 / 生物群落 —— 看清"世界是怎么来的"。 */
+/** 数据图层:板块 / 海拔 / 气温 / 降水 / 洋流 / 生物群落 —— 看清"世界是怎么来的"。 */
 import type { World } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import { BIOMES } from '../gen/biomes';
@@ -6,13 +6,14 @@ import { latitudeAt, windAt } from '../gen/climate';
 import { geometryOf } from '../gen/geometry';
 import { bakedView, drawRivers, hexRGB, hillshade, mix, ramp, rowCos, wrapOf, wrapShifts, type RGB } from './common';
 
-export type LayerId = 'plates' | 'elevation' | 'temperature' | 'precipitation' | 'biomes';
+export type LayerId = 'plates' | 'elevation' | 'temperature' | 'precipitation' | 'currents' | 'biomes';
 
 export const LAYERS: { id: LayerId; name: string }[] = [
   { id: 'plates', name: '板块' },
   { id: 'elevation', name: '海拔' },
   { id: 'temperature', name: '气温' },
   { id: 'precipitation', name: '降水' },
+  { id: 'currents', name: '洋流' },
   { id: 'biomes', name: '生物群落' },
 ];
 
@@ -46,6 +47,70 @@ export const PRECIP_RAMP: [number, RGB][] = [
   [3200, hexRGB('#1c4f9c')],
 ];
 
+/** 洋流图层:海面按水温偏差(和同纬度比,°C)上色,冷蓝暖红 */
+export const CURRENT_RAMP: [number, RGB][] = [
+  [-6, hexRGB('#2c5fb5')],
+  [-3, hexRGB('#7ea5d6')],
+  [0, hexRGB('#cbd7e2')],
+  [3, hexRGB('#e6a184')],
+  [6, hexRGB('#c7352b')],
+];
+const CURRENT_LAND = hexRGB('#d2cdc0');
+const CURRENT_SEA = hexRGB('#cbd7e2');
+
+/**
+ * 洋流图层每个像素的水温偏差:粗网格(GRID 像素一格)取最近地块的值,再双线性插值,冷暖边界是柔的。
+ * 陆地地块取相邻海面的平均,贴岸的海面插值时不会被陆地"拉"成 0
+ */
+function currentSst(world: World, r: Raster): Float32Array {
+  const { mesh, water, currents } = world;
+  const { n, adjStart, adj } = mesh;
+  const ext = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (water[i] === 1) {
+      ext[i] = currents.sst[i];
+      continue;
+    }
+    let s = 0;
+    let c = 0;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (water[j] === 1) {
+        s += currents.sst[j];
+        c++;
+      }
+    }
+    ext[i] = c ? s / c : 0;
+  }
+  const GRID = 4;
+  const gw = Math.ceil(r.w / GRID);
+  const gh = Math.ceil(r.h / GRID) + 1;
+  const loc = geometryOf(mesh).locator();
+  const g = new Float32Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++)
+    for (let gx = 0; gx < gw; gx++) {
+      const wx = ((gx * GRID + 0.5) / r.w) * world.width;
+      const wy = Math.min(world.height, ((gy * GRID + 0.5) / r.h) * world.height);
+      g[gy * gw + gx] = ext[loc(wx, wy)];
+    }
+  const out = new Float32Array(r.w * r.h);
+  for (let py = 0; py < r.h; py++) {
+    const fy = py / GRID;
+    const y0 = Math.min(gh - 2, Math.floor(fy));
+    const ty = fy - y0;
+    for (let px = 0; px < r.w; px++) {
+      const fx = px / GRID;
+      const x0 = Math.floor(fx) % gw;
+      const x1 = (x0 + 1) % gw; // 东西相连
+      const tx = fx - Math.floor(fx);
+      const a = g[y0 * gw + x0] * (1 - tx) + g[y0 * gw + x1] * tx;
+      const b = g[(y0 + 1) * gw + x0] * (1 - tx) + g[(y0 + 1) * gw + x1] * tx;
+      out[py * r.w + px] = a * (1 - ty) + b * ty;
+    }
+  }
+  return out;
+}
+
 function plateColor(k: number): RGB {
   const hue = (k * 137.508) % 360;
   const s = 0.45;
@@ -64,6 +129,7 @@ export function renderLayer(ctx: CanvasRenderingContext2D, world: World, r: Rast
   const img = ctx.createImageData(w, h);
   const d = img.data;
   const { plate, plateContinental } = world.tect;
+  const sst = layer === 'currents' ? currentSst(world, r) : null;
   for (let k = 0; k < w * h; k++) {
     let c: RGB;
     switch (layer) {
@@ -83,11 +149,17 @@ export function renderLayer(ctx: CanvasRenderingContext2D, world: World, r: Rast
       case 'precipitation':
         c = water[k] === 1 ? mix(ramp(PRECIP_RAMP, precip[k]), [30, 40, 60], 0.5) : ramp(PRECIP_RAMP, precip[k]);
         break;
+      case 'currents':
+        c = water[k] === 1 ? mix(ramp(CURRENT_RAMP, sst![k]), CURRENT_SEA, 0.15) : CURRENT_LAND;
+        break;
       default:
         c = BIOMES[biome[k]].real;
     }
     const s = shade[k];
-    const f = layer === 'plates' ? 1 : Math.max(0.5, Math.min(1.4, 1 + (s - 1) * 0.7));
+    const f =
+      layer === 'plates' || (layer === 'currents' && water[k] === 1)
+        ? 1
+        : Math.max(0.5, Math.min(1.4, 1 + (s - 1) * (layer === 'currents' ? 0.35 : 0.7)));
     d[k * 4] = c[0] * f;
     d[k * 4 + 1] = c[1] * f;
     d[k * 4 + 2] = c[2] * f;
@@ -104,7 +176,100 @@ export function renderLayer(ctx: CanvasRenderingContext2D, world: World, r: Rast
       fluxRef: 900,
     });
   if (layer === 'precipitation') drawWind(ctx, world, r.scale);
+  if (layer === 'currents') drawCurrents(ctx, world, r.scale);
 }
+
+/**
+ * 洋流流线:主图上大约每隔 STEP 个世界单位撒一个起点(按行错开、略微抖动),落在开阔海面上就顺着流向走几步,
+ * 画一条带箭头的短线。流得越快走得越远;碰到陆地、海冰就停。环流在岸边拐弯,流线跟着弯
+ */
+function drawCurrents(ctx: CanvasRenderingContext2D, world: World, S: number) {
+  const { water, currents, seaIce, width: W, height: H } = world;
+  const loc = geometryOf(world.mesh).locator();
+  const at = (x: number, y: number) => loc(((x % W) + W) % W, Math.max(0, Math.min(H, y)));
+  const open = (i: number) => water[i] === 1 && seaIce[i] < 0.5;
+  const { x: cx, y: cy, adjStart, adj } = world.mesh;
+  // 流速在地块之间插值(最近的地块 + 一圈邻居按距离加权),流线不会一格一格地折
+  const flow = [0, 0];
+  const sample = (px: number, py: number, i: number) => {
+    let su = 0;
+    let sv = 0;
+    let sw = 0;
+    const add = (j: number) => {
+      if (water[j] !== 1) return;
+      let dx = cx[j] - px;
+      dx -= W * Math.round(dx / W);
+      const w = 1 / (dx * dx + (cy[j] - py) ** 2 + 1);
+      su += currents.u[j] * w;
+      sv += currents.v[j] * w;
+      sw += w;
+    };
+    add(i);
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) add(adj[k]);
+    flow[0] = su / sw;
+    flow[1] = sv / sw;
+  };
+  ctx.lineWidth = 1.5 * S;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const pts: number[] = [];
+  let row = 0;
+  for (let yy = STREAM_GAP / 2; yy < H; yy += STREAM_GAP, row++) {
+    const cosr = Math.max(0.12, rowCos(yy, H));
+    const stepX = Math.min(W / 4, STREAM_GAP / cosr);
+    for (let xx = (row % 2) * stepX * 0.5; xx < W; xx += stepX) {
+      // 起点抖动(只看行列号,同一个世界每次画得一样)
+      const hsh = Math.sin(row * 127.1 + xx * 311.7) * 43758.5453;
+      const r1 = hsh - Math.floor(hsh);
+      const r2 = (r1 * 9301 + 0.4927) % 1;
+      pts.length = 0;
+      let x = xx + (r1 - 0.5) * stepX * 0.6;
+      let y = yy + (r2 - 0.5) * STREAM_GAP * 0.5;
+      let warm = 0;
+      for (let k = 0; k < STREAM_STEPS; k++) {
+        const i = at(x, y);
+        if (!open(i)) break;
+        sample(x, y, i);
+        const m = Math.hypot(flow[0], flow[1]);
+        if (m < 0.2) break;
+        pts.push(x, y);
+        warm += currents.sst[i];
+        const c = Math.max(0.12, rowCos(y, H));
+        const ux = flow[0] / c;
+        const l = Math.hypot(ux, flow[1]);
+        const h = STREAM_STEP * Math.min(1, m / 0.6);
+        x += (ux / l) * h;
+        y += (flow[1] / l) * h;
+      }
+      if (pts.length < 10) continue;
+      const n = pts.length;
+      warm /= n / 2;
+      ctx.strokeStyle = warm > 1 ? 'rgba(176,44,36,0.85)' : warm < -1 ? 'rgba(30,78,160,0.85)' : 'rgba(60,68,78,0.6)';
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let k = 0; k < n; k += 2) {
+        lo = Math.min(lo, pts[k]);
+        hi = Math.max(hi, pts[k]);
+      }
+      const ang = Math.atan2(pts[n - 1] - pts[n - 3], pts[n - 2] - pts[n - 4]);
+      for (const sh of wrapShifts(lo, hi, W, 6)) {
+        ctx.beginPath();
+        ctx.moveTo((pts[0] + sh) * S, pts[1] * S);
+        for (let k = 2; k < n; k += 2) ctx.lineTo((pts[k] + sh) * S, pts[k + 1] * S);
+        const ex = (pts[n - 2] + sh) * S;
+        const ey = pts[n - 1] * S;
+        ctx.moveTo(ex - Math.cos(ang - 0.5) * 5.5 * S, ey - Math.sin(ang - 0.5) * 5.5 * S);
+        ctx.lineTo(ex, ey);
+        ctx.lineTo(ex - Math.cos(ang + 0.5) * 5.5 * S, ey - Math.sin(ang + 0.5) * 5.5 * S);
+        ctx.stroke();
+      }
+    }
+  }
+}
+/** 流线起点间隔、每步多长、最多几步(世界单位) */
+const STREAM_GAP = 40;
+const STREAM_STEP = 3;
+const STREAM_STEPS = 16;
 
 /**
  * 板块图的叠加层:边界点 + 每个板块的漂移箭头。

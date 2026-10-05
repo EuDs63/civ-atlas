@@ -1876,7 +1876,9 @@ for (const style of ['realistic', 'fantasy']) {
       break;
     }
   }
-  // 3. 州:按网格找地图上的点(先用悬停读数看是不是某个州,是才点),找一个面板是"州"、能"划给…"的
+  // 3. 州:按网格找地图上的点(先用悬停读数看是不是某个州,是才点),找一个面板是"州"、能"划给…"的。
+  //    点有国家的州会选中那个国家,所以只点有人住、没有国家的(悬停读数是"部落地带")。
+  //    看得见的地方没有,就放回整张地图、转到别的经度再找(换了世界也找得到);找完放回原来的视图(下面还要点那座城)
   let regionInfo = '';
   let cedePage = '';
   let pickToast = '';
@@ -1887,53 +1889,76 @@ for (const style of ['realistic', 'fantasy']) {
   let mineAfter = '';
   let undoToast = '';
   let mineGone = false;
-  const box = (await page.locator('.map-box').boundingBox())!;
-  const grid: [number, number][] = [];
-  for (let gy = 0.3; gy < 0.8; gy += 0.08)
-    for (let gx = 0.15; gx < 0.62; gx += 0.05) {
-      const w = (await page.evaluate(([cx, cy]) => (window as any).__wfClientToWorld(cx, cy), [box.x + box.width * gx, box.y + box.height * gy])) as [number, number] | null;
-      if (w) grid.push(w);
-    }
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(700);
-  for (const [wx, wy] of grid) {
-    const at = (await page.evaluate(([x, y]) => (window as any).__wfWorldToClient(x, y), [wx, wy])) as [number, number] | null;
-    if (!at || !free(at[0], at[1]) || !/第 \d+ 州/.test(await probe(page, at[0], at[1]))) continue;
-    await page.mouse.click(at[0], at[1]);
-    await page.waitForTimeout(300);
-    if (!(await page.locator('.inspector .cp[data-region] [data-act=cede]').count())) {
-      // 点到的是字 / 城:关掉、等地图停稳再试下一处
+  const v0 = (await page.evaluate(() => (window as any).__wfView)) as { k: number; x: number; y: number; lon: number };
+  let turned = false;
+  search: for (const lon of [null, 0, 90, 180, 270]) {
+    if (lon !== null) {
+      turned = true;
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(700);
-      continue;
+      await page.evaluate((l) => {
+        (window as any).__wfSetView({ k: 1, x: 0, y: 0 });
+        (window as any).__wfSetCenter(l);
+      }, lon);
+      await page.waitForTimeout(900);
     }
-    regionInfo = await panel();
-    await page.click('.inspector [data-act=cede]');
-    await page.waitForTimeout(200);
-    cedePage = await panel();
-    if (!(await page.locator('.inspector [data-act=cede-pick]').isEnabled())) continue;
-    await page.click('.inspector [data-act=cede-pick]');
+    const box = (await page.locator('.map-box').boundingBox())!;
+    const grid: [number, number][] = [];
+    for (let gy = 0.14; gy < 0.82; gy += 0.06)
+      for (let gx = 0.15; gx < 0.9; gx += 0.04) {
+        const w = (await page.evaluate(([cx, cy]) => (window as any).__wfClientToWorld(cx, cy), [box.x + box.width * gx, box.y + box.height * gy])) as [number, number] | null;
+        if (w) grid.push(w);
+      }
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(700);
+    for (const [wx, wy] of grid) {
+      const at = (await page.evaluate(([x, y]) => (window as any).__wfWorldToClient(x, y), [wx, wy])) as [number, number] | null;
+      if (!at || !free(at[0], at[1])) continue;
+      const here = ` / ${await probe(page, at[0], at[1])}`;
+      if (!/第 \d+ 州/.test(here) || !here.includes(' / 部落地带')) continue;
+      await page.mouse.click(at[0], at[1]);
+      await page.waitForTimeout(300);
+      if (!(await page.locator('.inspector .cp[data-region] [data-act=cede]').count())) {
+        // 点到的是字 / 城:关掉、等地图停稳再试下一处
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(700);
+        continue;
+      }
+      regionInfo = await panel();
+      await page.click('.inspector [data-act=cede]');
+      await page.waitForTimeout(200);
+      cedePage = await panel();
+      if (!(await page.locator('.inspector [data-act=cede-pick]').isEnabled())) continue;
+      await page.click('.inspector [data-act=cede-pick]');
+      await page.waitForTimeout(900);
+      dim = await page.locator('.tp-dim').count();
+      cedePlates = (await page.evaluate('window.__wfPlates()')) as Plate[];
+      pickToast = await toastText(page, 'pick');
+      hidden = (await insHidden(page));
+      const tgt = cedePlates.filter((p) => !p.self).sort((a, b) => Math.abs(a.x - vp.width / 2) - Math.abs(b.x - vp.width / 2))[0];
+      if (tgt) {
+        const prev = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
+        await page.mouse.click(tgt.x, tgt.y);
+        await page.waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev, { timeout: 20000 }).catch(() => null);
+        await page.waitForTimeout(300);
+        doneToast = await toastText(page, 'resim-done');
+        mineAfter = (await page.locator('.inspector .cp-mine').innerText({ timeout: 2000 }).catch(() => '')).replace(/\n/g, ' ');
+        const prev2 = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
+        await page.click('.toast[data-toast=resim-done] .toast-act').catch(() => {});
+        await page.waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev2, { timeout: 20000 }).catch(() => null);
+        await page.waitForTimeout(300);
+        undoToast = await toastText(page, 'resim-done');
+        mineGone = (await page.locator('.inspector .cp[data-region]').count()) === 1 && !(await page.locator('.inspector .cp-mine').count());
+      }
+      break search;
+    }
+  }
+  if (turned) {
+    await page.keyboard.press('Escape');
+    await page.evaluate((v) => {
+      (window as any).__wfSetView({ k: v.k, x: v.x, y: v.y });
+      (window as any).__wfSetCenter(v.lon);
+    }, v0);
     await page.waitForTimeout(900);
-    dim = await page.locator('.tp-dim').count();
-    cedePlates = (await page.evaluate('window.__wfPlates()')) as Plate[];
-    pickToast = await toastText(page, 'pick');
-    hidden = (await insHidden(page));
-    const tgt = cedePlates.filter((p) => !p.self).sort((a, b) => Math.abs(a.x - vp.width / 2) - Math.abs(b.x - vp.width / 2))[0];
-    if (tgt) {
-      const prev = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
-      await page.mouse.click(tgt.x, tgt.y);
-      await page.waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev, { timeout: 20000 }).catch(() => null);
-      await page.waitForTimeout(300);
-      doneToast = await toastText(page, 'resim-done');
-      mineAfter = (await page.locator('.inspector .cp-mine').innerText({ timeout: 2000 }).catch(() => '')).replace(/\n/g, ' ');
-      const prev2 = await page.evaluate(() => (window as any).__wfResim?.seq ?? 0);
-      await page.click('.toast[data-toast=resim-done] .toast-act').catch(() => {});
-      await page.waitForFunction((s) => ((window as any).__wfResim?.seq ?? 0) > s, prev2, { timeout: 20000 }).catch(() => null);
-      await page.waitForTimeout(300);
-      undoToast = await toastText(page, 'resim-done');
-      mineGone = (await page.locator('.inspector .cp[data-region]').count()) === 1 && !(await page.locator('.inspector .cp-mine').count());
-    }
-    break;
   }
   // 4. 城面板"迁都到这里":替所属国下迁都令(和国家干预页同一套)→ 面板收起、推演 → "…迁都…,已从 N 年起重新推演"带撤销 → 撤销
   let moveToast = '';

@@ -5,8 +5,9 @@
  * - 冬季冷空气:大陆冬天比海洋冷得多,冷空气顺着盛行风吹到下风向的海面(鄂霍次克海、拉布拉多海);
  *   冰盖 / 高原上下来的风更冷
  * - 封闭程度:三面环陆的海湾、海峡水浅浪小、淡水多,最先封冻(哈德逊湾、波罗的海)
- * - 开阔大洋:水深、洋流带来热量,冰缘缩回去(挪威海)
- * - 洋流:低频噪声模拟暖流 / 寒流,让冰缘在开阔洋面上也有起伏
+ * - 开阔大洋:水深、环流带来热量,冰缘缩回去
+ * - 洋流:海面温度里已经带着洋流的冷暖(见 currents.ts:大陆西岸外暖流北上、东岸外寒流南下);
+ *   再叠一层低频噪声当小股的暖流 / 寒流,让冰缘在开阔洋面上也有起伏
  * 世界有真正的两极:极地本来就冷,真的冷就会结冰
  *
  * 像素层:铺像素时按地块插值出海冰程度(seaIceNodes + 三角形重心插值),再用 Voronoi 浮冰块
@@ -80,11 +81,7 @@ export function computeSeaIce(
   const near = blurField(mesh, landF, 5);
   const far = blurField(mesh, near, 30);
 
-  // ---- 3. 边界流:大洋西侧(大陆东岸外)寒流南下,东侧(大陆西岸外)暖流北上 ----
-  // 用粗网格(8 个世界单位一格)沿纬线扫描,求每个海面到西边 / 东边最近陆地的距离
-  const { west: distW, east: distE } = geo.zonalLand(landF, 8);
-
-  // ---- 4. 合成有效冬季温度 → 海冰程度 ----
+  // ---- 3. 合成有效冬季温度 → 海冰程度 ----
   const current = geo.fbm(subSeed(seed, 'seaice-current'), 2);
   const fc = 1 / 300;
   const ice = new Float32Array(n);
@@ -92,14 +89,12 @@ export function computeSeaIce(
     if (water[i] !== 1) continue;
     const open = 1 - clamp(far[i] * 2.2, 0, 1); // 周围几乎没有陆地 = 开阔大洋
     const deep = smoothstep(-200, -2500, elev[i]);
-    const boundary = -3.5 * Math.exp(-distW[i] / 180) + 2.5 * Math.exp(-distE[i] / 180);
     const teff =
       temperature[i] +
       chill[i] -
       3 * clamp(near[i] * 1.6, 0, 1) + // 海湾、海峡、沿岸固定冰
       1.5 * open +
       0.8 * deep +
-      boundary +
       (3.5 + 4.5 * open) * current.stretched(i, fc, 0.55); // 洋流:南北向拉长,冰舌一条一条伸出去
     ice[i] = smoothstep(T_OPEN, T_PACK, teff);
   }

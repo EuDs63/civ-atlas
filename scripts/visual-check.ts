@@ -4,7 +4,7 @@
  *   pnpm test:visual            比对;有图变了就打印差异百分比,并把对比图写到 snaps/visual-diff/
  *   pnpm test:visual --update   用当前画面覆盖基准图(改了画风 / 生成算法后跑,和代码一起提交)
  *
- * 每个种子(7、2024)渲染:写实、手绘、五个数据图层,各缩成 512×256;另有四张弯边投影的(见 PROJ_CASES)。
+ * 每个种子(7、2024)渲染:写实、手绘、六个数据图层,各缩成 512×256;另有四张弯边投影的(见 PROJ_CASES)。
  * "变了"的判定:某像素任一通道差 > 16/255 记为变化像素;变化像素占比 > 0.5% 判为不通过。
  * 自动起临时 dev server(scripts/lib/devserver.ts),不需要先 pnpm dev。
  *
@@ -28,6 +28,7 @@ const VIEWS = [
   { name: 'elevation', query: 'style=data&layer=elevation' },
   { name: 'temperature', query: 'style=data&layer=temperature' },
   { name: 'precipitation', query: 'style=data&layer=precipitation' },
+  { name: 'currents', query: 'style=data&layer=currents' },
   { name: 'biomes', query: 'style=data&layer=biomes' },
 ];
 /**

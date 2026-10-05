@@ -1,10 +1,10 @@
 /**
- * 图层(界面骨架的"图层与投影"弹层):六张缩略图 + 三个数据图层小字按钮。
+ * 图层(界面骨架的"图层与投影"弹层):六张缩略图 + 四个数据图层小字按钮。
  *
  * 一个图层 = 画风(手绘 / 写实 / 数据图层)+ 数据图层(数据图层时)+ 文明层开不开国家 / 民族:
  *   政区 = 手绘 + 国家      民族 = 手绘 + 民族      地形 = 手绘,不叠文明
  *   生态 = 数据图层"群落"   高程 = 数据图层"海拔"   实景 = 写实地貌,不叠文明
- *   板块 / 气温 / 降水 = 对应的数据图层
+ *   板块 / 气温 / 降水 / 洋流 = 对应的数据图层
  * 反过来,任意一组(画风, 数据图层, 国家 / 民族开关)都能认出它算哪个图层(旧链接 style=、layer=、civ= 照样认)。
  * 主题:高程、实景、降水底色深,界面换深色;其余浅色。
  */
@@ -12,7 +12,17 @@ import type { LayerId as DataLayer } from '../render/layers';
 
 export type Style = 'realistic' | 'fantasy' | 'data';
 
-export type MapLayer = 'political' | 'cultures' | 'terrain' | 'biomes' | 'elevation' | 'realistic' | 'plates' | 'temperature' | 'precipitation';
+export type MapLayer =
+  | 'political'
+  | 'cultures'
+  | 'terrain'
+  | 'biomes'
+  | 'elevation'
+  | 'realistic'
+  | 'plates'
+  | 'temperature'
+  | 'precipitation'
+  | 'currents';
 
 export interface LayerDef {
   id: MapLayer;
@@ -38,6 +48,7 @@ export const MAP_LAYERS: LayerDef[] = [
   { id: 'plates', name: '板块', style: 'data', data: 'plates', polities: false, cultures: false, dark: false, main: false },
   { id: 'temperature', name: '气温', style: 'data', data: 'temperature', polities: false, cultures: false, dark: false, main: false },
   { id: 'precipitation', name: '降水', style: 'data', data: 'precipitation', polities: false, cultures: false, dark: true, main: false },
+  { id: 'currents', name: '洋流', style: 'data', data: 'currents', polities: false, cultures: false, dark: false, main: false },
 ];
 
 const BY_ID = new Map(MAP_LAYERS.map((l) => [l.id, l]));

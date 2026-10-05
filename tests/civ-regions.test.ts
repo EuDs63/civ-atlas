@@ -178,12 +178,13 @@ describe('文明骨架:宜居度与州', () => {
   it('荒原的州比沃野的州大', () => {
     const w = generateWorld({ ...DEFAULT_PARAMS, seed: 2024 });
     const { regions: R, habitat } = generateCiv(w);
-    // 按治所宜居度分成最好 / 最差两组(不可居的除外),比平均面积
+    // 按治所宜居度分成最好 / 最差两组(不可居的除外),比平均面积。
+    // 20 个种子里最差一组是最好一组的 1.55–2.39 倍(GENERATOR_VERSION 7 以后 1.67–2.33,平均都约 2 倍;这个世界 1.76 倍)
     const idx = [...Array(R.count).keys()].filter((r) => habitat.suitability[R.seat[r]] > 0);
     idx.sort((a, b) => habitat.suitability[R.seat[b]] - habitat.suitability[R.seat[a]]);
     const q = Math.floor(idx.length / 4);
     const mean = (xs: number[]) => xs.reduce((s, r) => s + R.area[r], 0) / xs.length;
-    expect(mean(idx.slice(-q))).toBeGreaterThan(1.8 * mean(idx.slice(0, q)));
+    expect(mean(idx.slice(-q))).toBeGreaterThan(1.5 * mean(idx.slice(0, q)));
   }, 30_000);
 
   it('极端参数不报错:气温 −12、陆地 12% / 60%、极干', () => {

@@ -21,7 +21,7 @@ interface Case {
 const cases = new Map<number, Case>();
 
 beforeAll(() => {
-  for (const seed of [7, 2024, 1]) {
+  for (const seed of [7, 2024, 8, 11]) {
     const world = generateWorld({ ...DEFAULT_PARAMS, seed });
     const raster = rasterize(world, 1);
     const civ = generateCiv(world);
@@ -98,7 +98,7 @@ describe('地图文字(展开的视窗)', () => {
   });
 
   // 这两个世界都有跨 180° 经线的国家,国名正好骑在 180° 经线上
-  for (const seed of [2024, 1]) {
+  for (const seed of [8, 11]) {
     for (const style of ['fantasy', 'realistic'] as const) {
       it(`seed ${seed} · ${style}:视窗中心转到 180° 经线,跨接缝的国家国名只出现一次、完整、落在本国国土上`, () => {
         const c = cases.get(seed)!;

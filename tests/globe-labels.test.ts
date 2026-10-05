@@ -120,7 +120,7 @@ describe('地球仪文字:排版', () => {
       [100, 10, 3],
       [-60, 10, 3],
       [150, -20, 3],
-      [20, -10, 3],
+      [0, -40, 3],
       [60, 30, 3],
     ] as [number, number, number][]) {
       const { lv, layer, items } = setup(lon, lat, k);

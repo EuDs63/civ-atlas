@@ -135,6 +135,11 @@ export function hoverInfo(p: {
       case 'precipitation':
         info.extra = `年降水 ${Math.round(raster.precip[k])} mm`;
         break;
+      case 'currents': {
+        const d = world.currents.sst[cell];
+        if (water && Math.abs(d) >= 0.5) info.extra = `${d > 0 ? '暖流' : '寒流'}，水温比同纬度${d > 0 ? '高' : '低'} ${Math.abs(d).toFixed(1)}°C`;
+        break;
+      }
       case 'plates': {
         const plate = world.tect.plate[cell];
         info.extra = plate === undefined ? '' : `${world.tect.plateContinental[plate] ? '大陆' : '大洋'}板块 #${plate + 1}`;

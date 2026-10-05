@@ -1,5 +1,5 @@
 import { BIOMES } from '../gen/biomes';
-import { ELEV_RAMP, PRECIP_RAMP, TEMP_RAMP, type LayerId } from '../render/layers';
+import { CURRENT_RAMP, ELEV_RAMP, PRECIP_RAMP, TEMP_RAMP, type LayerId } from '../render/layers';
 import type { RGB } from '../render/common';
 
 const css = (c: RGB) => `rgb(${c.map(Math.round).join(',')})`;
@@ -33,6 +33,8 @@ export function Legend({ layer }: { layer: LayerId }) {
         <Gradient stops={PRECIP_RAMP} unit="年降水 mm · 白箭头 = 盛行风" labels={[0, 600, 1200, 2000, 3200]} />
       </>
     );
+  else if (layer === 'currents')
+    body = <Gradient stops={CURRENT_RAMP} unit="水温和同纬度比（°C），箭头是洋流方向" labels={[-6, -3, 0, 3, 6]} />;
   else if (layer === 'plates')
     body = (
       <div className="keys">

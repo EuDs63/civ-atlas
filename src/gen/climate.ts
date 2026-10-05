@@ -7,10 +7,15 @@
  * - 水汽:顺风一路搬运。海面蒸发补水;上陆后逐步下雨;
  *         遇山抬升猛下雨(迎风坡湿),翻过山水汽所剩无几(背风坡干 = 雨影)
  * - 纬度带修正:赤道辐合带多雨,副热带高压(~25°)干,中纬度锋面多雨,极地干
+ * - 洋流(给了 currents 时,见 currents.ts):海面温度加上洋流的冷暖偏差;海风把这份冷暖顺风带上岸,
+ *   越往内陆越淡,翻山再减;贴岸的地方不管风向都沾一点(海雾、海风)。寒流岸边空气稳定、不爱下雨
+ *   (海边的沙漠),暖流岸边湿热
  */
 import { blurField, type Mesh } from './mesh';
 import { piecewise, subSeed, clamp, smoothstep } from './util';
 import { geometryOf } from './geometry';
+import type { Currents } from './currents';
+import { round24 } from './civ/rand';
 
 export interface ClimateParams {
   seed: number;
@@ -76,10 +81,19 @@ export function seaLevelTemp(lat: number) {
   return piecewise(TEMP_BY_LAT, Math.abs(lat));
 }
 
+/** 洋流的冷暖顺风上岸:每走一个地块间距(世界单位)保留多少(内陆约 1500 公里淡到三分之一) */
+const HEAT_KEEP_PER_UNIT = round24(Math.exp(-1 / (1500 / (40000 / 2048))));
+/** 翻山时洋流的冷暖再减:每抬升 1000 米剩 exp(−1/1.5) */
+const HEAT_RISE = 1500;
+/** 贴岸的地方(不管风向)最多沾多少附近海面的冷暖;"附近"是几圈邻居 */
+const COAST_PULL = 0.85;
+const COAST_PASSES = 5;
+
 /**
  * elev:海拔(米,海洋为负);water:0 陆地 / 1 海洋 / 2 湖泊。
+ * currents:洋流(不给 = 不算洋流;造山侵蚀时用的粗略降水不算,地形和以前一样)
  */
-export function computeClimate(mesh: Mesh, elev: Float32Array, water: Uint8Array, p: ClimateParams): Climate {
+export function computeClimate(mesh: Mesh, elev: Float32Array, water: Uint8Array, p: ClimateParams, currents?: Currents): Climate {
   const { n, adjStart, adj, width: W } = mesh;
   const geo = geometryOf(mesh);
   const tNoise = geo.fbm(subSeed(p.seed, 'temp'), 4);
@@ -101,6 +115,25 @@ export function computeClimate(mesh: Mesh, elev: Float32Array, water: Uint8Array
     key[i] = geo.downwind(i, wx, wy, cuts);
     const e = water[i] === 1 ? 0 : Math.max(0, elev[i]);
     temperature[i] = seaLevelTemp(lat) + p.temperature - 0.0065 * e + 1.5 * tNoise.at(i, fs);
+    if (currents && water[i] === 1) temperature[i] += currents.sst[i];
+  }
+
+  // 贴岸的陆地沾附近海面的冷暖(不管风向):附近海面偏差的平均 + 附近有多少是海
+  const sst = currents?.sst;
+  let coastSst: Float32Array | null = null;
+  let coastW: Float32Array | null = null;
+  if (sst) {
+    const seaF = new Float32Array(n);
+    for (let i = 0; i < n; i++) seaF[i] = water[i] === 1 ? 1 : 0;
+    const num = blurField(mesh, sst, COAST_PASSES);
+    const den = blurField(mesh, seaF, COAST_PASSES);
+    coastSst = new Float32Array(n);
+    coastW = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      if (water[i] === 1 || den[i] === 0) continue;
+      coastSst[i] = num[i] / den[i];
+      coastW[i] = COAST_PULL * clamp(den[i] * 3, 0, 1);
+    }
   }
 
   // 每条邻接边:邻居 j 是否在 i 的上风向,以及权重(与风向越一致越大;0 = 不是上风)
@@ -178,6 +211,10 @@ export function computeClimate(mesh: Mesh, elev: Float32Array, water: Uint8Array
 
   const hum = new Float32Array(n);
   const rain = new Float32Array(n);
+  /** 空气里带着的洋流冷暖(°C);陆地上就是这里的气温偏差 */
+  const heat = new Float32Array(n);
+  const landHeat = new Float32Array(n);
+  const heatKeep = round24(HEAT_KEEP_PER_UNIT ** mesh.spacing);
   const BASE = 0.01; // 平地每个 cell 降掉的水汽比例
   const ORO = 0.00018; // 每米抬升额外降水比例
   const RECYCLE = 0.7; // 陆地降水被植被 / 土壤再蒸发回空气的比例
@@ -193,6 +230,7 @@ export function computeClimate(mesh: Mesh, elev: Float32Array, water: Uint8Array
       let sw = 0;
       let sh = 0;
       let se = 0;
+      let sq = 0;
       for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
         const dot = upW[k];
         if (dot === 0) continue;
@@ -200,6 +238,7 @@ export function computeClimate(mesh: Mesh, elev: Float32Array, water: Uint8Array
         sw += dot;
         sh += dot * hum[j];
         se += dot * smoothElev[j];
+        sq += dot * heat[j];
       }
       const isSea = water[i] !== 0;
       const sat = satOf(i);
@@ -212,14 +251,30 @@ export function computeClimate(mesh: Mesh, elev: Float32Array, water: Uint8Array
         rain[i] = hm * BASE * 1.2;
       } else {
         const rise = Math.max(0, smoothElev[i] - ue);
-        const frac = clamp(BASE + ORO * rise, 0, 0.6);
+        let frac = clamp(BASE + ORO * rise, 0, 0.6);
+        if (sst) {
+          // 顺风带来的冷暖(风越弱越少),贴岸再往附近海面的冷暖拉一把
+          let q = sw > 0 ? (sq / sw) * Math.sqrt(strength[i]) : 0;
+          q += (coastSst![i] - q) * coastW![i];
+          // 寒流岸边空气稳定,不爱下雨;暖流岸边湿热,多下一点
+          frac *= q < 0 ? Math.max(0.2, 1 + 0.2 * q) : 1 + 0.04 * Math.min(q, 5);
+          heat[i] = q * heatKeep * round24(Math.exp(-rise / HEAT_RISE));
+          landHeat[i] = q;
+        }
         const r = hm * frac;
         hm = hm - r + r * RECYCLE * clamp(sat, 0.3, 1);
         rain[i] = r;
       }
+      if (sst && isSea) {
+        // 海面上的空气很快染上海水的冷暖
+        const up = sw > 0 ? (sq / sw) * strength[i] : 0;
+        heat[i] = up + (sst[i] - up) * 0.35;
+      }
       hum[i] = hm;
     }
   }
+
+  if (sst) for (let i = 0; i < n; i++) temperature[i] += landHeat[i];
 
   const precipitation = new Float32Array(n);
   const rainS = blurField(mesh, rain, 2);

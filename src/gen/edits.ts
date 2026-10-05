@@ -100,7 +100,7 @@ import type { Civ, Place, Polity, Settlement } from './civ/types';
 import { polityRootAt } from './civ/growth';
 
 /** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对) */
-export const GENERATOR_VERSION = 6;
+export const GENERATOR_VERSION = 7;
 
 /** 干预的种类(见文件头的表) */
 export type InterventionKind = 'protect' | 'ally' | 'declare' | 'unity' | 'cede' | 'found' | 'move' | 'halt';
