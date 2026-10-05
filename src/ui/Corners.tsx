@@ -204,7 +204,7 @@ export function FirstHint({ show, touch }: { show: boolean; touch?: boolean }) {
   return <div className="first-hint">{touch ? '拖动地图，双指缩放，点国家看它的历史' : '拖动地图，滚轮缩放，点一个国家看它的历史'}</div>;
 }
 
-/** 悬停小卡片:跟着鼠标,靠右 / 靠下时翻到另一边 */
+/** 悬停小卡片:跟着鼠标,靠右 / 靠下时翻到另一边;放在鼠标下面会压住底部的时间轴时也翻到上面 */
 export function HoverCard({ info, x, y }: { info: HoverInfo; x: number; y: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -218,7 +218,9 @@ export function HoverCard({ info, x, y }: { info: HoverInfo; x: number; y: numbe
   const vw = typeof window === 'undefined' ? 1e4 : window.innerWidth;
   const vh = typeof window === 'undefined' ? 1e4 : window.innerHeight;
   const left = x + 16 + size.w > vw - 8 ? x - 12 - size.w : x + 16;
-  const top = y + 14 + size.h > vh - 8 ? y - 10 - size.h : y + 14;
+  let top = y + 14 + size.h > vh - 8 ? y - 10 - size.h : y + 14;
+  const bar = ref.current?.closest('.app')?.querySelector('.bottom-row .timebar')?.getBoundingClientRect();
+  if (bar && bar.height && top > y && y < bar.top && top + size.h > bar.top - 4 && left < bar.right && left + size.w > bar.left) top = y - 10 - size.h;
   return (
     <div ref={ref} className="hover hover-card" style={{ left, top }} role="tooltip">
       <div className="hc-line">
