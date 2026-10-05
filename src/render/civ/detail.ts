@@ -298,7 +298,6 @@ function fillDetail(
   value: ArrayLike<number>,
   rgba: (RGBA | null)[],
   segs: SegIndex | null,
-  paint: boolean,
 ): void {
   out.fill(0);
   const box = litBox(world, civ, value);
@@ -349,7 +348,7 @@ function fillDetail(
         if (blk === 2) continue;
         let cov = 1;
         if (blk === 1) {
-          cov = landCover(r, y0 * w + x0, y0 * w + x1, y1 * w + x0, y1 * w + x1, fx, fy, rpp, paint);
+          cov = landCover(r, y0 * w + x0, y0 * w + x1, y1 * w + x0, y1 * w + x1, fx, fy, rpp);
           if (cov <= 0) continue;
         }
         let reg = pix[ny * w + Math.min(w - 1, Math.floor(rx))];
@@ -476,7 +475,7 @@ export function drawSelectionDetail(
   const g = gridOf(cache, v, step, world);
   const segs = segIndex(lines, BAND + 0.75 / S, g.box, wrap);
   const sc = scratchOf(cache, g.gw, g.gh);
-  fillDetail(sc.img.data, g, raster, world, civ, regionPixels(world, raster, civ), grp.group, [null, look.fill], segs, style === 'fantasy');
+  fillDetail(sc.img.data, g, raster, world, civ, regionPixels(world, raster, civ), grp.group, [null, look.fill], segs);
   blit(ctx, cache, g);
   // 描边(沿州界,只描陆地之间;海岸那一侧靠罩染看出来)
   eachPart(ctx, v, world, S, () => {
@@ -524,7 +523,7 @@ export function drawHighlightDetail(
   const segs = segIndex(lines, BAND + 0.75 / S, g.box, wrap);
   const sc = scratchOf(cache, g.gw, g.gh);
   const [f1, f2] = highlightFill(style);
-  fillDetail(sc.img.data, g, raster, world, civ, regionPixels(world, raster, civ), marks, [null, f1, f2], segs, style === 'fantasy');
+  fillDetail(sc.img.data, g, raster, world, civ, regionPixels(world, raster, civ), marks, [null, f1, f2], segs);
   blit(ctx, cache, g);
   // 描边、光晕(光晕的模糊半径不跟着画布变换走,另乘 a)
   const { strokes, ring } = highlightStrokes(world, civ, hl, style);

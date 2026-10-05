@@ -28,6 +28,7 @@ import {
   type VecView,
 } from './common';
 import { smoothstep } from '../gen/util';
+import { reprojectImage, type Projector } from './projection';
 
 /**
  * 海的颜色(按海底深度):0 ~ −200 米是大陆架(浅、亮),过了坡折很快变深;
@@ -78,8 +79,11 @@ function makeCanvas(w: number, h: number): AnyCanvas {
     : new OffscreenCanvas(w, h);
 }
 
-/** 当前这张地图的像素层(不含河;只留一份,换了世界就释放) */
-let base: { raster: Raster; canvas: AnyCanvas } | null = null;
+/**
+ * 当前这张地图的像素层(不含河;只留一份,换了世界就释放)。
+ * raw = 水陆交界抗锯齿之前的像素(放大后的细节层拼水、陆两份要用,见 realisticShoreLayers;拼好就不留了)
+ */
+let base: { raster: Raster; canvas: AnyCanvas; raw: Uint8ClampedArray | null } | null = null;
 
 /** 像素层(地貌、海、冰、晕渲,不含河):铺进地形图,也给放大后的细节层当底图 */
 export function realisticBase(r: Raster): AnyCanvas {
@@ -87,8 +91,8 @@ export function realisticBase(r: Raster): AnyCanvas {
   if (base) base.canvas.width = base.canvas.height = 0;
   const cv = makeCanvas(r.w, r.h);
   const ctx = cv.getContext('2d') as CanvasRenderingContext2D;
-  paintRealistic(ctx, r);
-  base = { raster: r, canvas: cv };
+  const raw = paintRealistic(ctx, r, undefined, true);
+  base = { raster: r, canvas: cv, raw };
   return cv;
 }
 
@@ -129,6 +133,352 @@ export function drawRealisticRivers(ctx: CanvasRenderingContext2D, world: World,
     mouthFlare: 1.5,
     widthPower: 0.65,
   });
+}
+
+// ---------------------------------------------------------------------------
+// 放大后的岸线(细节层,见 render/detail.ts):像素层放大后水陆之间是一条好几个屏幕像素宽的模糊带,
+// 改成"水那一份 + 按岸线裁出来的陆地那一份"叠起来 —— 岸线按屏幕像素画,放大多少倍都是一条清楚的边
+
+/** 岸线两侧各一份的像素层(只留一份,换了世界就释放) */
+let shoreCache: { raster: Raster; water: AnyCanvas; land: AnyCanvas } | null = null;
+
+/**
+ * 水、陆各一份像素层(用抗锯齿之前的像素):对岸那几个像素换成离它最近的本侧颜色 ——
+ * 放大后双线性插值不会把对岸的颜色带过来,两份按岸线拼起来时边上不发虚。
+ * 放大到细节层时第一次用到才算(几十毫秒)
+ */
+export function realisticShoreLayers(r: Raster): { water: AnyCanvas; land: AnyCanvas } {
+  if (shoreCache?.raster === r) return shoreCache;
+  if (shoreCache) shoreCache.water.width = shoreCache.water.height = shoreCache.land.width = shoreCache.land.height = 0;
+  realisticBase(r);
+  const sides = shoreSides(base!.raw ?? paintRealistic(rawSink, r, undefined, true)!, r);
+  base!.raw = null;
+  const layer = (px: Uint8ClampedArray) => {
+    const cv = makeCanvas(r.w, r.h);
+    (cv.getContext('2d') as CanvasRenderingContext2D).putImageData(new ImageData(px, r.w, r.h), 0, 0);
+    return cv;
+  };
+  shoreCache = { raster: r, water: layer(sides.water), land: layer(sides.land) };
+  return shoreCache;
+}
+
+/**
+ * 纯计算(单测用):抗锯齿之前的像素(RGBA)→ 水、陆两份(见 realisticShoreLayers)。
+ * 只改岸边两圈:第 1 圈 = 水陆都有的 2×2 块里的像素(放大后双线性插值只用到这些),第 2 圈 = 它们的 8 邻域
+ * (缩放倍数不大时,岸线抗锯齿的那一个屏幕像素可能取到隔壁一格)。每一份里,对岸的像素一圈一圈填上
+ * 8 邻域里本侧(或已经填好的)像素的平均色;海和湖算一边
+ */
+export function shoreSides(px: Uint8ClampedArray, r: Pick<Raster, 'w' | 'h' | 'water'>): { water: Uint8ClampedArray; land: Uint8ClampedArray } {
+  const { w, h, water } = r;
+  const ring = new Uint8Array(w * h);
+  const rings: number[][] = [[], []];
+  const add = (j: number, n: number) => {
+    if (ring[j]) return;
+    ring[j] = n;
+    rings[n - 1].push(j);
+  };
+  for (let y = 0; y < h; y++) {
+    const r0 = y * w;
+    const r1 = (y < h - 1 ? y + 1 : y) * w;
+    for (let x = 0; x < w; x++) {
+      const x1 = x < w - 1 ? x + 1 : 0;
+      const l = water[r0 + x] === 0;
+      if ((water[r0 + x1] === 0) === l && (water[r1 + x] === 0) === l && (water[r1 + x1] === 0) === l) continue;
+      add(r0 + x, 1);
+      add(r0 + x1, 1);
+      add(r1 + x, 1);
+      add(r1 + x1, 1);
+    }
+  }
+  const nb = new Int32Array(8);
+  for (const k of rings[0]) {
+    const m = neighbours(k, w, h, nb);
+    for (let q = 0; q < m; q++) add(nb[q], 2);
+  }
+  const side = (land: boolean) => {
+    const out = new Uint8ClampedArray(px.length);
+    out.set(px);
+    // 对岸的像素:1 = 已填好(上一圈),2 = 这一圈刚填
+    const done = new Uint8Array(w * h);
+    for (const list of rings) {
+      for (const k of list) {
+        if ((water[k] === 0) === land) continue;
+        let sr = 0;
+        let sg = 0;
+        let sb = 0;
+        let n = 0;
+        const m = neighbours(k, w, h, nb);
+        for (let q = 0; q < m; q++) {
+          const j = nb[q];
+          if ((water[j] === 0) !== land && done[j] !== 1) continue;
+          sr += out[j * 4];
+          sg += out[j * 4 + 1];
+          sb += out[j * 4 + 2];
+          n++;
+        }
+        if (!n) continue;
+        out[k * 4] = sr / n;
+        out[k * 4 + 1] = sg / n;
+        out[k * 4 + 2] = sb / n;
+        done[k] = 2;
+      }
+      for (const k of list) if (done[k] === 2) done[k] = 1;
+    }
+    return out;
+  };
+  return { water: side(false), land: side(true) };
+}
+
+/** 像素 k 的 8 邻域(东西相连,上下到边为止)写进 out,返回几个 */
+function neighbours(k: number, w: number, h: number, out: Int32Array): number {
+  const x = k % w;
+  const y = (k - x) / w;
+  const lf = x > 0 ? -1 : w - 1;
+  const rt = x < w - 1 ? 1 : 1 - w;
+  let n = 0;
+  for (let dy = y > 0 ? -1 : 0; dy <= (y < h - 1 ? 1 : 0); dy++) {
+    const row = k + dy * w;
+    out[n++] = row + lf;
+    if (dy) out[n++] = row;
+    out[n++] = row + rt;
+  }
+  return n;
+}
+
+/** 只借用 createImageData / putImageData(不碰画布):重算一遍抗锯齿之前的像素用 */
+const rawSink = {
+  createImageData: (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+  putImageData: () => {},
+} as unknown as CanvasRenderingContext2D;
+
+/**
+ * 画路径用到的两个方法(Path2D、画布都有;单测里可以换成记录点的对象)。
+ * 每一块不调 closePath:填充、裁剪时没闭合的小块自动按闭合算,而 Chromium 里 closePath 的耗时随路径里已有的块数增长
+ * (几万块要几秒)
+ */
+export interface PathSink {
+  moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void;
+}
+
+/**
+ * 方格 → 画布:第 y 行方格夹在像素行 y、y + 1 的中心之间(y = −1 … h − 1;最上、最下一行把图边那半个像素也盖上),
+ * 第 i 列夹在像素列 i、i + 1 的中心之间(i 展开的,取像素时取模)。
+ *   at(世界 y) = 这条纬线上像素列 i(可以是小数)画在画布的 x = a + b·i,y = c(写进 out = [a, b, c])
+ *   cols(y) = 第 y 行方格要走哪几列 [i0, i1](null = 这一行不在画布上)
+ */
+export interface CellMap {
+  rows: [number, number];
+  cols(y: number): [number, number] | null;
+  at(wy: number, out: Float64Array): void;
+}
+
+/**
+ * 陆地的范围(加进 path):逐个方格(四角是相邻四个像素的中心)取陆地那一块 —— 四角里陆地的角、水陆不同的边上的交点依次连起来
+ * (两个对角是陆地的方格,两块陆地连着,和手绘风海岸墨线的走法一样)。交点:海岸按海拔过零处插值(和海岸墨线同一个位置),
+ * 湖岸按模糊过的湖泊掩膜过 0.5 处(和像素层的湖岸抗锯齿一样)。整格都是陆地的,一行里连着的合成一块。
+ * 所有小块都是同一个转向、只在边上相接:按非零规则填充 / 裁剪就是整块陆地,块与块之间没有缝
+ */
+export function addLandCells(path: PathSink, r: Raster, m: CellMap): void {
+  const { w, h, water, scale: S } = r;
+  const T = new Float64Array(3);
+  const B = new Float64Array(3);
+  const M = new Float64Array(3);
+  // 一块陆地的下一个点(第一个点 moveTo)
+  let first = true;
+  const pt = (x: number, y: number) => {
+    if (first) path.moveTo(x, y);
+    else path.lineTo(x, y);
+    first = false;
+  };
+  // 竖边上的交点:世界 y 在上下两行像素中心之间,第 i 列
+  const sidePt = (wy: number, i: number) => {
+    m.at(wy, M);
+    pt(M[0] + M[1] * i, M[2]);
+  };
+  for (let y = Math.max(-1, m.rows[0]); y <= Math.min(h - 1, m.rows[1]); y++) {
+    const cr = m.cols(y);
+    if (!cr) continue;
+    const rowA = (y < 0 ? 0 : y) * w;
+    const rowB = (y + 1 > h - 1 ? h - 1 : y + 1) * w;
+    const wy0 = (y + 0.5) / S;
+    m.at(wy0, T);
+    m.at((y + 1.5) / S, B);
+    const [i0, i1] = cr;
+    let x0 = i0 % w;
+    if (x0 < 0) x0 += w;
+    let run = NaN;
+    for (let i = i0; i <= i1 + 1; i++, x0 = x0 + 1 === w ? 0 : x0 + 1) {
+      const x1 = x0 + 1 === w ? 0 : x0 + 1;
+      const ka = rowA + x0;
+      const kb = rowA + x1;
+      const kc = rowB + x1;
+      const kd = rowB + x0;
+      const a = water[ka] === 0;
+      const b = water[kb] === 0;
+      const c = water[kc] === 0;
+      const d = water[kd] === 0;
+      const full = i <= i1 && a && b && c && d;
+      if (full) {
+        if (run !== run) run = i;
+        continue;
+      }
+      if (run === run) {
+        // 连着的整格陆地:一个四边形(弯边投影里上下两条纬线长短不同)
+        path.moveTo(T[0] + T[1] * run, T[2]);
+        path.lineTo(T[0] + T[1] * i, T[2]);
+        path.lineTo(B[0] + B[1] * i, B[2]);
+        path.lineTo(B[0] + B[1] * run, B[2]);
+        run = NaN;
+      }
+      if (i > i1 || !(a || b || c || d)) continue;
+      // 水陆都有的方格:左上 → 右上 → 右下 → 左下(和整格的转向一样)
+      first = true;
+      if (a) pt(T[0] + T[1] * i, T[2]);
+      if (a !== b) pt(T[0] + T[1] * (i + shoreT(r, ka, kb)), T[2]);
+      if (b) pt(T[0] + T[1] * (i + 1), T[2]);
+      if (b !== c) sidePt(wy0 + shoreT(r, kb, kc) / S, i + 1);
+      if (c) pt(B[0] + B[1] * (i + 1), B[2]);
+      if (c !== d) pt(B[0] + B[1] * (i + shoreT(r, kd, kc)), B[2]);
+      if (d) pt(B[0] + B[1] * i, B[2]);
+      if (d !== a) sidePt(wy0 + shoreT(r, ka, kd) / S, i);
+    }
+  }
+}
+
+/**
+ * 水陆不同的两个相邻像素 ka(左 / 上)、kb(右 / 下)之间,岸线在哪(从 ka 量起的比例):
+ * 海岸 = 海拔过零处(同手绘风的海岸墨线);湖岸 = 模糊过的湖泊掩膜过 0.5 处(同像素层的湖岸抗锯齿),对不上像素的归类就取中点
+ */
+export function shoreT(r: Raster, ka: number, kb: number): number {
+  const { water, elev, w, h } = r;
+  if (water[ka] === 2 || water[kb] === 2) {
+    const fa = lakeField(water, w, h, ka % w, Math.floor(ka / w)) - 0.5;
+    const fb = lakeField(water, w, h, kb % w, Math.floor(kb / w)) - 0.5;
+    if (fa > 0 !== (water[ka] === 2) || fb > 0 !== (water[kb] === 2) || fa === fb) return 0.5;
+    return Math.max(0.1, Math.min(0.9, fa / (fa - fb)));
+  }
+  const ea = elev[ka];
+  const eb = elev[kb];
+  return ea < 0 !== eb < 0 && ea !== eb ? Math.max(0.02, Math.min(0.98, ea / (ea - eb))) : 0.5;
+}
+
+/** 整张图的陆地范围(等距圆柱;只留一份,换了世界就重建) */
+let landPathCache: { raster: Raster; path: Path2D } | null = null;
+
+/**
+ * 整张图的陆地范围,坐标是像素层的像素(第 i 列像素中心在 x = i + 0.5)。列取 −2 … w:细节层画布按 180° 经线
+ * 分段画(ui/TerrainDetail.tsx),每一段用到的方格都在这里面
+ */
+function wholeLandPath(r: Raster): Path2D {
+  if (landPathCache?.raster === r) return landPathCache.path;
+  const path = new Path2D();
+  const S = r.scale;
+  addLandCells(path, r, {
+    rows: [-1, r.h - 1],
+    cols: () => [-2, r.w],
+    at: (wy, out) => {
+      out[0] = 0.5;
+      out[1] = 1;
+      out[2] = wy * S;
+    },
+  });
+  landPathCache = { raster: r, path };
+  return path;
+}
+
+/** 等距圆柱的细节层画布(画布 = 世界 × v.s + (v.ox, v.oy))上的方格范围 */
+function flatCells(r: Raster, v: { s: number; ox: number; oy: number }, cw: number, ch: number): CellMap {
+  const S = r.scale;
+  const ps = v.s / S;
+  const iA = Math.floor(((0 - v.ox) / v.s) * S - 1.5);
+  const iB = Math.ceil(((cw - v.ox) / v.s) * S - 0.5);
+  return {
+    rows: [Math.floor(((0 - v.oy) / v.s) * S - 1.5), Math.ceil(((ch - v.oy) / v.s) * S - 0.5)],
+    cols: () => [iA, iB],
+    at: (wy, out) => {
+      out[0] = v.ox + 0.5 * ps;
+      out[1] = ps;
+      out[2] = wy * v.s + v.oy;
+    },
+  };
+}
+
+/** 弯边投影的细节层画布(画布 = 地图平面 × v.s + (v.ox, v.oy))上的方格范围:每一行按这条纬线反算看得见的经度 */
+function projectedCells(r: Raster, pj: Projector, v: { s: number; ox: number; oy: number }, cw: number, ch: number): CellMap {
+  const { w, scale: S } = r;
+  const { W } = pj;
+  const lam0 = (pj.mp.lon0 * Math.PI) / 180;
+  // 第 i 列像素中心的经度差(展开的):rel = i·du + r0
+  const du = (2 * Math.PI) / w;
+  const r0 = 0.5 * du - Math.PI - lam0;
+  const mxL = (0 - v.ox) / v.s;
+  const mxR = (cw - v.ox) / v.s;
+  const myT = (0 - v.oy) / v.s;
+  const myB = (ch - v.oy) / v.s;
+  return {
+    rows: [-1, r.h - 1],
+    cols: (y) => {
+      const wa = (y + 0.5) / S;
+      const wb = (y + 1.5) / S;
+      if (pj.Y(wb) < myT || pj.Y(wa) > myB) return null;
+      const K = Math.min(pj.K(wa), pj.K(wb));
+      const relA = K > 1e-9 ? Math.max(-Math.PI, (mxL - W / 2) / K) : -Math.PI;
+      const relB = K > 1e-9 ? Math.min(Math.PI, (mxR - W / 2) / K) : Math.PI;
+      if (relB < relA) return null;
+      return [Math.floor((relA - r0) / du) - 1, Math.ceil((relB - r0) / du)];
+    },
+    at: (wy, out) => {
+      const K = pj.K(wy);
+      out[0] = (W / 2 + K * r0) * v.s + v.ox;
+      out[1] = K * du * v.s;
+      out[2] = pj.Y(wy) * v.s + v.oy;
+    },
+  };
+}
+
+/**
+ * 一个像素层像素放大到不足这么多个画布像素时,直接铺像素层:放大插值的过渡不比岸线抗锯齿宽多少,
+ * 拼两份(全图几十万个路径点)不划算
+ */
+const SHORE_MIN_PS = 2.5;
+
+/**
+ * 放大后的实景像素层(细节层):先铺水那一份,再按陆地范围(addLandCells)裁出陆地那一份铺上 —— 岸线按屏幕像素画,不发虚。
+ * 等距圆柱:像素层按视口变换放大贴上(双线性);弯边投影(v.proj):按行重投影(reprojectImage)
+ */
+export function drawRealisticShores(ctx: CanvasRenderingContext2D, r: Raster, v: VecView): void {
+  const pj = v.proj;
+  const ps = v.s / r.scale;
+  const put = (img: AnyCanvas) => {
+    if (pj) reprojectImage(ctx, img, r.w, r.h, pj.mp, v, 'low');
+    else ctx.drawImage(img, v.ox, v.oy, r.w * ps, r.h * ps);
+  };
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'low';
+  if (ps < SHORE_MIN_PS) put(realisticBase(r));
+  else {
+    const { water, land } = realisticShoreLayers(r);
+    put(water);
+    const cw = ctx.canvas.width;
+    const ch = ctx.canvas.height;
+    const cells = pj ? projectedCells(r, pj, v, cw, ch) : flatCells(r, v, cw, ch);
+    const cols = pj ? null : cells.cols(0)!;
+    if (cols && (cols[1] - cols[0]) * (cells.rows[1] - cells.rows[0]) * 8 > r.w * r.h) {
+      // 等距圆柱、视口里的方格多(放大不到三倍左右):用整张图的那一份(缓存的)按视口变换裁剪,省得每次重画重算几十万个点
+      const m = ctx.getTransform();
+      ctx.transform(ps, 0, 0, ps, v.ox, v.oy);
+      ctx.clip(wholeLandPath(r));
+      ctx.setTransform(m);
+    } else {
+      const path = new Path2D();
+      addLandCells(path, r, cells);
+      ctx.clip(path);
+    }
+    put(land);
+  }
+  ctx.restore();
 }
 
 /**
@@ -200,8 +550,11 @@ export function realisticGlobePixels(r: Raster): { shaded: Uint8ClampedArray; al
 }
 
 
-/** cap:地球仪要的底色和等效坡度也顺手记下来(不给 = 只画平面主图,画出来的一样) */
-function paintRealistic(ctx: CanvasRenderingContext2D, r: Raster, cap?: GlobeCapture) {
+/**
+ * cap:地球仪要的底色和等效坡度也顺手记下来(不给 = 只画平面主图,画出来的一样)。
+ * keepRaw:返回水陆交界抗锯齿之前的像素(一份拷贝)
+ */
+function paintRealistic(ctx: CanvasRenderingContext2D, r: Raster, cap?: GlobeCapture, keepRaw = false): Uint8ClampedArray | null {
   const { w, h, elev, water, temp, precip, ice: iceCover, iceConc, iceTone } = r;
   // 细节晕渲(沟壑纹理)+ 大尺度晕渲(整条山脉的明暗面)+ 海底晕渲
   const shade = hillshade(r, 0.012, 0);
@@ -343,9 +696,11 @@ function paintRealistic(ctx: CanvasRenderingContext2D, r: Raster, cap?: GlobeCap
       d[o + 3] = 255;
     }
   }
+  const raw = keepRaw ? d.slice() : null;
   // 3. 水陆交界抗锯齿
   antialiasShores(d, r);
   ctx.putImageData(img, 0, 0);
+  return raw;
 }
 
 /** 暗面最多压暗多少(1 - 下限) */

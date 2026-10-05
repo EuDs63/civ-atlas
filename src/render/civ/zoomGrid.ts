@@ -366,13 +366,13 @@ export function coastBlocks(r: Raster): Uint8Array {
 
 /**
  * 水陆都有的 2×2 块里一点的陆地覆盖度(0–1):四角(像素中心)的值双线性插值,过零处就是岸线。
- * byElev(手绘):只有海按海拔(陆地取 ≥ 0、海取 < 0)过零,和海岸墨线的位置一样(fantasy.ts 的 fantasyCoastLines);
- * 碰到湖、或写实风(岸线就是放大后水陆颜色的分界)按"陆 1 / 水 −1"取中点。
+ * 只有海:按海拔(陆地取 ≥ 0、海取 < 0)过零,和手绘风的海岸墨线(fantasy.ts 的 fantasyCoastLines)、
+ * 写实风放大后的岸线(realistic.ts 的 addLandCells)同一个位置;碰到湖按"陆 1 / 水 −1"取中点。
  * k00 = 左上像素,k10 右、k01 下、k11 右下;fx、fy = 在块里的位置(0–1);rpp = 一个工作格是几个像素(抗锯齿过渡的宽度)
  */
-export function landCover(r: Raster, k00: number, k10: number, k01: number, k11: number, fx: number, fy: number, rpp: number, byElev: boolean): number {
+export function landCover(r: Raster, k00: number, k10: number, k01: number, k11: number, fx: number, fy: number, rpp: number): number {
   const { water, elev } = r;
-  const lake = !byElev || water[k00] === 2 || water[k10] === 2 || water[k01] === 2 || water[k11] === 2;
+  const lake = water[k00] === 2 || water[k10] === 2 || water[k01] === 2 || water[k11] === 2;
   const val = (k: number) => (lake ? (water[k] ? -1 : 1) : water[k] ? Math.min(-1e-3, elev[k]) : Math.max(0, elev[k]));
   const v00 = val(k00);
   const v10 = val(k10);

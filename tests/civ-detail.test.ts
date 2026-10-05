@@ -94,14 +94,15 @@ describe('界线的空间索引', () => {
 describe('海岸抗锯齿', () => {
   // 2×2 的小图:左边陆地(海拔 300)、右边海(−100)
   const r = { w: 2, h: 2, water: Uint8Array.from([0, 1, 0, 1]), elev: Float32Array.from([300, -100, 300, -100]) } as unknown as Raster;
-  it('写实:岸线在两个像素中心的正中;手绘:按海拔过零处', () => {
-    expect(landCover(r, 0, 1, 2, 3, 0.45, 0.5, 0.01, false)).toBe(1);
-    expect(landCover(r, 0, 1, 2, 3, 0.55, 0.5, 0.01, false)).toBe(0);
+  it('海岸按海拔过零处(手绘、写实一样);湖岸取两个像素中心的正中', () => {
     // 海拔过零在 300 / 400 = 0.75 处
-    expect(landCover(r, 0, 1, 2, 3, 0.7, 0.5, 0.01, true)).toBe(1);
-    expect(landCover(r, 0, 1, 2, 3, 0.8, 0.5, 0.01, true)).toBe(0);
+    expect(landCover(r, 0, 1, 2, 3, 0.7, 0.5, 0.01)).toBe(1);
+    expect(landCover(r, 0, 1, 2, 3, 0.8, 0.5, 0.01)).toBe(0);
     // 一格宽的过渡:正好在岸线上 = 一半
-    expect(landCover(r, 0, 1, 2, 3, 0.75, 0.5, 0.2, true)).toBeCloseTo(0.5, 6);
+    expect(landCover(r, 0, 1, 2, 3, 0.75, 0.5, 0.2)).toBeCloseTo(0.5, 6);
+    const lake = { ...r, water: Uint8Array.from([0, 2, 0, 2]) } as unknown as Raster;
+    expect(landCover(lake, 0, 1, 2, 3, 0.45, 0.5, 0.01)).toBe(1);
+    expect(landCover(lake, 0, 1, 2, 3, 0.55, 0.5, 0.01)).toBe(0);
   });
 });
 

@@ -489,7 +489,7 @@ export function washDetail(
       }
       let cov = 1;
       if (blk === 1) {
-        cov = landCover(r, row0 + x0, row0 + x1, row1 + x0, row1 + x1, fx, fy, rpp, paint);
+        cov = landCover(r, row0 + x0, row0 + x1, row1 + x0, row1 + x1, fx, fy, rpp);
         if (cov <= 0) {
           out[o + 3] = 0;
           continue;
