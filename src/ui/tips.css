@@ -1,0 +1,36 @@
+/* 按钮的鼠标提示(Tips.tsx):白底小框,右边灰字是快捷键 */
+.ui-tip {
+  position: fixed;
+  z-index: 300;
+  padding: 4px 9px;
+  border: 0.5px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--panel-solid);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: ui-tip-in 0.12s ease;
+}
+.ui-tip kbd {
+  margin-left: 12px;
+  font: inherit;
+  color: var(--ink-2);
+}
+@keyframes ui-tip-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-tip {
+    animation: none;
+  }
+}
+@media (hover: none) {
+  .ui-tip {
+    display: none;
+  }
+}

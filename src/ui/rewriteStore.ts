@@ -5,10 +5,11 @@
  *   sendWish(ctx, wish)   发一句话:按现在的世界写材料、带上前几轮,调 AI;回来的修改逐条核对(不合格的写明原因,不能勾)
  *   stopWish()            停下正在想的那一轮
  *   toggleItem(turn, i)   勾 / 不勾第 i 条
- *   applyTurn(turn, now)  执行勾着的几条:一次 setEdits(干预、改地形只重推 / 重新生成一回)。
+ *   applyTurn(turn, now)  执行勾着的几条:一次合进修改(干预、改地形只重推 / 重新生成一回)。
  *                         只有最新的一轮能执行,而且发出去之后世界没再改过、现在也没在重推(否则提议是按旧世界写的,要重说一遍);
  *                         now = 界面上现在的这份历史(换了世界、重推完都会换成另一份)和是不是正在重推
  *   undoTurn(turn)        撤销执行过的那一轮(只拿掉这一轮加的修改,见 unmergeRewrite)
+ *   redoTurn(turn)        撤销过的那一轮再做一遍(⇧⌘Z;执行和撤销都记进修改的撤销记录,见 editsStore.ts)
  *   takeRewriteNote(e)    App 用:修改变成 e 是不是一次改写 / 撤销改写(推完在提示条上说"已按你说的改写"并带撤销)
  *
  * 对话只在内存里(换了世界就清空);每次调用照常记进 AI 调用记录(功能名"改写")。
@@ -33,7 +34,7 @@ import {
   type RewriteItem,
   type RewriteTurn,
 } from '../ai/prompts/rewrite';
-import { getEdits, setEdits } from './editsStore';
+import { commitEdits, getEdits, revertEdits } from './editsStore';
 import { currentWorld } from './saveStore';
 import { showToast } from './toastStore';
 
@@ -242,11 +243,11 @@ export function applyTurn(id: number, now: WorldNow): string | null {
   patch(id, { applied: { before, after } });
   // 只改名:不用重推,当场说;有干预 / 改地形:App 推完再说(带撤销)
   if (after.interventions === before.interventions && after.terrain === before.terrain) {
-    setEdits(after);
+    commitEdits(after, { id, kind: 'apply' });
     showToast({ id: 'resim-done', kind: 'ok', text: '已按你说的改名', action: { label: '撤销', act: 'rw-undo', onClick: () => undoTurn(id) } });
   } else {
     note = { kind: 'apply', turn: id, before, after, edits: after };
-    setEdits(after);
+    commitEdits(after, { id, kind: 'apply' });
   }
   return null;
 }
@@ -261,10 +262,28 @@ export function undoTurn(id: number) {
   patch(id, { applied: { ...a, undone: true } });
   if (next === now) return;
   if (next.interventions === now.interventions && next.terrain === now.terrain) {
-    setEdits(next);
+    commitEdits(next, { id, kind: 'undo' });
     showToast({ id: 'resim-done', kind: 'ok', text: '已撤销这次改写', ttl: 4000 });
   } else {
     note = { kind: 'undo', turn: id, before: a.before, after: a.after, edits: next };
-    setEdits(next);
+    commitEdits(next, { id, kind: 'undo' });
+  }
+}
+
+/** 撤销过的这一轮再做一遍(之后没再改过 = 正好回到执行后的样子;改过别的 = 只把这一轮的修改放回去) */
+export function redoTurn(id: number) {
+  const t = state.turns.find((x) => x.id === id);
+  const a = t?.applied;
+  if (!t || !a || !a.undone) return;
+  const now = getEdits();
+  const next = revertEdits(now, a.before, a.after);
+  patch(id, { applied: { ...a, undone: false } });
+  if (next === now) return;
+  if (next.interventions === now.interventions && next.terrain === now.terrain) {
+    commitEdits(next, { id, kind: 'apply' });
+    showToast({ id: 'resim-done', kind: 'ok', text: '已按你说的改名', action: { label: '撤销', act: 'rw-undo', onClick: () => undoTurn(id) } });
+  } else {
+    note = { kind: 'apply', turn: id, before: a.before, after: a.after, edits: next };
+    commitEdits(next, { id, kind: 'apply' });
   }
 }

@@ -12,7 +12,7 @@
  */
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { ChronicleEntry } from '../gen/civ/chronicle';
-import { pickChronicleEntry, setCivTime } from './civView';
+import { pickChronicleEntry, setCivTime, stepYear } from './civView';
 import { evLabel, evText, evType, evYears, hitDiamonds, layoutDiamonds, type Diamond } from './timelineLayout';
 
 /** 提示最多列几件 */
@@ -129,15 +129,11 @@ export const TimelineMarks = memo(function TimelineMarks({ entries, end, dock, y
   };
   const onKey = (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? 100 : 10;
-    const cur = year;
-    let y: number | null = null;
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') y = cur - step;
-    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') y = cur + step;
-    else if (e.key === 'Home') y = 0;
-    else if (e.key === 'End') y = end;
-    if (y === null) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') stepYear(end, -step);
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') stepYear(end, step);
+    else if (e.key === 'Home' || e.key === 'End') setCivTime({ year: e.key === 'Home' ? 0 : end, playing: false, story: false });
+    else return;
     e.preventDefault();
-    setCivTime({ year: Math.min(end, Math.max(0, y)), playing: false, story: false });
   };
 
   // 刻度、字、菱形、"令":只在排版变了时重新生成(播放时每年重新渲染一次,只改读屏用的年份)

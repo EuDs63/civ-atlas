@@ -24,9 +24,9 @@ import { layerDef, type MapLayer } from './mapLayers';
 import './book.css';
 
 /** 右上图层分段按钮里直接列出的几个图层(其余的在"更多图层"里) */
-const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'realistic'];
+export const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'realistic'];
 /** 新建世界时(还没有历史) */
-const DRAFT_SEG: MapLayer[] = ['terrain', 'realistic', 'elevation'];
+export const DRAFT_SEG: MapLayer[] = ['terrain', 'realistic', 'elevation'];
 
 /** 宽屏右上:写作进度、图层分段按钮、导出、编年史 */
 export function MapBar({ layers, exp, civ, draft }: { layers: LayerPopoverProps; exp: ExportMenuProps; civ: Civ | null; draft?: boolean }) {
@@ -37,13 +37,15 @@ export function MapBar({ layers, exp, civ, draft }: { layers: LayerPopoverProps;
     <div className="map-bar" onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
       <BookChip />
       <div className="glass seg-bar" role="radiogroup" aria-label="图层">
-        {seg.map((id) => (
+        {seg.map((id, i) => (
           <button
             key={id}
             className={`seg-btn${layers.layer === id ? ' on' : ''}`}
             role="radio"
             aria-checked={layers.layer === id}
             data-layer={id}
+            data-tip={layerDef(id).name}
+            data-tip-key={`layer${i + 1}`}
             disabled={layers.disabled}
             onClick={() => layers.onLayer(id)}
           >
@@ -135,10 +137,10 @@ export function MapControls({
       </button>
       {zoom && (
         <div className="glass mc-zooms">
-          <button className="mc-btn mc-zoom" data-act="zoom-in" onClick={() => onZoom(1.5)} title="放大" aria-label="放大">
+          <button className="mc-btn mc-zoom" data-act="zoom-in" onClick={() => onZoom(1.5)} aria-label="放大" data-tip="放大" data-tip-key="zoomIn" data-tip-side="left">
             +
           </button>
-          <button className="mc-btn mc-zoom" data-act="zoom-out" onClick={() => onZoom(1 / 1.5)} title="缩小" aria-label="缩小">
+          <button className="mc-btn mc-zoom" data-act="zoom-out" onClick={() => onZoom(1 / 1.5)} aria-label="缩小" data-tip="缩小" data-tip-key="zoomOut" data-tip-side="left">
             −
           </button>
         </div>

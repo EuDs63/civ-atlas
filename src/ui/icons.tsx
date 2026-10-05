@@ -128,6 +128,12 @@ const PATHS = {
       <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
     </>
   ),
+  keyboard: (
+    <>
+      <rect x="3" y="6.5" width="18" height="11" rx="2" />
+      <path d="M7 10h.01M10.5 10h.01M14 10h.01M17 10h.01M8 14h8" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

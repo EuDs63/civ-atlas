@@ -67,33 +67,6 @@
   background: var(--hover-bg);
   color: var(--ink);
 }
-.sb-collapse::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: 3px;
-  right: 36px;
-  z-index: 9;
-  padding: 4px 9px;
-  border: 0.5px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--panel-solid);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-  color: var(--ink);
-  font-size: 12.5px;
-  line-height: 1.45;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-}
-.sb-collapse:hover::after,
-.sb-collapse:focus-visible::after {
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity 0.12s ease 0.4s,
-    visibility 0s linear 0.4s;
-}
 .side-open {
   position: absolute;
   left: var(--side-gap, 14px);
@@ -520,6 +493,16 @@
   font-size: 11.5px;
   color: var(--ink-3);
   margin-left: 12px;
+}
+/* 菜单项右边的快捷键(和 Mac 菜单一样:灰字、和菜单项一样大) */
+.pm-kbd {
+  margin-left: 12px;
+  font: inherit;
+  color: var(--ink-2);
+}
+.pm-item:hover:not(:disabled) .pm-kbd {
+  color: inherit;
+  opacity: 0.85;
 }
 .pm-item:not(:has(.icon)) {
   padding-left: 36px;

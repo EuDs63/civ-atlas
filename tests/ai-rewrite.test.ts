@@ -43,6 +43,7 @@ import {
 } from '../src/ai/prompts/rewrite';
 import { clearEdits, getEdits, setEdits } from '../src/ui/editsStore';
 import { applyBlock, applyTurn, getRewrite, sendWish, syncRewriteWorld, takeRewriteNote, toggleItem, undoTurn } from '../src/ui/rewriteStore';
+import { redoLastEdit, undoLastEdit } from '../src/ui/undo';
 
 const world = generateWorld({ ...DEFAULT_PARAMS, seed: 7 });
 const civ = generateCiv(world);
@@ -533,6 +534,33 @@ describe('改写 · 测试用假 AI', () => {
     expect(getEdits()).toBe(start);
     expect(takeRewriteNote(getEdits())).toMatchObject({ kind: 'undo', turn: id });
     expect(getRewrite().turns.find((x) => x.id === id)!.applied).toMatchObject({ undone: true });
+  });
+
+  it('⌘Z / ⇧⌘Z:执行过的一轮也能撤销、再做一遍(框里的"已执行 / 已撤销"跟着变,推完的提示和点撤销一样)', async () => {
+    setActiveProvider('mock');
+    const start = getEdits();
+    const id = await sendWish({ world, civ, year: Y }, '让最大的国家多撑三百年');
+    expect(applyTurn(id, NOW)).toBeNull();
+    const after = getEdits();
+    takeRewriteNote(after);
+    const applied = () => getRewrite().turns.find((x) => x.id === id)!.applied;
+    expect(undoLastEdit()).toBe(true);
+    expect(getEdits()).toBe(start);
+    expect(applied()).toMatchObject({ undone: true });
+    expect(takeRewriteNote(getEdits())).toMatchObject({ kind: 'undo', turn: id });
+    expect(redoLastEdit()).toBe(true);
+    expect(getEdits()).toEqual(after);
+    expect(applied()).toMatchObject({ undone: false });
+    expect(takeRewriteNote(getEdits())).toMatchObject({ kind: 'apply', turn: id });
+    // 点了提示条上的"撤销"也记一步:⌘Z 把它退回去 = 又执行了,⇧⌘Z 再撤销
+    undoTurn(id);
+    expect(getEdits().interventions).toEqual([]);
+    expect(undoLastEdit()).toBe(true);
+    expect(getEdits()).toEqual(after);
+    expect(applied()).toMatchObject({ undone: false });
+    expect(redoLastEdit()).toBe(true);
+    expect(getEdits().interventions).toEqual([]);
+    expect(applied()).toMatchObject({ undone: true });
   });
 
   it('新建时提的改地形:点了创建世界(锁从只改地形换成只改历史)以后对话清空,不能再执行、撤销', async () => {

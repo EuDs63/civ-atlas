@@ -124,6 +124,21 @@ export function pausePlayback() {
   if (t.playing || t.story) time.set({ playing: false, story: false });
 }
 
+/** 播放 / 暂停(时间轴上的播放键、空格):停在结束年份(放到头了)时从 restart 那一年重播 */
+export function togglePlayback(end: number, restart: number) {
+  const t = time.get();
+  if (t.playing) return pausePlayback();
+  const year = Math.min(end, Math.max(0, t.year ?? end));
+  time.set({ playing: true, story: false, scrubbing: false, year: year >= end ? restart : year });
+}
+
+/** 往前 / 往后走 dy 年(时间轴上的方向键、← →;从显示的那一年算起),停下播放 */
+export function stepYear(end: number, dy: number) {
+  const t = time.get();
+  const cur = Math.floor(Math.min(end, Math.max(0, t.year ?? end)));
+  time.set({ year: Math.min(end, Math.max(0, cur + dy)), playing: false, story: false });
+}
+
 /**
  * 打开网页后第一次显示世界时,要不要自动播放(只问一次,之后都是 false):
  * 网址给了 civYear(看某一年)或 play=0 不播;play=1 一定播;无头浏览器(截图脚本、冒烟检查)里默认不播

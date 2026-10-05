@@ -7,6 +7,7 @@
  *     没有修改 = 普通网址(只带种子、参数);剪贴板用不了:菜单留着,里面多一行选中了链接的输入框,让用户自己复制
  *
  * 存、读、列都在 saveStore.ts。存储满了之类的提示(saveStore 的 notify)显示在顶部的提示条上。
+ * ⌘S 打开这个菜单(openSaveMenu;世界本来就自动存着,菜单上写着存没存好)。
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SHARE_WARN_LENGTH, editCount, encodeShare, hasShareData, saveFileName, saveText, type SaveFile } from '../gen/savefile';
@@ -116,9 +117,30 @@ function shareBase(): string {
   return location.origin + location.pathname + (s ? `?${s}` : '');
 }
 
+/** 页面上的存档菜单(宽屏侧栏顶上一个;手机在世界卡片里):⌘S 打开看得见的那一个 */
+const openers = new Set<{ root: () => HTMLElement | null; open: () => void }>();
+
+/** ⌘S:打开看得见的那个存档菜单(已经开着就留着);没有看得见的 = false */
+export function openSaveMenu(): boolean {
+  for (const o of openers) {
+    const el = o.root();
+    if (!el || !el.getClientRects().length || el.closest('[inert]')) continue;
+    o.open();
+    return true;
+  }
+  return false;
+}
+
 export function SaveMenu({ ready, icon }: SaveMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const o = { root: () => rootRef.current, open: () => setOpen(true) };
+    openers.add(o);
+    return () => {
+      openers.delete(o);
+    };
+  }, []);
   const v = useSavesVersion();
   const edits = useEdits();
   const cur = ready ? currentWorld() : null;
@@ -198,7 +220,7 @@ export function SaveMenu({ ready, icon }: SaveMenuProps) {
         : { cls: '', text: '还没存进我的世界；改了名字或历史就会自动存' };
   return (
     <div className="save" ref={rootRef}>
-      <button className={`save-btn${open ? ' on' : ''}`} onClick={() => setOpen((o) => !o)} title="存成文件、复制分享链接">
+      <button className={`save-btn${open ? ' on' : ''}`} onClick={() => setOpen((o) => !o)} data-tip="存档" data-tip-key="save">
         {icon}
         存档
       </button>

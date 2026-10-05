@@ -101,6 +101,7 @@ export function PopMenu({
 export function MenuItem({
   icon,
   note,
+  kbd,
   href,
   act,
   ain,
@@ -111,6 +112,8 @@ export function MenuItem({
   icon?: ReactNode;
   /** 右边的灰色小字("需设置") */
   note?: ReactNode;
+  /** 右边的快捷键(灰字,和菜单项一样大) */
+  kbd?: string;
   href?: string;
   act?: string;
   /** 名字由来 / AI 起名(data-ain) */
@@ -124,6 +127,7 @@ export function MenuItem({
       {icon}
       <span className="pm-text">{children}</span>
       {note && <small className="pm-note">{note}</small>}
+      {kbd && <kbd className="pm-kbd">{kbd}</kbd>}
     </>
   );
   if (href)

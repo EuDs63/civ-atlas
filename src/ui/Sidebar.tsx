@@ -34,6 +34,9 @@ import { Icon } from './icons';
 import { AiMenuItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
 import { APP_VERSION } from './version';
+import { useCoarse } from './device';
+import { keyLabel } from './shortcuts';
+import { openShortcuts } from './ShortcutsDialog';
 import { rgb } from './panelParts';
 import { collapseSide, expandSide, useSide } from './sideStore';
 import './sidebar.css';
@@ -87,7 +90,7 @@ export function Sidebar(p: SidebarProps) {
       >
         <header className="sb-head">
           <BackHome onClick={p.onHome} />
-          <button className="sb-collapse" data-act="side-collapse" aria-label="收起侧栏" data-tip="收起侧栏" onClick={collapseSide}>
+          <button className="sb-collapse" data-act="side-collapse" aria-label="收起侧栏" data-tip="收起侧栏" data-tip-key="side" data-tip-side="left" onClick={collapseSide}>
             <Icon name="sidebar" size={19} />
           </button>
           <WorldHead {...p} />
@@ -218,7 +221,7 @@ export function useWorldInfo(civ: Civ | null, data: SidebarProps['data']): { tit
   return { title: currentWorld()?.title || '未命名世界', sub };
 }
 
-/** "更多"菜单:用一句话改写世界、写成史书、AI 设置、源代码和两份协议;最底下一行版本号 */
+/** "更多"菜单:用一句话改写世界、写成史书、AI 设置、键盘快捷键(有鼠标时)、源代码和两份协议;最底下一行版本号 */
 export function WorldMoreMenu({
   civ,
   data,
@@ -235,6 +238,8 @@ export function WorldMoreMenu({
 }) {
   // 改写不要求有文明:没长出文明的世界也能改地形
   const canRewrite = !!civ && !!data;
+  // 键盘快捷键只在有鼠标的设备上列出(手机、平板没有键盘)
+  const coarse = useCoarse();
   return (
     <PopMenu className={className} icon={<Icon name="more" size={17} />} title="更多" act="world-more" align="right">
       <AiMenuItem icon={<Icon name="rename" size={16} />} act="rewrite" disabled={!canRewrite} onClick={onRewrite} note="AI">
@@ -256,6 +261,11 @@ export function WorldMoreMenu({
         AI 设置
       </MenuItem>
       <MenuSep />
+      {!coarse && (
+        <MenuItem icon={<Icon name="keyboard" size={16} />} act="shortcuts" kbd={keyLabel('help')} onClick={openShortcuts}>
+          键盘快捷键
+        </MenuItem>
+      )}
       <MenuItem icon={<Icon name="info" size={16} />} href={SOURCE_URL} act="source">
         源代码
       </MenuItem>

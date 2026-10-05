@@ -1,7 +1,7 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
- * 存档读档分享、导出、干预、改地形、AI、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
+ * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
  * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;创建时定下的种子、参数、地形在世界概览的"世界设定"页(只能看)
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
@@ -270,6 +270,155 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (!escClosed || !scrimClosed) errs.push('世界概览:Esc / 点外面收不起');
   if (!rowClosed || !rowIns.includes(rowName)) errs.push(`世界概览:国家表点一行没有收起概览、选中这国(${rowName};${rowIns.slice(0, 40)})`);
   if (!ins || !side || ins.x < side.x - 1 || ins.x + ins.width > side.x + side.width + 1 || home !== 0) errs.push('界面骨架:点国家后面板没有出现在侧栏里 / 世界首页没收起');
+  await page.evaluate(() => localStorage.clear());
+}
+
+// 键盘快捷键(电脑上):← → 走 10 年(Shift 100 年)、空格播放 / 暂停(用鼠标点过播放键以后按空格只算一下)、+ − 缩放、1–4 换图层、
+// / 跳进搜索框(在框里打数字不换图层)、? 打开一览(开着时空格不播放,Esc 收起)、Ctrl+S 打开存档菜单(拦下浏览器的"存储网页")、
+// 改名后 Ctrl+Z 撤销、Ctrl+Shift+Z 重做;Ctrl+\ 收起 / 展开左边的卡片(收起着按 / 先展开);按钮的提示框右边写着键;"更多"菜单里有"键盘快捷键"
+{
+  await page.goto(`${dev.url}/?seed=7`);
+  await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const vp = page.viewportSize()!;
+  const year = async () => Number((await page.locator('.timebar .tb-year').innerText()).replace(/[^\d]/g, ''));
+  const playing = async () => (await page.locator('.timebar .tb-play.on').count()) > 0;
+  const layer = () => page.locator('.seg-btn.on').innerText();
+  const k = async () => (await page.evaluate(() => (window as any).__wfView)).k as number;
+  await page.mouse.click(SIDE_ROOM + (vp.width - SIDE_ROOM) / 2, vp.height / 2);
+  await page.keyboard.press('Escape');
+  const y0 = await year();
+  await page.keyboard.press('ArrowLeft');
+  const y1 = await year();
+  await page.keyboard.press('Shift+ArrowLeft');
+  const y2 = await year();
+  await page.keyboard.press('ArrowRight');
+  const y3 = await year();
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(250);
+  const play1 = await playing();
+  await page.keyboard.press('Space');
+  const play2 = await playing();
+  await page.click('.timebar button.tb-play');
+  await page.waitForTimeout(150);
+  const play3 = await playing();
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(150);
+  const play4 = await playing();
+  const k0 = await k();
+  await page.keyboard.press('Equal');
+  await page.waitForTimeout(400);
+  const k1 = await k();
+  await page.keyboard.press('Minus');
+  await page.waitForTimeout(400);
+  const k2 = await k();
+  await page.keyboard.press('2');
+  await page.waitForTimeout(250);
+  const l2 = await layer();
+  await page.keyboard.press('1');
+  await page.waitForTimeout(250);
+  const l1 = await layer();
+  await page.keyboard.press('/');
+  const searchFocused = await page.evaluate(() => document.activeElement?.classList.contains('search-input') ?? false);
+  await page.keyboard.type('2');
+  const typed = await page.locator('input.search-input').inputValue();
+  const lTyped = await layer();
+  await page.keyboard.press('Escape');
+  await page.locator('input.search-input').fill('');
+  await page.mouse.click(SIDE_ROOM + (vp.width - SIDE_ROOM) / 2, vp.height / 2);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Shift+Slash');
+  await page.waitForTimeout(200);
+  const help = (await page.locator('[data-testid=shortcuts]').innerText().catch(() => '')).replace(/\n/g, ' ');
+  await page.keyboard.press('Space');
+  const playUnderHelp = await playing();
+  await page.keyboard.press('Escape');
+  const helpClosed = !(await page.locator('[data-testid=shortcuts]').count());
+  await page.evaluate(() => window.addEventListener('keydown', (e) => e.code === 'KeyS' && ((window as any).__kbSave = e.defaultPrevented)));
+  await page.keyboard.press('Control+s');
+  await page.waitForTimeout(200);
+  const saveMenu = await page.locator('.save-menu').isVisible().catch(() => false);
+  const savePrevented = await page.evaluate(() => (window as any).__kbSave);
+  await page.keyboard.press('Escape');
+  // 提示框:鼠标停在"民族"上
+  await page.hover('.seg-btn[data-layer=cultures]');
+  await page.waitForTimeout(700);
+  const tip = (await page.locator('.ui-tip').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  await page.mouse.move(SIDE_ROOM + (vp.width - SIDE_ROOM) / 2, vp.height / 2);
+  // "更多"菜单 → 键盘快捷键
+  await page.click('[data-act=world-more]');
+  const menu = (await page.locator('.pm-menu').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  await page.click('[data-act=shortcuts]');
+  const menuOpens = (await page.locator('[data-testid=shortcuts]').count()) === 1;
+  await page.click('[data-act=shortcuts-close]');
+  // 改一座城的名字,Ctrl+Z 撤销、Ctrl+Shift+Z 重做
+  type Pick = { kind: string; id: number; text: string; x: number; y: number };
+  const ps = (await page.evaluate('window.__wfPickables()')) as Pick[];
+  const city = ps.find((c) => c.kind === 'settlement' && ps.some((m) => m.kind === 'mark' && m.id === c.id && m.x > SIDE_ROOM + 60 && m.x < vp.width - 60 && m.y > 120 && m.y < vp.height - 160));
+  const has = (n: string) => page.evaluate((t) => ((window as any).__wfLabels?.texts ?? []).includes(t), n);
+  let undo = '';
+  let redo = '';
+  const named: boolean[] = [];
+  if (city) {
+    const m = ps.find((q) => q.kind === 'mark' && q.id === city.id)!;
+    await page.mouse.click(m.x, m.y);
+    await page.click('.inspector .ins-name');
+    await page.fill('.inspector .ins-edit input', '快捷键城');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    named.push(await has('快捷键城'));
+    await page.keyboard.press('Control+z');
+    undo = await toastText(page, 'resim-done');
+    await page.waitForTimeout(400);
+    named.push(await has('快捷键城'), await has(city.text));
+    await page.keyboard.press('Control+Shift+z');
+    redo = await toastText(page, 'resim-done');
+    await page.waitForTimeout(400);
+    named.push(await has('快捷键城'));
+  }
+  // 收起按钮的提示框;Ctrl+\ 收起、再按展开;收起着按 / :卡片展开、光标在搜索框里
+  await page.keyboard.press('Escape');
+  await page.hover('[data-act=side-collapse]');
+  await page.waitForTimeout(700);
+  const tipSide = (await page.locator('.ui-tip').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  await page.mouse.move(SIDE_ROOM + (vp.width - SIDE_ROOM) / 2, vp.height / 2);
+  const folded = async () => (await page.locator('.side-open').count()) === 1;
+  await page.keyboard.press('Control+Backslash');
+  await page.waitForTimeout(400);
+  const fold1 = await folded();
+  await page.keyboard.press('Control+Backslash');
+  await page.waitForTimeout(400);
+  const fold2 = await folded();
+  await page.keyboard.press('Control+Backslash');
+  await page.waitForTimeout(400);
+  await page.keyboard.press('/');
+  await page.waitForTimeout(300);
+  const fold3 = await folded();
+  const searchAfterFold = await page.evaluate(() => document.activeElement?.classList.contains('search-input') ?? false);
+  await page.keyboard.press('Escape');
+  console.log(
+    `快捷键:年份 ${y0} → ← ${y1} → Shift+← ${y2} → → ${y3};空格 ${play1}/${play2},点播放键 ${play3} 后空格 ${play4};缩放 ${k0.toFixed(2)} → ${k1.toFixed(2)} → ${k2.toFixed(2)};` +
+      `2 → ${l2}、1 → ${l1};/ 进搜索框 ${searchFocused}、打「${typed}」图层 ${lTyped};? 一览「${help.slice(0, 30)}…」、开着时空格播放 ${playUnderHelp}、Esc 收起 ${helpClosed};` +
+      `Ctrl+S 存档菜单 ${saveMenu}、拦下 ${savePrevented};提示「${tip}」;更多菜单「${menu}」→ 一览 ${menuOpens};` +
+      `改名「${city?.text}」→ 快捷键城 ${named.join('/')}、撤销「${undo}」、重做「${redo}」;收起按钮提示「${tipSide}」;Ctrl+\\ 收起 ${fold1} → 展开 ${!fold2};收起着按 / → 展开 ${!fold3}、进搜索框 ${searchAfterFold}`,
+  );
+  if (!(y1 === y0 - 10 && y2 === y0 - 110 && y3 === y0 - 100)) errs.push(`快捷键:← → 没有按 10 年 / Shift 100 年走(${y0} → ${y1} → ${y2} → ${y3})`);
+  if (!play1 || play2) errs.push(`快捷键:空格没有播放 / 暂停(${play1}、${play2})`);
+  if (!play3 || play4) errs.push(`快捷键:点过播放键以后按空格,应只暂停一次(${play3} → ${play4})`);
+  if (!(k1 > k0 * 1.3 && Math.abs(k2 - k0) < 0.01)) errs.push(`快捷键:+ − 没有缩放(${k0} → ${k1} → ${k2})`);
+  if (l2 !== '民族' || l1 !== '政区') errs.push(`快捷键:1 2 没有换图层(${l2}、${l1})`);
+  if (!searchFocused || typed !== '2' || lTyped !== '政区') errs.push(`快捷键:/ 没有跳进搜索框,或在框里打字换了图层(${searchFocused}、「${typed}」、${lTyped})`);
+  if (!['时间', '地图', '世界', '播放 / 暂停', '撤销 / 重做', 'Ctrl+S'].every((w) => help.includes(w)) || playUnderHelp || !helpClosed)
+    errs.push(`快捷键:? 一览不对,或开着时空格还在播放 / Esc 收不起(${help.slice(0, 60)};${playUnderHelp};${helpClosed})`);
+  if (!saveMenu || savePrevented !== true) errs.push(`快捷键:Ctrl+S 没有打开存档菜单 / 没拦下浏览器的存网页(${saveMenu}、${savePrevented})`);
+  if (!/民族\s*2/.test(tip)) errs.push(`快捷键:"民族"按钮的提示框没写键(${tip})`);
+  if (!/键盘快捷键\s*\?/.test(menu) || !menuOpens) errs.push(`快捷键:"更多"菜单里没有"键盘快捷键",或点了没打开一览(${menu})`);
+  if (!city) errs.push('快捷键:没找到能点的城');
+  else if (named.join() !== 'true,false,true,true' || undo !== '已撤销改名' || redo !== '已重做改名')
+    errs.push(`快捷键:改名后 Ctrl+Z / Ctrl+Shift+Z 不对(${named.join('/')};${undo};${redo})`);
+  if (!/收起侧栏\s*Ctrl\+\\/.test(tipSide)) errs.push(`快捷键:收起按钮的提示框没写键(${tipSide})`);
+  if (!fold1 || fold2) errs.push(`快捷键:Ctrl+\\ 没有收起 / 展开左边的卡片(${fold1}、${fold2})`);
+  if (fold3 || !searchAfterFold) errs.push(`快捷键:卡片收起着按 / ,应先展开再跳进搜索框(${fold3}、${searchAfterFold})`);
   await page.evaluate(() => localStorage.clear());
 }
 
