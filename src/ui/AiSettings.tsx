@@ -237,8 +237,7 @@ function SettingsTab() {
       </label>
 
       <p className="ai-foot">
-        密钥只存在这个浏览器里
-        <i aria-hidden="true">·</i>
+        <span>密钥只存在这个浏览器里</span>
         <a href={PRIVACY_URL} target="_blank" rel="noreferrer" data-link="privacy">
           隐私政策
         </a>
@@ -394,11 +393,11 @@ function TestRow({ disabled, sig }: { disabled: boolean; sig: string }) {
       const reply = r.text.replace(/\s+/g, ' ').trim();
       const extra = [r.usage ? `${r.usage.inputTokens + r.usage.outputTokens} tokens` : '', r.credits !== undefined ? `扣了 ${r.credits} 积分` : '']
         .filter(Boolean)
-        .join(' · ');
+        .join('，');
       setSt({
         sig,
         kind: 'ok',
-        text: `连上了 · 用时 ${dur(r.ms)} · ${r.model}${extra ? ` · ${extra}` : ''} · 回复"${reply.length > 40 ? reply.slice(0, 40) + '…' : reply}"`,
+        text: `连上了，用时 ${dur(r.ms)}，模型 ${r.model}${extra ? `，${extra}` : ''}，回复"${reply.length > 40 ? reply.slice(0, 40) + '…' : reply}"`,
       });
     } catch (e) {
       if (ctl.signal.aborted) return;

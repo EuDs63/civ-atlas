@@ -1,7 +1,7 @@
 /**
  * 悬停小卡片的内容(界面骨架):只提示,不承担功能。
  *
- *   鼠标在城镇符号 / 城名、国名、地名上:这个东西的名字 + 一句("国都 · 约 3.2 万人""山脉")
+ *   鼠标在城镇符号 / 城名、国名、地名上:这个东西的名字 + 一句("国都，约 3.2 万人""山脉")
  *   否则按时间轴当前这一年:有国家 → 国名 + 州数(民族图层:族名 + 所属国家);
  *   没有国家 → 有人住写族名 + "部落地带",没人住写州名 / 群落
  *   数据图层多一行数值(海拔、气温、降水、板块、群落)
@@ -94,7 +94,7 @@ export function hoverInfo(p: {
       const s = civ.settlements[label.id];
       const pop = populationAt(s, year);
       const capital = pop > 0 && civ.polities.some((q) => polityAlive(q, year) && capitalAt(q, year) === s.id);
-      info = { name: s.name, sub: pop > 0 ? `${capital ? '国都' : SETTLEMENT_RANKS[settlementRank(pop)].name} · ${populationLabel(pop)}` : '故城遗址' };
+      info = { name: s.name, sub: pop > 0 ? `${capital ? '国都' : SETTLEMENT_RANKS[settlementRank(pop)].name}，${populationLabel(pop)}` : '故城遗址' };
     } else if (label.kind === 'polity' && civ.polities[label.id] && civ.cultures.length) {
       const po = civ.polities[label.id];
       owners = ownersAt(civ, year, owners);

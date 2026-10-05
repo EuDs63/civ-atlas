@@ -301,7 +301,7 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
         download(r.blob, r.name);
         dbg = { job, name: r.name, bytes: r.blob.size, w: r.w, h: r.h, ms: performance.now() - t0 };
         const gmb = r.blob.size >= 1e6 ? `${(r.blob.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(r.blob.size / 1e3))} KB`;
-        setStatus({ kind: 'ok', text: `已导出 ${r.name}`, more: `${r.w}×${r.h} · ${gmb} · 用时 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` });
+        setStatus({ kind: 'ok', text: `已导出 ${r.name}`, more: `${r.w}×${r.h}，${gmb}，用时 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` });
       } else if (job === 'map' || job === 'mapjpg') {
         const format: ImageFormat = job === 'map' ? 'png' : 'jpeg';
         const name = `${base}-第${yi}年-${styleName(style, layer)}${x2}.${IMAGE_FORMATS[format].ext}`;
@@ -313,7 +313,7 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
         download(r.blob, name);
         dbg = { job, name, bytes: r.blob.size, w: r.w, h: r.h, ms: performance.now() - t0, detail: r.detail };
         const mb = r.blob.size >= 1e6 ? `${(r.blob.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(r.blob.size / 1e3))} KB`;
-        setStatus({ kind: 'ok', text: `已导出 ${name}`, more: `${r.w}×${r.h} · ${mb} · 用时 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` });
+        setStatus({ kind: 'ok', text: `已导出 ${name}`, more: `${r.w}×${r.h}，${mb}，用时 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` });
       } else if (job === 'height16' || job === 'height8') {
         const bits: HeightmapBits = job === 'height16' ? 16 : 8;
         const name = `${base}-高度图-${bits}位${x2}.png`;
@@ -363,12 +363,12 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
   };
 
   const items: { job: Job; title: string; sub: string; need?: boolean }[] = [
-    ...(globeOn ? [{ job: 'globe' as const, title: '导出地球仪这一面', sub: '现在看到的样子 · PNG' }] : []),
-    { job: 'map', title: '地图图片(PNG)', sub: `整张地图 · ${styleName(style, layer)} · 第 ${year} 年 · ${W}×${H}`, need: true },
+    ...(globeOn ? [{ job: 'globe' as const, title: '导出地球仪这一面', sub: '现在看到的样子，PNG' }] : []),
+    { job: 'map', title: '地图图片(PNG)', sub: `整张地图，${styleName(style, layer)}，第 ${year} 年，${W}×${H}`, need: true },
     { job: 'mapjpg', title: '地图图片(JPEG)', sub: `同上,文件小好几倍(质量 ${Math.round(IMAGE_FORMATS.jpeg.quality! * 100)}%)`, need: true },
     { job: 'legend', title: '图例(PNG)', sub: `第 ${year} 年的国家 / 民族 + 颜色、城镇符号、道路`, need: true },
-    { job: 'height16', title: '高度图 · 16 位(PNG)', sub: `游戏引擎、World Machine 用 · ${W}×${H}` },
-    { job: 'height8', title: '高度图 · 8 位(PNG)', sub: `Azgaar 导入用 · 海平面 = 灰度 ${AZGAAR_SEA_GRAY}(Azgaar 的 20)` },
+    { job: 'height16', title: '高度图(16 位 PNG)', sub: `游戏引擎、World Machine 用，${W}×${H}` },
+    { job: 'height8', title: '高度图(8 位 PNG)', sub: `Azgaar 导入用，海平面 = 灰度 ${AZGAAR_SEA_GRAY}(Azgaar 的 20)` },
     { job: 'md', title: '编年史(Markdown)', sub: '按时代分节,大事在前、全部附后', need: true },
     { job: 'txt', title: '编年史(纯文本)', sub: '同上,不带 Markdown 记号', need: true },
   ];
@@ -399,7 +399,8 @@ export function ExportMenu({ data, civ, style, layer, icon }: ExportMenuProps) {
             <div className="seg">
               {([1, 2] as const).map((s) => (
                 <button key={s} className={scale === s ? 'on' : ''} onClick={() => setScale(s)} title={s === 2 ? '重新铺两倍像素,文字按两倍密度重画;适合打印、放大看' : undefined}>
-                  {s}× · {(data?.world.width ?? 2048) * s}×{(data?.world.height ?? 1024) * s}
+                  {/* 按钮上只写像素大小;"两倍"的意思在鼠标停上去的说明里 */}
+                  {(data?.world.width ?? 2048) * s}×{(data?.world.height ?? 1024) * s}
                 </button>
               ))}
             </div>

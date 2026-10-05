@@ -35,7 +35,7 @@ export interface ToastInput {
   text: string;
   /** kind = 'progress' 时的进度 0–1(不给 = 转圈,不知道还要多久) */
   progress?: number;
-  /** 第二行小字(给几条就用" · "连成一行) */
+  /** 第二行小字(给几条就用中文逗号连成一行) */
   more?: string[];
   /** 右侧的按钮:"撤销""取消""下载说明" */
   action?: ToastAction;

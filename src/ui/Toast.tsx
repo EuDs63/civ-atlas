@@ -19,7 +19,8 @@ export function ToastBar() {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   const mark = t.kind === 'info' || t.kind === 'progress';
   const dismiss = t.dismissible ?? (t.kind === 'warn' || t.kind === 'error');
-  const more = t.more?.filter(Boolean).join(' · ');
+  // 几句说明连成一行用中文逗号(和面板标题下"国家，1992 年立国"一个写法)
+  const more = t.more?.filter(Boolean).join('，');
   const acts: ToastAction[] = t.actions ?? (t.action ? [t.action] : []);
   // ok 类只有一个按钮时是链接样式("撤销");两个按钮时第一个(或标了 primary 的)是主按钮
   const link = t.kind === 'ok' && acts.length === 1;
