@@ -48,8 +48,32 @@ export interface Focus {
   lat: number;
 }
 
+/**
+ * 人物的稳定键:国家的稳定键 + 身份 + 名字 + 生年(重推历史后同一国、同名、同年生的还是他;推演变了、指不到就算了)
+ */
+export function personKey(civ: Civ, id: number): string {
+  const x = civ.people?.[id];
+  if (!x || !civ.polities[x.polity]) return '';
+  return `person:${polityKey(civ, x.polity)}|${x.role}|${x.name}|${Math.round(x.born)}`;
+}
+
+/** 按人物的稳定键在(重推过的)历史里找回这个人;找不到 = −1 */
+export function resolvePersonKey(civ: Civ, key: string): number {
+  for (const x of civ.people ?? []) if (personKey(civ, x.id) === key) return x.id;
+  return -1;
+}
+
+/** 地图上按什么画、往哪飞:人物 = 他的国家;其余照旧 */
+export function mapTarget(civ: Civ | null, sel: MapSelection | null): Exclude<MapSelection, { kind: 'person' }> | null {
+  if (!sel) return null;
+  if (sel.kind !== 'person') return sel;
+  const x = civ?.people?.[sel.id];
+  return x && civ!.polities[x.polity] ? { kind: 'polity', id: x.polity } : null;
+}
+
 /** 选中的东西的稳定键(重推历史后编号变了、还是同一个东西 = 同一个键) */
 export function selectionKey(civ: Civ, sel: MapSelection): string {
+  if (sel.kind === 'person') return personKey(civ, sel.id);
   if (sel.kind === 'polity') return civ.polities[sel.id] ? polityKey(civ, sel.id) : '';
   if (sel.kind === 'settlement') return civ.settlements[sel.id] ? settlementKey(civ, sel.id) : '';
   if (sel.kind === 'place') return civ.places[sel.id] ? placeKeyOf(civ, sel.id) : '';
@@ -89,8 +113,10 @@ function cellsBox(world: World, cells: Iterable<number>, ref: number): [number, 
   return x0 <= x1 ? [x0, y0, x1, y1] : null;
 }
 
-/** 选中的东西在地图上的位置和范围;找不到 = null */
-export function selectionFocus(world: World, civ: Civ, sel: MapSelection, year: number): Focus | null {
+/** 选中的东西在地图上的位置和范围(人物 = 他的国家);找不到 = null */
+export function selectionFocus(world: World, civ: Civ, selIn: MapSelection, year: number): Focus | null {
+  const sel = mapTarget(civ, selIn);
+  if (!sel) return null;
   const { x, y } = world.mesh;
   const W = world.width;
   const H = world.height;

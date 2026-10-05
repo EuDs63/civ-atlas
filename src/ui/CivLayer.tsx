@@ -166,7 +166,7 @@ export function CivLayer({ world, raster, civ, geo, style, year, view, mp = null
   const [detailOn, setDetailOn] = useState(false);
   const hl = useCivHighlight();
   const { sel: picked } = useSelection();
-  // 选中一种信仰:地图上圈它的城(selectionOnMap),信仰图层上别的信仰变淡(faithFocus)
+  // 选中人物:地图上亮出他的国家;选中一种信仰:圈它的城,信仰图层上别的信仰变淡(selectionOnMap、faithFocus)
   const sel = useMemo(() => selectionOnMap(civ, picked), [civ, picked]);
   const faithFocus = faithFocusOf(picked);
   const mpRef = useRef(mp);

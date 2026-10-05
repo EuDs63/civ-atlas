@@ -6,7 +6,7 @@
  *   点名牌或地图上的目标 = 下令(PolityPick.accept)。顶部提示条"选择与某国结盟的国家 · N 年起生效 · 取消 · Esc"。
  * - 下了令、正在推演:地图还压着(这期间不接受点击),只留本国和对象的名牌;顶部提示条"正在重新推演 X–3000 年"带进度。
  *   推完:面板留着、回到信息页;选对象时缩回了整张图的,地图飞回这个国家(App 从生效年份接着放,提示"…,已从 X 年起重新推演"带撤销)。
- * - 平时选中国家:国都画一个直径 24 的主色圆环,旁边写"竹影城（国都）" —— 默认写在圆环下面,压着地图上的字(国名、城名、地名)
+ * - 平时选中国家(或这国的人物):国都画一个直径 24 的主色圆环,旁边写"竹影城（国都）" —— 默认写在圆环下面,压着地图上的字(国名、城名、地名)
  *   就换到上面 / 右边 / 左边……挑一处不压字的(地图停稳了再挑,拖动、飞行时跟着圆环走)。
  * - 名牌、圆环每帧按"世界坐标 → 屏幕坐标"重新摆(平移、缩放、左右无限拖动、弯边投影、地球仪都对;转到球背面的不显示);
  *   名牌互相压着时,小国的先让开或藏起来。
@@ -21,7 +21,7 @@ import { getPolityPick, nameAt, setPickHover, setPolityPick, usePickHover, usePo
 import { endRun, getPanel, requestFly, setPanelTab, setSheet, usePanel } from './panelStore';
 import { clearToast, showToast } from './toastStore';
 import { isCoarse } from './device';
-import { sideRoom } from './flyTo';
+import { mapTarget, sideRoom } from './flyTo';
 import { astRoom } from './astPanel';
 import type { WorldToClient } from './EventPins';
 import type { LabelPick } from './mapPick';
@@ -144,7 +144,9 @@ export function TargetLayer({ civ, world, toClient, resim, generating, labelAt }
   const pick = usePolityPick();
   const { run } = usePanel();
   const hover = usePickHover();
-  const { sel } = useSelection();
+  const picked = useSelection().sel;
+  // 选中人物 = 他的国家(国都的圆环也画)
+  const sel = useMemo(() => mapTarget(civ, picked), [civ, picked]);
   const t = useCivTime();
   const ok = !!civ && civ.viable;
 

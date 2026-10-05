@@ -647,7 +647,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   const graticule = useGraticule();
   const [hiLoading, setHiLoading] = useState(false);
   const { sel: picked } = useSelection();
-  // 选中一种信仰:圈它的城,信仰图层上别的信仰变淡(faithSelection.ts)
+  // 选中人物:地图上亮出他的国家;选中一种信仰:圈它的城,信仰图层上别的信仰变淡(faithSelection.ts)
   const sel = useMemo(() => selectionOnMap(civ, picked), [civ, picked]);
   const faithFocus = faithFocusOf(picked);
   const hl = useCivHighlight();

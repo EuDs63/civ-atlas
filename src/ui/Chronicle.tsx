@@ -14,16 +14,17 @@
  * - "复制全文":当前列出的纪事(含战争里的每一件事)复制成纯文本,给 OC 作者写设定用。
  * - "写成史书"(阶段 5):打开 HistoryBook 窗口;按国家看时默认写这一国的国史。「使用 AI 功能」关着时没有这个按钮。
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Civ } from '../gen/civ/types';
 import { chronicleText, filterChronicle, polityChronicle, yearText, type ChronicleEntry } from '../gen/civ/chronicle';
 import { fullChronicle } from '../gen/civ/religionText';
 import { polityName } from '../gen/civ/growth';
 import { getCivTime, pickChronicleEntry, setChronicle, subscribeCivTime, useChronicle, useChroniclePick, type CivTime } from './civView';
-import { evLabel, evText, evType } from './timelineLayout';
+import { evLabel, evType } from './timelineLayout';
 import { openHistoryBook } from './HistoryBook';
 import { useAiOn } from '../ai/client';
 import { closeOverview } from './overviewStore';
+import { EntryText } from './panelParts';
 import { polityHistory } from './WorldOverviewCountries';
 import './timeline.css';
 
@@ -59,8 +60,6 @@ export function Chronicle({ civ }: { civ: Civ | null }) {
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const nowRef = useRef<HTMLDivElement>(null);
-  /** 列表换了(换世界 / 换筛选)之后第一次同步:滚到当前年份 */
-  const scrolledFor = useRef<unknown>(null);
   /** 国家下拉框:在编年史里出现过的国家,鼎盛时大的在前 */
   const choices = useMemo(() => {
     if (!civ || !civ.viable || !civ.polities.length) return [];
@@ -103,67 +102,8 @@ export function Chronicle({ civ }: { civ: Civ | null }) {
   }, [picked]);
 
   // ---- 跟着时间轴:淡显还没发生的、标出进行中的战争、"现在"线,回放 / 拖动时滚动 ----
-  useLayoutEffect(() => {
-    const box = listRef.current;
-    if (!box || !civ) return;
-    const rows = [...box.querySelectorAll<HTMLElement>('[data-y]')];
-    const ys = rows.map((r) => Number(r.dataset.y));
-    const es = rows.map((r) => Number(r.dataset.e));
-    const items = rows.map((r) => (r.dataset.top === '1' ? (r.parentElement as HTMLElement) : null));
-    // 状态记在 data-st / data-next 上(React 不管这两个属性,重新渲染时不会被冲掉)
-    const state = new Int8Array(rows.length).fill(-1);
-    const end = civ.endYear;
-    let shownYear = -1;
-    /** "现在"线下面的第一条:还没发生的(在上面)之后,第一条已经发生的(它上面空出一道缝放线) */
-    let next: HTMLElement | null = null;
-    for (const el of box.querySelectorAll<HTMLElement>('[data-next]')) delete el.dataset.next;
-    const sync = (t: CivTime, jump: boolean) => {
-      const y = Math.min(end, Math.max(0, t.year ?? end));
-      let first: HTMLElement | null = null;
-      let future = false;
-      for (let i = 0; i < rows.length; i++) {
-        const s = ys[i] > y ? 2 : es[i] > y ? 1 : 0;
-        if (s !== state[i]) {
-          rows[i].dataset.st = ST[s];
-          state[i] = s;
-        }
-        if (items[i]) {
-          if (s === 2) future = true;
-          else if (!first && future) first = items[i];
-        }
-      }
-      const atEnd = y >= end;
-      if (atEnd) first = null;
-      if (first !== next) {
-        if (next) delete next.dataset.next;
-        if (first) first.dataset.next = '1';
-        next = first;
-      }
-      const line = nowRef.current;
-      if (!line) return;
-      line.style.display = next ? '' : 'none';
-      if (!next) {
-        // 都已发生:停在最上面(最新的);都还没发生:停在最下面
-        if (jump) box.scrollTop = future ? box.scrollHeight : 0;
-        return;
-      }
-      const pos = next.offsetTop - NOW_GAP / 2;
-      line.style.top = `${pos}px`;
-      if (Math.floor(y) !== shownYear) {
-        shownYear = Math.floor(y);
-        line.firstElementChild!.textContent = yearText(y);
-      }
-      const h = box.clientHeight;
-      const follow = t.playing || t.scrubbing;
-      if (jump || (follow && (pos < box.scrollTop + h * 0.12 || pos > box.scrollTop + h * 0.8))) {
-        box.scrollTop = Math.max(0, pos - h * FOLLOW_AT);
-      }
-    };
-    const jump = scrolledFor.current !== shown;
-    scrolledFor.current = shown;
-    sync(getCivTime(), jump);
-    return subscribeCivTime((t) => sync(t, false));
-  }, [civ, shown, expanded]);
+  // 人物卡片的"编年史"带着 at:打开后滚到那一年(滚过去就清掉)
+  useNowLine({ listRef, nowRef, civ, jumpKey: shown, deps: [expanded], at: view.at ?? null, onAt: () => setChronicle({ at: null }) });
 
   if (!civ) return <section className="chronicle" />;
 
@@ -224,7 +164,9 @@ export function Chronicle({ civ }: { civ: Civ | null }) {
           {top && b > a && <em>–{b}</em>}
         </span>
         <b className="tb-ev chron-type">{evLabel(e)}</b>
-        <span className="chron-text">{evText(e)}</span>
+        <span className="chron-text">
+          <EntryText civ={civ} e={e} />
+        </span>
         {kids && (
           <button
             className={`chron-fold${isOpen ? ' open' : ''}`}
@@ -314,4 +256,102 @@ export function Chronicle({ civ }: { civ: Civ | null }) {
       </div>
     </section>
   );
+}
+
+export interface NowLineOpts {
+  listRef: RefObject<HTMLDivElement>;
+  nowRef: RefObject<HTMLDivElement>;
+  civ: Civ | null;
+  /** 列表换了(换世界 / 换筛选)之后第一次同步滚到当前年份:换了它就算换了 */
+  jumpKey: unknown;
+  /** 别的会让行重新排的东西(展开的战争……) */
+  deps?: readonly unknown[];
+  /** 打开后滚到这一年(不给 = 滚到"现在"线);滚过去以后调 onAt */
+  at?: number | null;
+  onAt?: () => void;
+  /** 画"现在"线(不给 = 画;行不是一条时间线时不画,只淡显还没发生的) */
+  line?: boolean;
+}
+
+/**
+ * 列表跟着时间轴(编年史、人物页共用):行上带 data-y(开始年份)、data-e(结束年份)、data-top="1"(顶层的一行,
+ * 它的上一层是一项);还没发生的(在上面)淡显,"现在"线放在第一项已经发生的上方,回放 / 拖动时滚动。
+ * 这一步不经过 React(订阅时间轴,直接改行的 data-st 属性和 scrollTop),几千条也不会每帧重排
+ */
+export function useNowLine({ listRef, nowRef, civ, jumpKey, deps = [], at = null, onAt, line: withLine = true }: NowLineOpts) {
+  /** 列表换了之后第一次同步:滚到当前年份 */
+  const scrolledFor = useRef<unknown>(null);
+  useLayoutEffect(() => {
+    const box = listRef.current;
+    if (!box || !civ) return;
+    const rows = [...box.querySelectorAll<HTMLElement>('[data-y]')];
+    const ys = rows.map((r) => Number(r.dataset.y));
+    const es = rows.map((r) => Number(r.dataset.e));
+    const items = rows.map((r) => (r.dataset.top === '1' ? (r.parentElement as HTMLElement) : null));
+    // 状态记在 data-st / data-next 上(React 不管这两个属性,重新渲染时不会被冲掉)
+    const state = new Int8Array(rows.length).fill(-1);
+    const end = civ.endYear;
+    let shownYear = -1;
+    /** "现在"线下面的第一条:还没发生的(在上面)之后,第一条已经发生的(它上面空出一道缝放线) */
+    let next: HTMLElement | null = null;
+    for (const el of box.querySelectorAll<HTMLElement>('[data-next]')) delete el.dataset.next;
+    const sync = (t: CivTime, jump: boolean) => {
+      const y = Math.min(end, Math.max(0, t.year ?? end));
+      let first: HTMLElement | null = null;
+      let future = false;
+      for (let i = 0; i < rows.length; i++) {
+        const s = ys[i] > y ? 2 : es[i] > y ? 1 : 0;
+        if (s !== state[i]) {
+          rows[i].dataset.st = ST[s];
+          state[i] = s;
+        }
+        if (items[i]) {
+          if (s === 2) future = true;
+          else if (!first && future) first = items[i];
+        }
+      }
+      // 都已发生、或者不画线(行不是一条时间线):不空出放线的缝
+      if (y >= end || !withLine) first = null;
+      if (first !== next) {
+        if (next) delete next.dataset.next;
+        if (first) first.dataset.next = '1';
+        next = first;
+      }
+      const line = nowRef.current;
+      if (!line) return;
+      if (!withLine) {
+        line.style.display = 'none';
+        return;
+      }
+      line.style.display = next ? '' : 'none';
+      if (!next) {
+        // 都已发生:停在最上面(最新的);都还没发生:停在最下面
+        if (jump) box.scrollTop = future ? box.scrollHeight : 0;
+        return;
+      }
+      const pos = next.offsetTop - NOW_GAP / 2;
+      line.style.top = `${pos}px`;
+      if (Math.floor(y) !== shownYear) {
+        shownYear = Math.floor(y);
+        line.firstElementChild!.textContent = yearText(y);
+      }
+      const h = box.clientHeight;
+      const follow = t.playing || t.scrubbing;
+      if (jump || (follow && (pos < box.scrollTop + h * 0.12 || pos > box.scrollTop + h * 0.8))) {
+        box.scrollTop = Math.max(0, pos - h * FOLLOW_AT);
+      }
+    };
+    const jump = scrolledFor.current !== jumpKey;
+    scrolledFor.current = jumpKey;
+    sync(getCivTime(), jump);
+    if (at !== null) {
+      // 新的在上:滚到 at 那年或更早的第一条
+      const k = ys.findIndex((y, i) => items[i] && y <= at + 1e-6);
+      const row = k >= 0 ? rows[k] : null;
+      if (row) box.scrollTop = Math.max(0, row.offsetTop - box.clientHeight * 0.3);
+      onAt?.();
+    }
+    return subscribeCivTime((t) => sync(t, false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [civ, jumpKey, at, withLine, ...deps]);
 }

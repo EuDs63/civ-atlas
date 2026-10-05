@@ -217,7 +217,7 @@ function RegionInfo({ civ, raw, raster, id, year, names, ai, aiRef }: DetailProp
         )}
       </Stats>
       <OwnerBar civ={civ} spans={spans} year={year} />
-      <EventList upTo={upTo} />
+      <EventList upTo={upTo} civ={civ} />
       {mine.length > 0 && (
         <section className="cp-sec cp-mine">
           <div className="cp-sec-head">这一州的干预</div>

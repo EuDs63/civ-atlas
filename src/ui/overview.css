@@ -165,7 +165,8 @@
   overscroll-behavior: contain;
   padding: 4px 24px 16px;
 }
-.ov-body.tab-chronicle {
+.ov-body.tab-chronicle,
+.ov-body.tab-people {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -486,6 +487,35 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- 人物页(和编年史同一套行,多一列名字;朝代 / 国家的组名停在顶上) ---- */
+.chron-row.pp-row {
+  grid-template-columns: 60px 112px 1fr;
+}
+.pp-who {
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.pp-group {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 0 6px;
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.pp-group b {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 /* ---- 我的干预页 ---- */
 .ov-iv {
   display: flex;
@@ -710,6 +740,9 @@ button.ov-iv-text:hover {
   }
   .chron-kids {
     margin-left: 20px;
+  }
+  .chron-row.pp-row {
+    grid-template-columns: 44px 84px 1fr;
   }
   .chron-acts {
     margin-left: 0;

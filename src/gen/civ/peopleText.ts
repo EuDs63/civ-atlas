@@ -96,3 +96,95 @@ export function generalRef(civ: Civ, x: Person, year: Year): string {
 export function ageAt(x: Person, year: Year): number {
   return Math.floor(year - x.born);
 }
+
+// ---------------------------------------------------------------------------
+// 人物卡片、人物页用的写法
+
+/** 人物页、人物卡片上的名字:东方有称号的 称号 + 名字("圣宗柳玄"),没有的写名字;西幻 "阿尔德里克三世";统帅 = 名字 */
+export function personName(civ: Civ, x: Person): string {
+  if (x.role !== 'ruler') return x.name;
+  const p = polityOfPerson(civ, x);
+  if (p?.eastern) return x.title ? `${x.title}${x.name}` : x.name;
+  return rulerShort(civ, x);
+}
+
+/** 君主在位的最后那一刻(还在位 = 结束年份;身份、国号都按它) */
+function lastReignYear(civ: Civ, x: Person): Year {
+  const end = x.until ?? civ.endYear;
+  return Math.max(x.from ?? 0, end - 1 / 512);
+}
+
+/**
+ * 君主的身份(卡片上名字下面那行的开头):国名 + 君号,按在位最后那年 ——
+ * 东方 "大景皇帝""昌王""昌公""昌部首领""乌耐汗国可汗";西幻 "索拉特国王""提布里亚执政官"
+ */
+export function rulerRole(civ: Civ, x: Person): string {
+  const p = polityOfPerson(civ, x);
+  if (!p) return '';
+  const at = lastReignYear(civ, x);
+  const tier = tierFor(p, x, at);
+  if (p.eastern) {
+    if (p.lineage === 'khanate') return tier <= 0 ? `${polityTitles(p, at)[0]}首领` : `${polityName(p, at)}可汗`;
+    if (tier <= 0) return `${polityTitles(p, at)[0]}首领`;
+    if (tier >= 3) return `${polityShortTitle(p, 3, at)}皇帝`;
+    return `${core(polityRootAt(p, at))}${EAST_RANK[tier]}`;
+  }
+  return `${polityRootAt(p, at)}${(WEST_RANK[p.lineage ?? 'realm'] ?? WEST_RANK.realm)[tier]}`;
+}
+
+/** 统帅的身份:"大景将领"(国名按第一次领兵那年的简称) */
+export function generalRole(civ: Civ, x: Person): string {
+  const p = polityOfPerson(civ, x);
+  if (!p) return '将领';
+  const y = x.commands?.[0]?.from ?? x.born;
+  return `${polityShortTitle(p, clampTier(polityTierAt(p, y)), y)}将领`;
+}
+
+/** 共和国的执政官(写"执政""在任""任满",不写"君主""在位") */
+export function isConsul(civ: Civ, x: Person): boolean {
+  return x.role === 'ruler' && polityOfPerson(civ, x)?.lineage === 'republic';
+}
+
+/**
+ * 后一位君主是前一位的什么人:按两人的年纪差说(差十四岁以上是子,四十岁以上是孙,不然是弟;后一位年长的是兄)。
+ * 推演没有记父子,编年史的"其子 / 其弟"和人物卡片的"父 / 兄"都按这个算,两边一致
+ */
+export function kinOf(prev: Person, next: Person): '子' | '孙' | '弟' | '兄' {
+  const gap = next.born - prev.born;
+  if (gap >= 40) return '孙';
+  if (gap < 0) return '兄';
+  return gap >= 14 ? '子' : '弟';
+}
+
+/** kinOf 倒过来:前一位是后一位的什么人 */
+export const KIN_BACK: Record<ReturnType<typeof kinOf>, string> = { 子: '父', 孙: '祖父', 弟: '兄', 兄: '弟' };
+
+/** 君主的结局(卡片、人物页):"驾崩""遇弑""被废""殉国"……;还在位 = 空串 */
+export function rulerFateWord(civ: Civ, x: Person): string {
+  const p = polityOfPerson(civ, x);
+  if (!p || !x.fate) return '';
+  const tier = tierFor(p, x, lastReignYear(civ, x));
+  switch (x.fate) {
+    case 'died':
+      if (!p.eastern) return tier >= 1 ? '驾崩' : '去世';
+      return p.lineage === 'khanate' || tier <= 0 ? '去世' : tier >= 3 ? '驾崩' : '薨';
+    case 'murdered':
+      return p.eastern ? '遇弑' : '遇刺身亡';
+    case 'deposed':
+      return '被废';
+    case 'overthrown':
+      return '死于兵乱';
+    case 'fell':
+      return '亡国殉国';
+    case 'surrendered':
+      return '亡国出降';
+    case 'fled':
+      return '亡国出奔';
+    case 'merged':
+      return '国并入他国';
+    case 'retired':
+      return '任满';
+    case 'battle':
+      return '战死';
+  }
+}

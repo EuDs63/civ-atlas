@@ -1,7 +1,7 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
- * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
+ * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、人物(人物卡片、历代君主、编年史里的人名、人物页、搜人名)、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
  * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;创建时定下的种子、参数、地形在世界概览的"世界设定"页(只能看)
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
@@ -439,6 +439,94 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (!/收起侧栏\s*Ctrl\+\\/.test(tipSide)) errs.push(`快捷键:收起按钮的提示框没写键(${tipSide})`);
   if (!fold1 || fold2) errs.push(`快捷键:Ctrl+\\ 没有收起 / 展开左边的卡片(${fold1}、${fold2})`);
   if (fold3 || !searchAfterFold) errs.push(`快捷键:卡片收起着按 / ,应先展开再跳进搜索框(${fold3}、${searchAfterFold})`);
+  await page.evaluate(() => localStorage.clear());
+}
+
+// 人物:国家卡片的「君主」行和「历代君主」(当前那位标"当前"、点了打开他);人物卡片(名人第一行「事迹」、前任 / 继任、将领可点;
+// 「出征那年」跳时间轴;「编年史」打开这国的编年史;「复制生平」);编年史里的人名是蓝字,点了收起概览、打开这个人,不跳年份;
+// 世界概览的「人物」页(名人 / 君主 / 将领,「全部 N 位」进来停在这国的君主);搜"圣宗"第一个是这个人
+{
+  await page.goto(`${dev.url}/?seed=7&civYear=2512`);
+  await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const year = async () => Number((await page.locator('.timebar .tb-year').innerText()).replace(/[^\d]/g, ''));
+  const text = (sel: string) => page.locator(sel).first().innerText().then((t) => t.replace(/\s+/g, ' ')).catch(() => '');
+  await page.evaluate(() => (window as any).__wfSelect('polity', 0));
+  await page.waitForTimeout(600);
+  const stats = await text('.inspector .cp-stats');
+  const rulers = await page.locator('.inspector .cp-rulers .cp-dyn-row').count();
+  const cur = await text('.inspector .cp-rulers .cp-dyn-row.on');
+  const all = await text('.inspector [data-act=all-rulers]');
+  await page.click('.inspector .cp-rulers .cp-dyn-row.on');
+  await page.waitForTimeout(400);
+  const card1 = await text('.inspector .cp.pp');
+  const deed = await text('.inspector .cp.pp .cp-stats');
+  await page.click('.inspector .cp.pp [data-act=person-copy]');
+  await page.waitForTimeout(200);
+  const copied = (await page.evaluate(() => (window as any).__wfPersonText as string)) ?? '';
+  // 将领一行的名字 → 将领的卡片;出征那年
+  await page.locator('.inspector .cp.pp .cp-stats .ins-link', { hasText: '楚尧' }).first().click();
+  await page.waitForTimeout(400);
+  const card2 = await text('.inspector .cp.pp');
+  await page.click('.inspector [data-act=person-year]');
+  await page.waitForTimeout(300);
+  const y1 = await year();
+  // 编年史:这国、全部;正文里的人名是蓝字
+  await page.click('.inspector [data-act=person-chronicle]');
+  await page.waitForTimeout(600);
+  const chronOpen = await page.locator('.ov-tab.on[data-tab=chronicle]').count();
+  const names = await page.locator('.chron-list .pp-name').count();
+  const pick = page.locator('.chron-list .pp-name').first();
+  const pickName = (await pick.innerText().catch(() => '')).trim();
+  const pickId = Number(await pick.getAttribute('data-person').catch(() => '-1'));
+  await pick.click().catch(() => {});
+  await page.waitForTimeout(500);
+  const closed = !(await page.locator('.ov-root:not([hidden])').count());
+  const card3Id = Number(await page.locator('.inspector .cp.pp').getAttribute('data-person').catch(() => '-1'));
+  const y2 = await year();
+  // 人物页:名人(默认)→ 点一行;国家卡片「全部 N 位」→ 君主、只看这国
+  await openOverview(page, 'people');
+  await page.waitForTimeout(300);
+  const famousOn = await page.locator('.chronicle.people [data-list=famous].on').count();
+  const famous = await page.locator('.chronicle.people .pp-row').count();
+  const famousFirst = await text('.chronicle.people .pp-row');
+  await page.locator('.chronicle.people .pp-row').first().click();
+  await page.waitForTimeout(500);
+  const card4 = await text('.inspector .cp.pp');
+  await page.evaluate(() => (window as any).__wfSelect('polity', 0));
+  await page.waitForTimeout(400);
+  await page.click('.inspector [data-act=all-rulers]');
+  await page.waitForTimeout(500);
+  const rulersOn = await page.locator('.chronicle.people [data-list=rulers].on').count();
+  const polityPick = await page.locator('[data-act=people-polity]').inputValue();
+  const groups = await page.locator('.chronicle.people .pp-group').count();
+  const rows = await page.locator('.chronicle.people .pp-row').count();
+  await closeOverview();
+  // 搜索
+  await page.fill('.sidebar .search-input', '圣宗');
+  await page.waitForTimeout(300);
+  const hit = await text('.search-row');
+  const hitKind = await page.locator('.search-row').first().getAttribute('data-kind');
+  await page.locator('.search-row').first().click();
+  await page.waitForTimeout(400);
+  const card5 = await text('.inspector .cp.pp .pp-title');
+  console.log(
+    `人物:国家卡片「${stats.slice(0, 40)}…」,历代君主 ${rulers} 行、当前「${cur}」、「${all}」;卡片「${card1.slice(0, 50)}…」,复制 ${copied.length} 字;` +
+      `将领卡片「${card2.slice(0, 30)}…」、出征那年 → ${y1};编年史开 ${chronOpen}、蓝字 ${names} 个,点「${pickName}」→ 收起 ${closed}、卡片 ${card3Id}/${pickId}、年份 ${y1} → ${y2};` +
+      `人物页名人 ${famousOn}/${famous} 行「${famousFirst.slice(0, 30)}」→ 卡片「${card4.slice(0, 20)}」;全部 N 位 → 君主 ${rulersOn}、只看 ${polityPick}、${groups} 组 ${rows} 行;搜"圣宗"「${hit}」(${hitKind})→「${card5}」`,
+  );
+  if (!/君主\s*圣宗柳玄\s*2485 年即位/.test(stats)) errs.push(`人物:国家卡片没有「君主」行(${stats.slice(0, 80)})`);
+  if (rulers !== 5 || !/圣宗柳玄\s*当前/.test(cur) || !/全部 \d+ 位/.test(all)) errs.push(`人物:国家卡片的历代君主不对(${rulers} 行;${cur};${all})`);
+  if (!/圣宗柳玄/.test(card1) || !/大景皇帝，2485–2519 年在位/.test(card1) || !/事迹\s*在位时得五州/.test(deed) || !/前任\s*明宗柳尧霄\s*兄/.test(deed))
+    errs.push(`人物:君主卡片不对(${card1.slice(0, 120)})`);
+  if (!copied.startsWith('圣宗柳玄\n大景皇帝') || !copied.includes('在位时：')) errs.push(`人物:复制生平不对(${copied.slice(0, 60)})`);
+  if (!/楚尧\s*大景将领，2478–2509 年领兵/.test(card2) || y1 !== 2478) errs.push(`人物:将领卡片 / 出征那年不对(${card2.slice(0, 60)};${y1})`);
+  if (!chronOpen || names < 3 || !closed || pickId < 0 || card3Id !== pickId || y2 !== y1) errs.push(`人物:编年史里的人名点不开,或点了跳了年份(${chronOpen};${names};${closed};${card3Id}/${pickId};${y1} → ${y2})`);
+  if (!famousOn || famous < 20 || !card4) errs.push(`人物:人物页的名人不对,或点一行没打开卡片(${famousOn};${famous};${card4.slice(0, 30)})`);
+  if (!rulersOn || polityPick !== '0' || groups < 1 || rows !== 102) errs.push(`人物:「全部 N 位」没有打开这国的君主(${rulersOn};${polityPick};${groups};${rows})`);
+  if (!/^圣宗柳玄 大景皇帝，2485–2519$/.test(hit) || hitKind !== 'person' || card5 !== '圣宗柳玄') errs.push(`人物:搜"圣宗"不对(${hit};${hitKind};${card5})`);
+  await page.fill('.sidebar .search-input', '');
+  await page.keyboard.press('Escape');
   await page.evaluate(() => localStorage.clear());
 }
 
@@ -2482,7 +2570,7 @@ for (const style of ['realistic', 'fantasy']) {
       `搜「${name}」→ ${rows.join('、')};点第一条:结果收起 ${pickClosed}、选中 ${selected};成书的写什么:${scopes}(默认整个世界 ${worldFirst});` +
       `面板里写国史 → 默认「${polityDefault}」`,
   );
-  if (placeholder !== '搜索国家、城市、民族、山河') errs.push(`搜索:占位文字不对(${placeholder})`);
+  if (placeholder !== '搜索国家、城市、人物、山河') errs.push(`搜索:占位文字不对(${placeholder})`);
   if (!name || !(partial >= 1)) errs.push(`搜索:打两个字没有结果(${name},${partial} 条)`);
   if (!escClosed) errs.push('搜索:Esc 没清空搜索、回到世界首页');
   if (!rows.length || !rows.some((r) => r.includes(name))) errs.push(`搜索:输入名字没搜到(${rows.join('、')})`);

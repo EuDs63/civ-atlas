@@ -9,7 +9,8 @@
  *   Stats        "概况":一组圆角的行,左边名目、右边数值;children = 接在后面的行(Row)
  *   SegBar       分段色条(历任归属):按时长分段,点一段跳到它开始的那年;OwnerBar = 历任归属(城、州)
  *   Spark        小柱图(疆域、兴衰)
- *   EventList    大事(最近几条,点了跳到那一年、地图上闪出事发地)
+ *   EventList    大事(最近几条,点了跳到那一年、地图上闪出事发地;正文里的人名是蓝字,点了看这个人)
+ *   EntryText    纪事正文,写到的人名变成能点的蓝字(编年史、大事、最近大事、人物卡片共用)
  *   Foot         底部按钮(干预页、立国 / 划给的表单页:返回、确定)
  *   YearStepper  生效年份:−100 −10 [年份] +10,下面一句"该年之前的历史不变,之后重新推演。"
  *   useRevealAi  名字由来 / AI 起名:内容在面板最下面,点了滚过去让它露出来
@@ -26,6 +27,8 @@ import { useAiName, type AiName, type AiNameProps } from './AiNamePanel';
 import { selectionLon } from './ProjectionPanel';
 import { requestMapCenter } from './mapWrap';
 import { evLabel, evText, evType } from './timelineLayout';
+import { personMentions } from '../gen/civ/peopleInfo';
+import { closeOverview } from './overviewStore';
 import { Icon, type IconName } from './icons';
 import { MenuItem, PopMenu } from './PopMenu';
 import { useAiOn } from '../ai/client';
@@ -43,6 +46,20 @@ export interface DetailProps {
   /** 时间轴当前那一年(取整) */
   year: number;
   names: Record<string, string>;
+}
+
+/** 复制文字(没有剪贴板权限时退回老办法) */
+export async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = Object.assign(document.createElement('textarea'), { value: text });
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
 }
 
 /** 时间轴跳到某一年(暂停) */
@@ -296,24 +313,80 @@ export function Spark({ bars, title, fill }: { bars: Bar[]; title?: string; fill
 // ---------------------------------------------------------------------------
 // 相关事件
 
+/** 选中一个人(人物卡片);世界概览开着就收起 */
+export function selectPerson(id: number) {
+  closeOverview();
+  setSelection({ kind: 'person', id });
+}
+
+/**
+ * 纪事正文:写到的人名变成蓝字,点了看这个人(不触发整行的点击:整行还是跳到那一年);self = 不变蓝的那个人(他自己的卡片里)。
+ * 一行本身是按钮,蓝字不能再是按钮:用 span + 点击
+ */
+export function EntryText({ civ, e, self = -1 }: { civ?: Civ; e: Pick<ChronicleEntry, 'text' | 'people' | 'year'>; self?: number }) {
+  const text = evText(e);
+  if (!civ || !e.people?.length) return <>{text}</>;
+  return (
+    <>
+      {personMentions(civ, text, e.people, self, e.year).map((m, i) =>
+        m.person === undefined ? (
+          m.text
+        ) : (
+          <span
+            key={i}
+            className="pp-name"
+            data-person={m.person}
+            title="看这个人"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              selectPerson(m.person!);
+            }}
+          >
+            {m.text}
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
 /**
  * 大事:upTo = 到当前年份为止的(按年份排好),显示最近 limit 条(默认 5 条,新的在上)。
- * more = 标题右边的"全部 N 件"(不给 = 只写条数);empty = 一条都没有时写的一行(不给 = 整块不显示)
+ * more = 标题右边的"全部 N 件"(不给 = 只写条数);empty = 一条都没有时写的一行(不给 = 整块不显示);
+ * civ = 正文里的人名变成蓝字(不给 = 纯文字);title = 标题(默认"大事");limit = 最多列几条;self = 人物卡片里他自己(名字不变蓝)
  */
-export function EventList({ upTo, more, empty, limit = 5 }: { upTo: readonly ChronicleEntry[]; more?: ReactNode; empty?: string; limit?: number }) {
+export function EventList({
+  upTo,
+  more,
+  empty,
+  civ,
+  title = '大事',
+  limit = 5,
+  self,
+}: {
+  upTo: readonly ChronicleEntry[];
+  more?: ReactNode;
+  empty?: string;
+  civ?: Civ;
+  title?: string;
+  limit?: number;
+  self?: number;
+}) {
   if (!upTo.length && empty === undefined) return null;
   const recent = upTo.slice(-limit).reverse();
   return (
     <section className="cp-sec cp-events">
       <div className="cp-sec-head cp-events-head">
-        <span>大事</span>
+        <span>{title}</span>
         {more || (upTo.length > 0 && <span className="cp-count">{upTo.length} 件</span>)}
       </div>
       <div className="cp-group">
         {recent.map((e: ChronicleEntry) => (
-          <button key={e.id} className="cp-ev" data-ev={evType(e)} title={evLabel(e)} onClick={() => pickChronicleEntry(e)}>
+          <button key={`${e.kind}:${e.id}`} className="cp-ev" data-ev={evType(e)} title={evLabel(e)} onClick={() => pickChronicleEntry(e)}>
             <span className="cp-ev-year">{Math.floor(e.year)}</span>
-            <span className="cp-ev-text">{evText(e)}</span>
+            <span className="cp-ev-text">
+              <EntryText civ={civ} e={e} self={self} />
+            </span>
           </button>
         ))}
         {!recent.length && <span className="cp-none">{empty}</span>}

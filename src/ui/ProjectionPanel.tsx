@@ -11,6 +11,7 @@ import { PROJECTIONS, PROJECTION_IDS, type ProjectionId } from '../render/projec
 import { formatLon, lonOfX, requestMapCenter, useMapCenter } from './mapWrap';
 import { GLOBE_READY, setGraticule, setMapMoving, setProjection, useGraticule, useProjection, type MapProjection } from './projection';
 import type { MapSelection } from './civView';
+import { mapTarget } from './flyTo';
 
 /** 悬停时的一句用途(弹层里地方小,比 render/projection.ts 的说明短) */
 const SHORT_HINT: Partial<Record<ProjectionId, string>> = {
@@ -119,10 +120,12 @@ export function ProjectionSection() {
 }
 
 /**
- * 选中的东西在哪条经线上(国家 = 当年的国都;城 = 城址;地理实体 = 路径中点;州 = 州府;
+ * 选中的东西在哪条经线上(人物按他的国家;国家 = 当年的国都;城 = 城址;地理实体 = 路径中点;州 = 州府;
  * 信仰 = 圣城 / 教派分出时的国都 / 民间信仰的民族发源州);找不到 = null
  */
-export function selectionLon(world: World, civ: Civ, sel: MapSelection, year: number): number | null {
+export function selectionLon(world: World, civ: Civ, selIn: MapSelection, year: number): number | null {
+  const sel = mapTarget(civ, selIn);
+  if (!sel) return null;
   const { x } = world.mesh;
   const W = world.width;
   if (sel.kind === 'settlement') {

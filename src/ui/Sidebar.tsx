@@ -29,7 +29,7 @@ import { openAiSettings } from './AiSettings';
 import { openHistoryBook } from './bookStore';
 import { openOverview } from './overviewStore';
 import { searchCiv, type SearchHit } from './searchIndex';
-import { countUpTo, evText } from './timelineLayout';
+import { countUpTo } from './timelineLayout';
 import { Icon } from './icons';
 import { AiMenuItem, AiSettingsItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
@@ -37,7 +37,7 @@ import { APP_VERSION } from './version';
 import { useCoarse } from './device';
 import { keyLabel } from './shortcuts';
 import { openShortcuts } from './ShortcutsDialog';
-import { jumpTo, rgb } from './panelParts';
+import { EntryText, jumpTo, rgb } from './panelParts';
 import { collapseSide, expandSide, useSide } from './sideStore';
 import './sidebar.css';
 
@@ -163,7 +163,7 @@ export function SearchField({ s, civ, onFocus }: { s: SearchState; civ: Civ | nu
         className="search-input"
         data-act="search"
         value={q}
-        placeholder="搜索国家、城市、民族、山河"
+        placeholder="搜索国家、城市、人物、山河"
         spellCheck={false}
         autoComplete="off"
         disabled={!civ || !civ.viable}
@@ -451,7 +451,9 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
             {recent.map((e) => (
               <button key={e.id} className="sb-row ev" onClick={() => pickChronicleEntry(e)}>
                 <span className="sb-year">{Math.floor(e.year)}</span>
-                <span className="sb-ev-text">{evText(e)}</span>
+                <span className="sb-ev-text">
+                  <EntryText civ={civ!} e={e} />
+                </span>
               </button>
             ))}
           </div>

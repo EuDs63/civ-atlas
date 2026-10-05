@@ -190,6 +190,8 @@ export interface ChronicleView {
   major: boolean;
   /** 只看这个国家的事(null = 全部国家;编年史页顶上的国家下拉框、国家面板的"编年史"设它) */
   polity: number | null;
+  /** 打开后滚到这一年(人物卡片的"编年史":滚到他在位 / 领兵那段;滚过去就清掉) */
+  at?: number | null;
 }
 
 function chronFromUrl(): ChronicleView {
@@ -277,14 +279,16 @@ export function useChroniclePick(): { entry: ChronicleEntry | null; stamp: numbe
 
 /**
  * 选中的东西(这个世界里的编号;改名不改编号,换世界时清掉):
- * 国家、城(含故城遗址)、地理实体(civ.places 的下标)、州(没点到别的东西时)、信仰(civ.religion.faiths 的下标)
+ * 国家、城(含故城遗址)、地理实体(civ.places 的下标)、州(没点到别的东西时)、信仰(civ.religion.faiths 的下标)、
+ * 人物(civ.people 的下标;点编年史、卡片、人物页里的人名选中,地图上亮出、飞到他的国家,见 flyTo.ts 的 mapTarget)
  */
 export type MapSelection =
   | { kind: 'polity'; id: number }
   | { kind: 'settlement'; id: number }
   | { kind: 'place'; id: number }
   | { kind: 'region'; id: number }
-  | { kind: 'faith'; id: number };
+  | { kind: 'faith'; id: number }
+  | { kind: 'person'; id: number };
 
 export interface SelectionState {
   sel: MapSelection | null;

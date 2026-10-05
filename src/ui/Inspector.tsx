@@ -6,6 +6,7 @@
  * - 城:CityPanel.tsx(级别 / 人口 / 做过国都、兴衰、历任归属、相关事件;迁都到这里、看所属国家)
  * - 地理实体:PlacePanel.tsx(按种类的几个数、当年在哪些国家境内;AI 起名)
  * - 州(没点到别的东西时):RegionPanel.tsx(主体民族 / 宜居度 / 人口、历任归属、州里的城、相关事件;在这里立国、划给…)
+ * - 人物(点人名):PersonPanel.tsx(生卒、在位 / 领兵、前任继任、结局、他在台上那几年的事)
  * - 信仰(信仰图层上点陆地、侧栏的信仰组、国家卡片的「国教」):FaithPanel.tsx(类型、创立、圣城、信众、国教、教派、大事)
  *
  * 四种面板用同一套零件(panelParts.tsx):顶部、三格数字、色条、小柱图、事件列表、底部按钮。
@@ -28,6 +29,7 @@ import { CountryPanel } from './CountryPanel';
 import { CityPanel } from './CityPanel';
 import { PlacePanel } from './PlacePanel';
 import { RegionPanel } from './RegionPanel';
+import { PersonPanel } from './PersonPanel';
 import { FaithPanel } from './FaithPanel';
 import { setPanelTab, setSheet, setSheetDrag, usePanel } from './panelStore';
 import { ownersOf } from './panelData';
@@ -77,6 +79,7 @@ export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: C
   else if (sel.kind === 'settlement' && civ.settlements[sel.id]) body = <CityPanel key={stable} {...common} id={sel.id} />;
   else if (sel.kind === 'place' && civ.places[sel.id]) body = <PlacePanel key={stable} {...common} id={sel.id} />;
   else if (sel.kind === 'region' && sel.id >= 0 && sel.id < civ.regions.count) body = <RegionPanel key={stable} {...common} id={sel.id} />;
+  else if (sel.kind === 'person' && civ.people?.[sel.id]) body = <PersonPanel key={stable} {...common} id={sel.id} />;
   else if (sel.kind === 'faith' && civ.religion?.faiths[sel.id]) body = <FaithPanel key={stable} {...common} id={sel.id} />;
   if (!body) return null;
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();

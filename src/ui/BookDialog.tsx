@@ -66,7 +66,7 @@ function Dialog({ civ }: { civ: Civ }) {
     const b = getBook();
     const pend = b.dialog.polity === null ? b.pending : null;
     const preset = b.dialog.polity ?? (pend?.scope.kind === 'polity' ? pend.scope.polity : null);
-    const chosen = sel?.kind === 'polity' ? sel.id : null;
+    const chosen = sel?.kind === 'polity' ? sel.id : sel?.kind === 'person' ? (civ.people?.[sel.id]?.polity ?? null) : null;
     return {
       polity: preset !== null && civ.polities[preset] ? preset : chosen !== null && civ.polities[chosen] ? chosen : null,
       scope: (preset !== null && civ.polities[preset] ? 'polity' : 'world') as 'world' | 'polity',

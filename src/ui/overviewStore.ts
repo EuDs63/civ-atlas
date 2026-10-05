@@ -4,6 +4,7 @@
  *   openOverview()                               打开(停在上次那一页)
  *   openOverview('chronicle', { polity: 3 })     打开编年史,只看 3 号国家的事
  *   openOverview('interventions')                打开"我的干预"
+ *   openPeople({ list: 'rulers', polity: 3 })    打开人物页,看 3 号国家的历代君主(usePeople() 读人物页的筛选)
  *   closeOverview()                              收起(编年史的"只看这一国"一起清掉)
  *   useOverview() / getOverview()                { open, tab }
  *
@@ -14,9 +15,9 @@
 import { useSyncExternalStore } from 'react';
 import { getChronicle, setChronicle, subscribeChronicle, type ChronicleView } from './civView';
 
-export type OverviewTab = 'countries' | 'chronicle' | 'interventions' | 'genesis';
+export type OverviewTab = 'countries' | 'chronicle' | 'people' | 'interventions' | 'genesis';
 
-export const OVERVIEW_TABS: readonly OverviewTab[] = ['countries', 'chronicle', 'interventions', 'genesis'];
+export const OVERVIEW_TABS: readonly OverviewTab[] = ['countries', 'chronicle', 'people', 'interventions', 'genesis'];
 
 export interface OverviewState {
   open: boolean;
@@ -28,6 +29,8 @@ export interface OverviewOpts {
   polity?: number | null;
   /** 编年史只看大事(不给 = 不变) */
   major?: boolean;
+  /** 编年史打开后滚到这一年(不给 = 滚到时间轴当前那年) */
+  at?: number;
 }
 
 const chron0 = getChronicle();
@@ -71,9 +74,10 @@ export function useOverview(): OverviewState {
 
 /** 打开概览(不给 tab = 停在上次那一页);opts 给编年史页设筛选 */
 export function openOverview(tab?: OverviewTab, opts: OverviewOpts = {}) {
-  const patch: { polity?: number | null; major?: boolean } = {};
+  const patch: Partial<ChronicleView> = {};
   if (opts.polity !== undefined) patch.polity = opts.polity;
   if (opts.major !== undefined) patch.major = opts.major;
+  if (opts.at !== undefined) patch.at = opts.at;
   if (Object.keys(patch).length) setChronicle(patch);
   set({ open: true, tab: tab ?? state.tab });
 }
@@ -85,4 +89,40 @@ export function closeOverview() {
 /** 换页(开着时) */
 export function setOverviewTab(tab: OverviewTab) {
   set({ ...state, tab });
+}
+
+// ---- 人物页的筛选:名人 / 君主 / 将领,只看哪一国 ----
+
+export type PeopleList = 'famous' | 'rulers' | 'generals';
+
+export interface PeopleView {
+  list: PeopleList;
+  /** 只看这一国(null = 全部国家) */
+  polity: number | null;
+}
+
+let people: PeopleView = { list: 'famous', polity: null };
+const peopleSubs = new Set<() => void>();
+
+export function getPeople(): PeopleView {
+  return people;
+}
+
+export function setPeople(patch: Partial<PeopleView>) {
+  people = { ...people, ...patch };
+  peopleSubs.forEach((f) => f());
+}
+
+export function usePeople(): PeopleView {
+  return useSyncExternalStore(
+    (f) => (peopleSubs.add(f), () => peopleSubs.delete(f)),
+    getPeople,
+    getPeople,
+  );
+}
+
+/** 打开概览的人物页(国家卡片的"全部 N 位" = 这国的历代君主) */
+export function openPeople(patch: Partial<PeopleView> = {}) {
+  setPeople(patch);
+  set({ open: true, tab: 'people' });
 }

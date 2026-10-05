@@ -1,24 +1,27 @@
 /**
- * 右上"搜索"的查找(纯计算,不碰 DOM;单测直接调):按名字找国家(含已亡)、城、民族、信仰、山河湖海岛。
+ * 右上"搜索"的查找(纯计算,不碰 DOM;单测直接调):按名字找国家(含已亡)、城、人物、民族、信仰、山河湖海岛。
  *
  * - 用改过名的那份历史(editsStore 套过的 civ):改过的名字能搜到
  * - 国家按它实际用过的国号找(改朝换代前的"大景"也算),显示时间轴这一年的国号(已亡的写最后的国号)
- * - 排序:名字完全相同 > 开头就对上 > 名字里有;同样对得上时 国家 > 城 > 民族 > 信仰 > 山河;同类里大的在前
+ * - 人物按名字、称号找("柳玄""圣宗""圣宗柳玄""阿尔德里克三世"),右边写"大景皇帝，2485–2519";名人在前
+ * - 排序:名字完全相同 > 开头就对上 > 名字里有;同样对得上时 国家 > 城 > 人物 > 民族 > 信仰 > 山河;同类里大的在前
  * - 什么都没输:列出这一年最大的几个国家
  */
 import type { Civ, Place, Polity } from '../gen/civ/types';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
 import { cultureLabel } from '../gen/civ/display';
 import { capitalAt, polityAlive, polityName, populationAt } from '../gen/civ/growth';
+import { personFame, personSpan } from '../gen/civ/peopleInfo';
+import { generalRole, personName, rulerRole, rulerShort } from '../gen/civ/peopleText';
 import { faithCounts } from '../gen/civ/religion';
 import type { MapSelection } from './civView';
 
 export interface SearchHit {
-  kind: 'polity' | 'settlement' | 'culture' | 'faith' | 'place';
+  kind: 'polity' | 'settlement' | 'person' | 'culture' | 'faith' | 'place';
   id: number;
   /** 显示的名字 */
   name: string;
-  /** 右侧小字:"12 州" / "国都 竹影城" / "城，属大澜王朝" / "民族" / "宗教" / "山脉" */
+  /** 右侧小字:"12 州" / "国都 竹影城" / "城，属大澜王朝" / "大景皇帝，2485–2519" / "民族" / "宗教" / "山脉" */
   sub: string;
   /** 颜色块 */
   color: string;
@@ -122,7 +125,7 @@ interface Scored extends SearchHit {
   weight: number;
 }
 
-const KIND_ORDER: Record<SearchHit['kind'], number> = { polity: 0, settlement: 1, culture: 2, faith: 3, place: 4 };
+const KIND_ORDER: Record<SearchHit['kind'], number> = { polity: 0, settlement: 1, person: 2, culture: 3, faith: 4, place: 5 };
 
 /** 按名字找;q 为空 = 这一年最大的几个国家 */
 export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARCH_LIMIT): SearchHit[] {
@@ -191,6 +194,30 @@ export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARC
       select: { kind: 'settlement', id: s.id },
       score: m,
       weight: built && !ruined ? populationAt(s, year) : 0,
+    });
+  }
+  // 人物:名字、称号、称号 + 名字
+  for (const x of civ.people ?? []) {
+    const P = civ.polities[x.polity];
+    if (!P) continue;
+    const forms = [personName(civ, x), x.name];
+    if (x.role === 'ruler') {
+      forms.push(rulerShort(civ, x));
+      if (x.title) forms.push(x.title);
+    }
+    const m = best(forms, q);
+    if (m < 0) continue;
+    const span = personSpan(x);
+    const years = span.until !== null ? `${Math.floor(span.from)}–${Math.floor(span.until)}` : `${Math.floor(span.from)} 年起`;
+    out.push({
+      kind: 'person',
+      id: x.id,
+      name: personName(civ, x),
+      sub: `${x.role === 'ruler' ? rulerRole(civ, x) : generalRole(civ, x)}，${years}`,
+      color: rgb(P.color),
+      select: { kind: 'person', id: x.id },
+      score: m,
+      weight: (personFame(civ, x)?.score ?? 0) * 1e4 + ((span.until ?? civ.endYear) - span.from),
     });
   }
   // 民族:"某某" 和 "某某族" 都算

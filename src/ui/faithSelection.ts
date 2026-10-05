@@ -6,9 +6,11 @@
 import type { Civ } from '../gen/civ/types';
 import type { SelectionTarget } from '../render/civ/highlight';
 import type { MapSelection } from './civView';
+import { mapTarget } from './flyTo';
 
-/** 地图上画选中用的目标(信仰换成它的城;其余照旧) */
-export function selectionOnMap(civ: Civ | null, sel: MapSelection | null): SelectionTarget | null {
+/** 地图上画选中用的目标(人物换成他的国家,见 flyTo.ts 的 mapTarget;信仰换成它的城;其余照旧) */
+export function selectionOnMap(civ: Civ | null, picked: MapSelection | null): SelectionTarget | null {
+  const sel = mapTarget(civ, picked);
   if (!sel || sel.kind !== 'faith') return sel;
   const f = civ?.religion?.faiths[sel.id];
   const city = f?.kind === 'great' ? f.holy : f?.kind === 'sect' ? f.seat : undefined;

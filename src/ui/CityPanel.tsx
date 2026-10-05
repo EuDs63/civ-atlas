@@ -208,7 +208,7 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
         </Stats>
         <Trend civ={civ} s={s} year={year} from={s.founded} to={last} spans={spans} />
         <OwnerBar civ={civ} spans={spans} year={year} />
-        <EventList upTo={upTo} />
+        <EventList upTo={upTo} civ={civ} />
         <AiBox ai={ai} aiRef={aiRef} />
       </div>
     </div>
