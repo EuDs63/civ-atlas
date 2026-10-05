@@ -154,7 +154,7 @@ import { CIV_SHOW_OFF, drawCivOverlay } from '../render/civ/overlay';
 import { getPolityPick, interventionActorThen, interventionDoneText, setPickHover, setPolityPick, usePolityPick } from './Interventions';
 import { Inspector } from './Inspector';
 import { TargetLayer } from './TargetPlates';
-import { FLY_MS, curvedFly, easeOutCubic, flatFly, selectionFocus, selectionKey, sideRoom, phoneFree, type FlyGoal } from './flyTo';
+import { FLY_MS, animProgress, curvedFly, easeOutCubic, flatFly, selectionFocus, selectionKey, sideRoom, phoneFree, type FlyGoal } from './flyTo';
 import { collapseSide, expandSide, getSide, setSideHold, useSide } from './sideStore';
 import { getPanel, setWorldSheet, usePanel } from './panelStore';
 import { closeOverview } from './overviewStore';
@@ -1565,7 +1565,7 @@ export function App() {
     const t0 = performance.now();
     let raf = 0;
     const step = (now: number) => {
-      const t = Math.min(1, (now - t0) / 300);
+      const t = animProgress(now, t0, 300);
       // 用户按下地图 / 又飞走了:让给它们
       if (flyRaf.current || drag.current) return;
       const v = { k: v0.k, x: v0.x, y: v0.y + (y1 - v0.y) * easeOutCubic(t) };
@@ -1836,7 +1836,7 @@ export function App() {
     let raf = 0;
     setMapMoving(true);
     const step = (now: number) => {
-      const t = Math.min(1, (now - t0) / 400);
+      const t = animProgress(now, t0, 400);
       const e = 1 - (1 - t) ** 3;
       if (dLon) publishMapCenter(wrapLon(lon0 + dLon * e));
       setView(clampRef.current({ k: v0.k, x: v0.x, y: v0.y + (toY - v0.y) * e }, W, H));
@@ -1890,7 +1890,7 @@ export function App() {
     const t0 = performance.now();
     let raf = 0;
     const step = (now: number) => {
-      const t = Math.min(1, (now - t0) / 400);
+      const t = animProgress(now, t0, 400);
       const e = 1 - (1 - t) ** 3;
       const v = { k: v0.k, x: v0.x + (to.x - v0.x) * e, y: v0.y + (to.y - v0.y) * e };
       setView(clampRef.current(v, W, H));
@@ -1929,7 +1929,7 @@ export function App() {
     if (m) setMapMoving(true);
     // 用户自己拖动 / 缩放时 stopFly 让给用户(按下地图、滚轮、右下的 + −)
     const frame = (now: number) => {
-      const t = Math.min(1, (now - t0) / FLY_MS);
+      const t = animProgress(now, t0, FLY_MS);
       const r = step(easeOutCubic(t));
       if (r.lon !== null) publishMapCenter(wrapLon(r.lon));
       viewRef.current = r.v;

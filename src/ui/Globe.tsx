@@ -70,6 +70,7 @@ import { getCivFeed, subscribeCivFeed } from './CivLayer';
 import { getProjection, lastFlatProjection, setProjection, useGraticule, useProjection } from './projection';
 import { clearToast, showToast } from './toastStore';
 import { getMapCenter, publishMapCenter } from './mapWrap';
+import { animProgress } from './flyTo';
 import { drawSettlementMarks, type SettlementMarkInfo } from '../render/civ/settlements';
 import { REF_MAP_CSS, drawPlacedLabels, placeMap, placedMarkBox, type LabelItem, type LabelMark, type LabelView, type Placement } from '../render/labels/draw';
 import { glyphBox } from '../render/labels/layout';
@@ -1065,7 +1066,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     const t0 = performance.now();
     let more = false;
     if (s.fly) {
-      const t = Math.min(1, (now - s.fly.t0) / s.fly.dur);
+      const t = animProgress(now, s.fly.t0, s.fly.dur);
       const e = 1 - (1 - t) ** 3;
       s.view = clampView(lerpView(s.fly.from, s.fly.to, e));
       if (t < 1) more = true;

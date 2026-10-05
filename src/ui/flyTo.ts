@@ -22,6 +22,15 @@ import { sideShown } from './sideStore';
 export const FLY_MS = 600;
 export const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 
+/**
+ * 动画走到哪了(0…1)。requestAnimationFrame 给的帧时刻可能比起步时记下的 performance.now() 还早
+ * (主线程刚忙过一阵,比如下令后重推历史):早于起点按 0 算。不夹的话缓动会往回外推,
+ * 缩放按比例插值的那一帧能放大到天文数字倍(地名排版跟着卡死)
+ */
+export function animProgress(now: number, t0: number, ms: number): number {
+  return Math.max(0, Math.min(1, (now - t0) / ms));
+}
+
 /** 看全疆域时上下留出的地方:右上的图层按钮 / 提示条、时间轴(宽屏左边让出侧栏卡片,见 sideRoom) */
 const TOP_ROOM = 64;
 const BOTTOM_ROOM = 104;
