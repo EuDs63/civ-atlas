@@ -1147,13 +1147,84 @@ export function removeSyncedWorld(id: string) {
   changed();
 }
 
-/** 退出登录时选了"从这台设备上删掉":浏览器里的世界全删 */
-export function removeAllWorlds() {
-  const kv = store();
-  for (const k of kv.keys()) if ([PREFIX, THUMB, META, NOTES, LEGACY].some((p) => k.startsWith(p))) kv.remove(k);
+/**
+ * 退出登录时选了"从这台设备上删掉":浏览器里的世界全删;返回删干净了没有。
+ * 浏览器不让删、看不了还剩什么 = false:删掉了的几样原样放回去(不然剩下半个世界,下次同步会把缺了东西的那份存进账号),
+ * 正在看的世界接着用
+ */
+export function removeAllWorlds(): boolean {
+  const ours = (k: string) => [PREFIX, THUMB, META, NOTES, LEGACY].some((p) => k.startsWith(p));
+  if (!wipeBrowser(ours)) {
+    // 正在看的那份没能放回去:马上再存一次
+    if (current?.wrote != null && store().get(PREFIX + current.id) === null) saveCurrent(true);
+    changed();
+    return false;
+  }
+  for (const k of [...mem.keys()]) if (ours(k)) mem.delete(k);
   current = null;
   stopThumb();
   changed();
+  return true;
+}
+
+/**
+ * 直接对浏览器存储删一遍、再看一遍还剩没剩。浏览器存储能不能用以这时直接看的为准(打开页面时探测不成功、
+ * 后来出错退回内存的,浏览器里都可能还存着);看不了 = false。这个页面存在内存里、浏览器里却还存着的 = false,不删
+ * (页面没看到它们,不知道同步过没有)。没删干净:删掉了的按删之前的样子放回去
+ */
+function wipeBrowser(ours: (k: string) => boolean): boolean {
+  let s: Storage | undefined;
+  try {
+    s = (globalThis as { localStorage?: Storage }).localStorage;
+  } catch {
+    return false;
+  }
+  // 没有浏览器存储(不在网页里):世界只在内存里
+  if (!s) return true;
+  const st = s;
+  // 这个页面存在内存里(打开时探测不成功、后来出错退回内存):浏览器里还存着的这个页面没列出来、也就没同步过,删了就没了
+  if (local === undefined) store();
+  const fallback = local === null;
+  const left = () => {
+    const out: string[] = [];
+    for (let i = 0; i < st.length; i++) {
+      const k = st.key(i);
+      if (k !== null && ours(k)) out.push(k);
+    }
+    return out;
+  };
+  const before = new Map<string, string>();
+  try {
+    for (const k of left()) {
+      const v = st.getItem(k);
+      if (v !== null) before.set(k, v);
+    }
+  } catch {
+    return false;
+  }
+  if (fallback && before.size) return false;
+  let ok = true;
+  for (const k of before.keys()) {
+    try {
+      st.removeItem(k);
+    } catch {
+      ok = false;
+    }
+  }
+  try {
+    if (ok && left().length) ok = false;
+  } catch {
+    ok = false;
+  }
+  if (ok) return true;
+  for (const [k, v] of before) {
+    try {
+      if (st.getItem(k) === null) st.setItem(k, v);
+    } catch {
+      /* 放不回去的:正在看的那份由上面再存一次 */
+    }
+  }
+  return false;
 }
 
 /** 测试用:清空内存里的状态(不动浏览器存储) */

@@ -57,9 +57,14 @@ interface Known {
   rev: number;
   /** 那时内容的指纹 */
   sum: string;
+  /** 那时不算缩略图的指纹(看哪边改过时用:缩略图会自己重画,不算改了这个世界) */
+  core?: string;
   /** 那是什么时候(ISO) */
   at: string;
 }
+
+/** Known.rev 记成这个 = 这里的那份比账号里的旧、缺了东西(退出时删了一半没能放回去),下次同步取回来。服务器的版本号从 1 起 */
+const STALE_REV = 0;
 
 interface SyncState {
   /** 哪个账号的 */
@@ -95,7 +100,7 @@ function storedState(key = KEY): SyncState | null | undefined {
  */
 const bases = new WeakMap<SyncState, SyncState>();
 const copyState = (st: SyncState): SyncState => ({ user: st.user, worlds: { ...st.worlds }, deletes: { ...st.deletes } });
-const sameKnown = (a: Known | undefined, b: Known | undefined) => a === b || (!!a && !!b && a.rev === b.rev && a.sum === b.sum && a.at === b.at);
+const sameKnown = (a: Known | undefined, b: Known | undefined) => a === b || (!!a && !!b && a.rev === b.rev && a.sum === b.sum && a.core === b.core && a.at === b.at);
 
 /** 三方合:这边没动过的(ours 和 base 一样)换成浏览器里现在的(theirs) */
 function mergeInto<T>(ours: Record<string, T>, base: Record<string, T>, theirs: Record<string, T>, same: (a: T | undefined, b: T | undefined) => boolean) {
@@ -222,18 +227,28 @@ function sumOf(w: RawWorld, notes: AiNote[] | null | undefined): string {
   return cyrb53([canonSave(w.save), canon(w.meta), w.thumb ?? '', notesText(notes)].join('\u0000'));
 }
 
+/** 不算缩略图的指纹:两边做了同样的改动,不同的浏览器画出来的图也可能差一点点;打开世界时缩略图也会重画 */
+const coreOf = (w: RawWorld, notes: AiNote[] | null | undefined) => sumOf({ ...w, thumb: null }, notes);
+
 interface Local {
   raw: RawWorld;
   notes: AiNote[];
   sum: string;
+  core: string;
+}
+
+function localOf(raw: RawWorld, notes: AiNote[]): Local {
+  return { raw, notes, sum: sumOf(raw, notes), core: coreOf(raw, notes) };
 }
 
 function localWorld(id: string): Local | null {
   const raw = rawWorld(id);
   if (!raw) return null;
-  const notes = exportNotes(id);
-  return { raw, notes, sum: sumOf(raw, notes) };
+  return localOf(raw, exportNotes(id));
 }
+
+/** 上次同步以后这里有没有改过这个世界(只重画了缩略图不算) */
+const unchanged = (k: Known | undefined, l: Local) => !!k && (k.sum === l.sum || (k.core !== undefined && k.core === l.core));
 
 /** 存着的世界按什么顺序同步:最近打开或改过的在前(换台设备最可能接着用的先传上去) */
 function syncOrder(): string[] {
@@ -428,7 +443,7 @@ async function upload(st: SyncState, id: string, l: Local, baseRev: number, revi
     return;
   }
   // 存上去的工夫为了腾地方被挤出浏览器的也算存好了:账号里的那份留着,有地方了再取回来
-  st.worlds[id] = { rev: r.rev, sum: l.sum, at: nowIso() };
+  st.worlds[id] = { rev: r.rev, sum: l.sum, core: l.core, at: nowIso() };
   behind.delete(id);
 }
 
@@ -482,7 +497,7 @@ async function pull(st: SyncState, id: string, expect?: string | null): Promise<
     return false;
   }
   const l = localWorld(id);
-  if (l) st.worlds[id] = { rev: w.rev, sum: l.sum, at: nowIso() };
+  if (l) st.worlds[id] = { rev: w.rev, sum: l.sum, core: l.core, at: nowIso() };
   forgetOffer(id);
   behind.delete(id);
   return true;
@@ -608,7 +623,7 @@ async function fork(st: SyncState, id: string, l: Local, remote: CloudWorld) {
     dropped = deletedWhileUp.delete(nid);
   }
   // 被挤出去了也照样存进账号(服务器上原来那份已经被本地这份盖掉,另存的这份是它唯一的去处),有地方了再取回来
-  const n = localWorld(nid) ?? (dropped ? null : { raw: forkRaw, notes: forkNotes ?? [], sum: sumOf(forkRaw, forkNotes) });
+  const n = localWorld(nid) ?? (dropped ? null : localOf(forkRaw, forkNotes ?? []));
   forkedFor.delete(id);
   if (n) await push(st, nid, n, 0);
   const name = cleanTitle((JSON.parse(l.raw.save) as { title?: string }).title) || '未命名世界';
@@ -620,7 +635,9 @@ async function reconcile(st: SyncState, id: string, s: CloudEntry | null, depth 
   const l = localWorld(id);
   // 刚删掉、还没告诉服务器的:下一轮去删,这次不取回来
   if (!l && id in st.deletes) return;
-  const k = st.worlds[id];
+  let k = st.worlds[id];
+  // 以前记下的没有不算缩略图的指纹:这里和那时一样,就补上(之后只重画了缩略图也认得出没改过)
+  if (k && k.core === undefined && l && k.sum === l.sum) k = st.worlds[id] = { ...k, core: l.core };
   if (!s) {
     if (l) await push(st, id, l, 0, false, depth);
     else delete st.worlds[id];
@@ -631,7 +648,7 @@ async function reconcile(st: SyncState, id: string, s: CloudEntry | null, depth 
       delete st.worlds[id];
       return;
     }
-    if (k && k.sum === l.sum) {
+    if (unchanged(k, l)) {
       // 这里没改过:跟着删(正在看的先不删)
       if (pinned(id)) return;
       applying = true;
@@ -658,8 +675,8 @@ async function reconcile(st: SyncState, id: string, s: CloudEntry | null, depth 
     if (k.sum !== l.sum) await push(st, id, l, s.rev, false, depth);
     return;
   }
-  if (k && k.sum === l.sum) {
-    // 只有服务器变了
+  if (unchanged(k, l)) {
+    // 只有服务器变了(这里顶多重画了缩略图:换成那边的)
     if (pinned(id)) {
       behindNow.add(id);
       return offerReload(id, s.rev);
@@ -675,10 +692,14 @@ async function reconcile(st: SyncState, id: string, s: CloudEntry | null, depth 
     if (e instanceof ServerError && e.code === 'not-found') return push(st, id, l, s.rev, true, depth);
     throw e;
   }
-  if (sumOf(remoteRaw(remote), Array.isArray(remote.notes) ? remote.notes : null) === l.sum) {
-    st.worlds[id] = { rev: remote.rev, sum: l.sum, at: nowIso() };
+  // 一样就不算两边都改过(缩略图不比,各留各的)
+  const core = coreOf(remoteRaw(remote), Array.isArray(remote.notes) ? remote.notes : null);
+  if (core === l.core) {
+    st.worlds[id] = { rev: remote.rev, sum: l.sum, core: l.core, at: nowIso() };
     return;
   }
+  // 那边只是重画了缩略图(内容和上次同步时一样):只有这边改了,接着那边的版本存上去
+  if (k?.core !== undefined && core === k.core) return push(st, id, l, remote.rev, false, depth);
   await fork(st, id, l, remote);
 }
 
@@ -793,6 +814,8 @@ async function cycleWith(st: SyncState, full: boolean): Promise<void> {
     writeState(st);
   }
 
+  // 有记成"比账号里的旧"的(退出时删了一半):这次也全看一遍,先把完整的取回来,不按这里缺了东西的那份存上去
+  if (!full && [...local.keys()].some((id) => st.worlds[id]?.rev === STALE_REV)) full = true;
   if (full) {
     behindNow = new Set();
     const list = await net(() => listCloud());
@@ -1069,11 +1092,34 @@ export async function signOut(keep: boolean): Promise<{ ok: true } | { ok: false
   if (!keep) {
     // 先删再退出:等服务器回话的工夫退出窗已经关了,这期间新建、改的世界不能被后删掉
     applying = true;
+    let gone: boolean;
     try {
-      removeAllWorlds();
-      forgetNotes();
+      gone = removeAllWorlds();
+      // 没删成:页面里的 AI 写的东西留着(有的只在页面里,浏览器存不下),不然之后同步会把账号里的清空
+      if (gone) forgetNotes();
     } finally {
       applying = false;
+    }
+    // 浏览器不让删(存储突然不让用了之类):不退出,不然以为删干净了,刷新以后世界又都在。没删掉的同步记录还在,下次同步不会当成删了
+    if (!gone) {
+      // 删前每个世界都和账号里的一样(上面查过);现在不一样的 = 删了一部分又没能放回去(比如存档还在、AI 写的东西没了):
+      // 不能当成在账号那份上改过、存上去盖掉完整的那份。记成"比账号里的旧"(STALE_REV),下次同步把完整的取回来
+      const st = readState();
+      if (st) {
+        let hurt = false;
+        for (const [id, k] of Object.entries(st.worlds)) {
+          const l = localWorld(id);
+          if (!l || k.sum === l.sum) continue;
+          st.worlds[id] = { ...k, rev: STALE_REV, sum: l.sum, core: l.core };
+          hurt = true;
+        }
+        if (hurt) {
+          writeState(st);
+          // 马上取回来,别等用户在缺了东西的那份上接着改
+          requestSync('full');
+        }
+      }
+      return { ok: false, message: '浏览器没让删掉这台设备上的世界，没有退出。可以选「留着」再退出' };
     }
     writeState(null);
     rejected.clear();
