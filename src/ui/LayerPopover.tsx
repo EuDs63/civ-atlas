@@ -1,15 +1,15 @@
 /**
  * "图层与投影"按钮(宽屏是右上分段按钮的最后一段"更多图层",手机是右上竖排的图层图标),点开弹层:
- *   图层:六张缩略图(政区、民族、地形、生态、高程、实景)+ 一行小字按钮(板块、气温、降水)
+ *   图层:六张缩略图(政区、民族、信仰、地形、生态、实景)+ 一行小字按钮(高程、板块、气温、降水、洋流)
  *         + 一行叠加开关(地名、宜居度、州、城址、道路;CivPanel.tsx 的 CivToggles);
- *         选中"民族"时下面是紧凑的民族色块列表(CultureLegend)
+ *         选中"民族"时下面是紧凑的民族色块列表(CultureLegend),选中"信仰"时是信仰的(FaithLegend)
  *   投影:ProjectionSection(六种投影、中央经线滑条、经纬网)
  * 点图层就换(弹层收起);点叠加开关不收起;点外面(包括旁边的按钮)、Esc 收起。
  * 窄屏(手机):弹层是从底部升起的抽屉(右上 ✕ 收起)。
  *
  * 缩略图是当前世界真实画出来的小图:App 给 baseCanvas(画风键)取整张底图(画过的直接从缓存拿,没画过的画一张放进缓存),
- * 政区 / 民族再叠上文明底图,缩成小图存成 dataURL。当前图层的一张在世界出来后就做;其余的等弹层第一次打开时
- * 一张一张做(每张之间让出主线程),没做好的先显示占位。换世界全部作废;历史重推(干预、改地形)只作废政区、民族两张。
+ * 政区 / 民族 / 信仰再叠上文明底图,缩成小图存成 dataURL。当前图层的一张在世界出来后就做;其余的等弹层第一次打开时
+ * 一张一张做(每张之间让出主线程),没做好的先显示占位。换世界全部作废;历史重推(干预、改地形)只作废政区、民族、信仰三张。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { World } from '../gen/world';
@@ -21,7 +21,7 @@ import { Icon } from './icons';
 import { ProjectionSection, projectionName } from './ProjectionPanel';
 import { useProjection } from './projection';
 import { getCivTime } from './civView';
-import { CivToggles, CultureLegend } from './CivPanel';
+import { CivToggles, CultureLegend, FaithLegend } from './CivPanel';
 import './overview.css';
 import { noteDismiss } from './dismissClick';
 
@@ -67,7 +67,7 @@ export function useLayerThumbs(src: ThumbSource, current: MapLayer) {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(base, 0, 0, TW, TH);
     const civOk = !!civ && civ.viable && civ.habitat.suitability.length === data.world.mesh.n;
-    if ((def.polities || def.cultures) && civOk) {
+    if ((def.polities || def.cultures || def.faiths) && civOk) {
       const { raster, world } = data;
       const cv = document.createElement('canvas');
       cv.width = raster.w;
@@ -75,7 +75,7 @@ export function useLayerThumbs(src: ThumbSource, current: MapLayer) {
       const cctx = cv.getContext('2d');
       if (cctx) {
         const y = Math.min(civ!.endYear, Math.max(0, getCivTime().year ?? civ!.endYear));
-        drawCivOverlay(cctx, { world, raster, civ: civ!, style: def.style, year: y, show: { ...CIV_SHOW_OFF, polities: def.polities, cultures: def.cultures } });
+        drawCivOverlay(cctx, { world, raster, civ: civ!, style: def.style, year: y, show: { ...CIV_SHOW_OFF, polities: def.polities, cultures: def.cultures, faiths: def.faiths } });
         ctx.drawImage(cv, 0, 0, TW, TH);
       }
       cv.width = cv.height = 0;
@@ -113,7 +113,7 @@ export function useLayerThumbs(src: ThumbSource, current: MapLayer) {
     [pump],
   );
 
-  // 换世界:全部作废;文明重推:政区、民族作废
+  // 换世界:全部作废;文明重推:政区、民族、信仰作废
   const { data, civ } = src;
   useEffect(() => {
     queue.current = [];
@@ -126,6 +126,7 @@ export function useLayerThumbs(src: ThumbSource, current: MapLayer) {
       const next = { ...have.current };
       delete next.political;
       delete next.cultures;
+      delete next.faith;
       have.current = next;
       setThumbs(next);
     }
@@ -162,7 +163,7 @@ export interface LayerPopoverProps {
 }
 
 /** 新建世界时列不出来的图层(要有历史) */
-const HISTORY_LAYERS: MapLayer[] = ['political', 'cultures'];
+const HISTORY_LAYERS: MapLayer[] = ['political', 'cultures', 'faith'];
 
 export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs, disabled, trigger = 'icon', inSeg = true, draft = false }: LayerPopoverProps) {
   const [open, setOpen] = useState(false);
@@ -250,6 +251,7 @@ export function LayerPopover({ layer, civ = null, onLayer, thumbs, requestThumbs
             <div className="lp-overlays">
               <CivToggles />
               {layer === 'cultures' && <CultureLegend civ={civ} />}
+              {layer === 'faith' && <FaithLegend civ={civ} />}
             </div>
           )}
           <ProjectionSection />

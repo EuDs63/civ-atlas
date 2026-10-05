@@ -1,5 +1,5 @@
 /**
- * 界面骨架的纯逻辑:图层 ↔ (画风, 数据图层, 国家 / 民族开关) 的换算、网址里的图层、深浅主题;顶部提示条的 store;
+ * 界面骨架的纯逻辑:图层 ↔ (画风, 数据图层, 国家 / 民族 / 信仰开关) 的换算、网址里的图层、深浅主题;顶部提示条的 store;
  * 宽屏左边侧栏卡片的收起 / 展开;地图飞回整张图时的进度。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,18 +13,20 @@ import { FLY_MS, animProgress, easeOutCubic, flatFly, sideRoom } from '../src/ui
 describe('图层换算', () => {
   it('每个图层换成设置再换回来还是它自己', () => {
     for (const l of MAP_LAYERS) {
-      expect(layerOf(l.style, l.data ?? 'biomes', { polities: l.polities, cultures: l.cultures })).toBe(l.id);
+      expect(layerOf(l.style, l.data ?? 'biomes', { polities: l.polities, cultures: l.cultures, faiths: l.faiths })).toBe(l.id);
     }
   });
-  it('旧的组合也认得出:写实 + 国家算实景;手绘 + 国家 + 民族算政区;没有数据图层名的算生态', () => {
+  it('旧的组合也认得出:写实 + 国家算实景;手绘 + 国家 + 民族算政区;没有数据图层名的算生态;信仰开着(手绘)算信仰', () => {
     expect(layerOf('realistic', 'biomes', { polities: true, cultures: false })).toBe('realistic');
+    expect(layerOf('realistic', 'biomes', { polities: true, cultures: false, faiths: true })).toBe('realistic');
+    expect(layerOf('fantasy', 'biomes', { polities: false, cultures: true, faiths: true })).toBe('faith');
     expect(layerOf('fantasy', 'biomes', { polities: true, cultures: true })).toBe('political');
     expect(layerOf('fantasy', 'biomes', { polities: false, cultures: false })).toBe('terrain');
     expect(layerOf('data', 'temperature', { polities: true, cultures: false })).toBe('temperature');
   });
-  it('深色主题:高程、实景、降水', () => {
-    expect(MAP_LAYERS.filter((l) => layerDark(l.id)).map((l) => l.id)).toEqual(['elevation', 'realistic', 'precipitation']);
-    expect(layerDef('political').main && layerDef('cultures').main && !layerDef('plates').main).toBe(true);
+  it('深色主题:实景、高程、降水;六张缩略图是政区、民族、信仰、地形、生态、实景', () => {
+    expect(MAP_LAYERS.filter((l) => layerDark(l.id)).map((l) => l.id)).toEqual(['realistic', 'elevation', 'precipitation']);
+    expect(MAP_LAYERS.filter((l) => l.main).map((l) => l.id)).toEqual(['political', 'cultures', 'faith', 'terrain', 'biomes', 'realistic']);
   });
   it('网址:带 style= 的旧链接照旧;没有 style= 时 layer= 是新图层名;都没有默认政区(有 civ= 就按 civ=)', () => {
     const q = (s: string) => new URLSearchParams(s);
@@ -32,6 +34,7 @@ describe('图层换算', () => {
     expect(layerFromUrl(q('seed=7&style=data&layer=plates'))).toBe(null);
     expect(layerFromUrl(q('seed=7&layer=realistic'))).toBe('realistic');
     expect(layerFromUrl(q('seed=7&layer=elevation'))).toBe('elevation');
+    expect(layerFromUrl(q('seed=7&layer=faith'))).toBe('faith');
     expect(layerFromUrl(q('seed=7&civ=cultures'))).toBe(null);
     expect(layerFromUrl(q('seed=7'))).toBe('political');
     expect(layerFromUrl(q('seed=7&layer=nonsense'))).toBe('political');

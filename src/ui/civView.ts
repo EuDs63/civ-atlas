@@ -3,7 +3,7 @@
  * 放在这里而不是 App.tsx 里,这样以后加开关 / 时间轴时只改文明自己的文件。
  *
  * 网址参数(截图脚本用):
- *   civ=habitat,regions,sites,routes,cultures,polities,wars   直接打开对应显示;前面加减号是关掉,
+ *   civ=habitat,regions,sites,routes,cultures,polities,faiths,wars   直接打开对应显示;前面加减号是关掉,
  *                                               如 civ=-labels 关掉默认打开的地名、civ=-wars 关掉默认打开的战事
  *   civYear=1200                                时间轴停在第 1200 年(不给 = 结束年份);给了就不自动播放
  *   chron=1 / chron=all                         打开世界概览的编年史页(1 = 只看大事,all = 全部)
@@ -253,12 +253,12 @@ export function useCivHighlight(): CivHighlightState | null {
 const pick = store<{ entry: ChronicleEntry | null; stamp: number }>({ entry: null, stamp: 0 });
 
 /**
- * 点编年史的一条:时间轴跳到那一年并暂停,打开"国家"图层,地图上闪烁高亮事发地
+ * 点编年史的一条:时间轴跳到那一年并暂停,换到政区图层(宗教大事:正在信仰图层上就留在信仰图层),地图上闪烁高亮事发地
  * (事发地不在视野里时 App 把地图平移过去);编年史面板里这一条标成选中(战争自动展开,不在视野里就滚过去)。
  */
 export function pickChronicleEntry(e: ChronicleEntry) {
   setCivTime({ year: e.year, playing: false, scrubbing: false, story: false });
-  setCivShow({ polities: true });
+  setCivShow(e.kind === 'faith' && getCivShow().faiths ? { polities: true } : { polities: true, cultures: false, faiths: false });
   setCivHighlight({ regions: e.regions, polities: e.polities, year: e.year });
   pick.set({ entry: e, stamp: pick.get().stamp + 1 });
 }
@@ -277,13 +277,14 @@ export function useChroniclePick(): { entry: ChronicleEntry | null; stamp: numbe
 
 /**
  * 选中的东西(这个世界里的编号;改名不改编号,换世界时清掉):
- * 国家、城(含故城遗址)、地理实体(civ.places 的下标)、州(没点到别的东西时)
+ * 国家、城(含故城遗址)、地理实体(civ.places 的下标)、州(没点到别的东西时)、信仰(civ.religion.faiths 的下标)
  */
 export type MapSelection =
   | { kind: 'polity'; id: number }
   | { kind: 'settlement'; id: number }
   | { kind: 'place'; id: number }
-  | { kind: 'region'; id: number };
+  | { kind: 'region'; id: number }
+  | { kind: 'faith'; id: number };
 
 export interface SelectionState {
   sel: MapSelection | null;

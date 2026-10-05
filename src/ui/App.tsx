@@ -84,6 +84,7 @@ import {
   GENERATOR_VERSION,
   applyNames,
   aiNameKeys,
+  faithKey,
   namesWithoutAi,
   placeKeyOf,
   polityKey,
@@ -167,6 +168,7 @@ import { isDoubleTap, pinchStep, type Pt, type Tap } from './gestures';
 import { createPinchGuard, createWheelReader, inGesturePinch, setGesturePinch, wheelSample } from './wheel';
 import { pickLabelAt } from './mapPick';
 import { ownersAt } from '../gen/civ/timeline';
+import { faithAt } from '../gen/civ/religion';
 import { interventionOutcome } from '../gen/civ/chronicle';
 import { takeRewriteNote, type RewriteNote } from './rewriteStore';
 import { AssistantPanel, PreviewBanner } from './Assistant';
@@ -231,14 +233,14 @@ function readUrl() {
 }
 
 /**
- * 换了图层:写进网址(layer= 新的图层名;去掉旧的 style=,civ= 里的国家 / 民族开关交给图层管),刷新、复制网址都还在
+ * 换了图层:写进网址(layer= 新的图层名;去掉旧的 style=,civ= 里的国家 / 民族 / 信仰开关交给图层管),刷新、复制网址都还在
  */
 function writeLayerUrl(id: MapLayer) {
   const q = new URLSearchParams(location.search);
   q.delete('style');
   const civ = q.get('civ');
   if (civ !== null) {
-    const rest = civ.split(/[,+ ]/).filter((k) => k && !/^-?(polities|cultures)$/.test(k));
+    const rest = civ.split(/[,+ ]/).filter((k) => k && !/^-?(polities|cultures|faiths)$/.test(k));
     if (rest.length) q.set('civ', rest.join(','));
     else q.delete('civ');
   }
@@ -335,7 +337,7 @@ function firstRoute(init: ReturnType<typeof readUrl>): { stage: Stage; target: T
 }
 
 /** 新建时列不出来的图层(要有历史):进新建时换成"地形",建好以后换回来 */
-const HISTORY_LAYERS: MapLayer[] = ['political', 'cultures'];
+const HISTORY_LAYERS: MapLayer[] = ['political', 'cultures', 'faith'];
 
 /** 把世界写进网址:种子 + 参数(和默认值相同的省略,别人打开是同一颗星球);存着的加 w=编号,新建中还没存的加 new=1 */
 function writeWorldUrl(t: Target) {
@@ -379,7 +381,7 @@ export function App() {
   const init = useMemo(readUrl, []);
   /** 打开网页时去哪:我的世界 / 新建 / 某个世界(见 firstRoute) */
   const route = useMemo(() => firstRoute(init), [init]);
-  /** 进新建时换掉的图层(政区、民族要有历史);建好 / 打开别的世界时换回来 */
+  /** 进新建时换掉的图层(政区、民族、信仰要有历史);建好 / 打开别的世界时换回来 */
   const draftLayerRef = useRef<MapLayer | null>(null);
   // 网址里的投影、中央经线、经纬网:第一次渲染之前放进 store(等距圆柱的视图在世界出来以后再转过去,见 pendingLon)
   const start = useState(() => {
@@ -387,7 +389,7 @@ export function App() {
     if (init.lon !== null) publishMapCenter(init.lon);
     setGraticule(init.grat);
     setStage(route.stage, route.target?.base ?? null);
-    // 网址里给的(或默认的)图层:国家 / 民族开不开跟着它;新建时只看地形
+    // 网址里给的(或默认的)图层:国家 / 民族 / 信仰开不开跟着它;新建时只看地形
     let ml = init.mapLayer;
     let { style, layer } = init;
     if (route.stage === 'draft') {
@@ -401,7 +403,7 @@ export function App() {
     }
     if (ml) {
       const d = layerDef(ml);
-      setCivShow({ polities: d.polities, cultures: d.cultures });
+      setCivShow({ polities: d.polities, cultures: d.cultures, faiths: d.faiths });
     }
     return { style, layer };
   })[0];
@@ -457,7 +459,7 @@ export function App() {
     setPickHover(h?.info.pick ?? -1);
     setHoverState(h);
   };
-  // ---- 图层(政区 / 民族 / 地形 / 生态 / 高程 / 实景 / 板块 / 气温 / 降水)= 画风 + 数据图层 + 国家 / 民族开关 ----
+  // ---- 图层(政区 / 民族 / 信仰 / 地形 / 生态 / 高程 / 实景 / 板块 / 气温 / 降水)= 画风 + 数据图层 + 国家 / 民族 / 信仰开关 ----
   const civShow = useCivShow();
   const mapLayer = layerOf(style, layer, civShow);
   const mapLayerRef = useRef(mapLayer);
@@ -471,7 +473,7 @@ export function App() {
     const d = layerDef(id);
     setStyle(d.style);
     if (d.data) setLayer(d.data);
-    setCivShow({ polities: d.polities, cultures: d.cultures });
+    setCivShow({ polities: d.polities, cultures: d.cultures, faiths: d.faiths });
     writeLayerUrl(id);
   }, []);
   /** 第一次打开的操作提示(第一次拖动 / 缩放 / 点击之后不再出现) */
@@ -681,7 +683,9 @@ export function App() {
             ? settlementKey(old, sel.id)
             : sel.kind === 'place' && old.places[sel.id]
               ? placeKeyOf(old, sel.id)
-              : null;
+              : sel.kind === 'faith' && old.religion?.faiths[sel.id]
+                ? faithKey(old, sel.id)
+                : null;
       if (key) {
         const r = resolveKey(civ, key);
         if (r && r.kind === sel.kind) setSelection({ kind: sel.kind, id: r.id } as MapSelection);
@@ -2279,6 +2283,12 @@ export function App() {
     const c = cellAt(e.clientX, e.clientY);
     const r = civ && c >= 0 && c < civ.regions.of.length ? civ.regions.of[c] : -1;
     if (!civ || r < 0) return clearSelection();
+    // 信仰图层:点陆地 = 那里信的那个教(国名、城名照旧打开国家、城)
+    if (getCivShow().faiths && civ.religion) {
+      const y = Math.min(civ.endYear, Math.max(0, getCivTime().year ?? civ.endYear));
+      const f = faithAt(civ, y)[r];
+      if (f >= 0) return setSelection({ kind: 'faith', id: f }, side);
+    }
     if (getCivShow().polities && civ.polities.length) {
       const y = Math.min(civ.endYear, Math.max(0, getCivTime().year ?? civ.endYear));
       const po = ownersAt(civ, y).polity[r];
@@ -2411,7 +2421,8 @@ export function App() {
       case 'layer1':
       case 'layer2':
       case 'layer3':
-      case 'layer4': {
+      case 'layer4':
+      case 'layer5': {
         const id = (draft ? DRAFT_SEG : SEG_LAYERS)[Number(a.slice(5)) - 1];
         if (!id) return false;
         applyLayer(id);

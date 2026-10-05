@@ -2,7 +2,7 @@
  * 极端参数压力测试:npx tsx scripts/stress.ts(出现 NaN 则退出码 1)
  * 每行打印:生成 / 铺像素 / 文明(其中宜居度 + 划州、推演(民族 + 城镇 + 国家 + 战争)、回放一帧、道路)耗时,
  * 州数、民族数、占据率、国家数、城镇数、路段数,战争统计(场数、攻占、灭亡、迁都、飞地、易手频繁的州),
- * 分合统计(分裂、合并、复国、主动迁都),王朝更替(东方改朝换代 / 西幻王室更迭),
+ * 分合统计(分裂、合并、复国、主动迁都),王朝更替(东方改朝换代 / 西幻王室更迭),信仰(大教、教派、宗教大事),
  * 以及 36k 默认精细度下的生成总时长。
  * 改地形(阶段 4):几组极端的地形修改(最大最强的火山 / 山脉铺满全图、两极的湖、跨 180° 经线的笔画、整片沉成海 / 抬成陆地)。
  */
@@ -23,6 +23,7 @@ import { dynastyStats } from '../src/gen/civ/dynasty';
 import { assimStats } from '../src/gen/civ/assimilation';
 import { cityStats } from '../src/gen/civ/cities';
 import { Layer } from '../src/gen/civ/types';
+import { faithAt, faithFromScratch } from '../src/gen/civ/religion';
 import { civLabelItems, civMapLayer, labelViewExtras } from '../src/render/civ/labels';
 import { placeMap } from '../src/render/labels/draw';
 import type { TerrainOp } from '../src/gen/edits';
@@ -209,6 +210,30 @@ for (const c of cases) {
       if (!pl.name) cn++;
       for (let k = 0; k < pl.path.length; k++) if (!Number.isFinite(pl.path[k])) cn++;
     }
+    // 信仰:编号在范围内、年份有限且有序;检查点 + 补日志和从头翻日志一样;有文明就有信仰
+    const rel = civ.religion;
+    if (civ.viable && civ.cultures.length && !rel) cn++;
+    if (rel) {
+      const F = rel.faiths.length;
+      rel.faiths.forEach((f, i) => {
+        if (f.id !== i || !f.name || f.color.some((v) => !Number.isFinite(v))) cn++;
+        if (f.kind !== 'folk' && !Number.isFinite(f.founded)) cn++;
+        if (f.kind === 'great' && !civ.settlements[f.holy ?? -1]) cn++;
+        if (f.kind === 'sect' && !(f.parent !== undefined && rel.faiths[f.parent]?.kind === 'great')) cn++;
+      });
+      for (let i = 0; i < rel.log.size; i++) {
+        if (!Number.isFinite(rel.log.year[i]) || (i && rel.log.year[i] < rel.log.year[i - 1])) cn++;
+        if (rel.log.value[i] < -1 || rel.log.value[i] >= F || !(rel.log.region[i] >= 0 && rel.log.region[i] < R.count)) cn++;
+      }
+      for (let i = 0; i < rel.events.length; i++) {
+        const e = rel.events[i];
+        if (!Number.isFinite(e.year) || (i && e.year < rel.events[i - 1].year) || !(e.faith >= 0 && e.faith < F) || e.polity >= civ.polities.length) cn++;
+      }
+      for (const st of rel.states) if (!civ.polities[st.polity] || !rel.faiths[st.faith] || (st.until !== undefined && !(st.until >= st.from))) cn++;
+      const a = faithAt(civ, civ.endYear * 0.55);
+      const b = faithFromScratch(civ, civ.endYear * 0.55);
+      for (let q = 0; q < R.count; q++) if (a[q] !== b[q]) cn++;
+    }
     // 国名、城名、城镇符号:国名的路径、字号不能有 NaN;排版 + 避让一帧的耗时(缩放 1 倍,Node 里,不含画)
     let labelMs = 0;
     for (const y of [civ.endYear * 0.6, civ.endYear]) {
@@ -251,6 +276,7 @@ for (const c of cases) {
       `改朝换代 ${ds.eastern} 王室更迭 ${ds.western}`,
       `同化 ${asm.assimilated} 迁徙 ${asm.migrations} 波 ${asm.migrated} 州 改换过民族 ${(asm.changedShare * 100).toFixed(1)}% 消亡 ${asm.vanished}`,
       `洗劫 ${cs.sacks} 毁城 ${cs.ruins} 重建 ${cs.rebuilds} 遗址 ${cs.ruinsAtEnd} 旧都渐衰 ${cs.declines}`,
+      `大教 ${rel?.faiths.filter((f) => f.kind === 'great').length ?? 0} 教派 ${rel?.faiths.filter((f) => f.kind === 'sect').length ?? 0} 宗教大事 ${rel?.events.length ?? 0}`,
       nan || rn || cn ? `NaN! ${nan}/${rn}/${cn}` : '',
     );
   }

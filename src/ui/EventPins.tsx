@@ -14,7 +14,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { Civ } from '../gen/civ/types';
 import type { World } from '../gen/world';
-import { buildChronicle, filterChronicle } from '../gen/civ/chronicle';
+import { filterChronicle } from '../gen/civ/chronicle';
+import { fullChronicle } from '../gen/civ/religionText';
 import { getCivTime, subscribeCivTime, useChronicle, useChroniclePick } from './civView';
 import { useThemeCompat } from './CivTimeline';
 import {
@@ -70,7 +71,7 @@ export function EventPins({ civ, world, toClient, hidden }: EventPinsProps) {
   );
   const has = !!civ && civ.viable && civ.cultures.length > 0;
   const end = civ?.endYear ?? 0;
-  const entries = useMemo(() => (has ? filterChronicle(buildChronicle(civ), { major: true, polity: chron.polity }) : []), [civ, has, chron.polity]);
+  const entries = useMemo(() => (has ? filterChronicle(fullChronicle(civ), { major: true, polity: chron.polity }) : []), [civ, has, chron.polity]);
   const [pins, setPins] = useState<LivePin[]>([]);
   const pinsRef = useRef(pins);
   pinsRef.current = pins;

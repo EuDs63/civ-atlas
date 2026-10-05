@@ -727,15 +727,22 @@ function showPreview(id: number) {
 
 /**
  * 一个键在两份历史里是不是同一个东西(在地图上看试推演时改名、下令用):州、山河湖海两边一样;
- * 国家、城、民族要两边都有、而且立国 / 建城 / 出现的年份一样(生效年份以前的历史一字不差,这样的就是同一个)
+ * 国家、城、民族、信仰要两边都有、而且立国 / 建城 / 出现 / 创立的年份一样(生效年份以前的历史一字不差,这样的就是同一个;民间信仰看它的民族)
  */
 export function sameInBoth(a: Civ, b: Civ, key: string): boolean {
   const x = resolveKey(a, key);
   const y = resolveKey(b, key);
   if (!x || !y || x.kind !== y.kind) return false;
   if (x.kind === 'region' || x.kind === 'place') return true;
-  const born = (c: Civ, r: ResolvedKey) =>
-    r.kind === 'settlement' ? c.settlements[r.id]?.founded : r.kind === 'culture' ? c.cultures[r.id]?.born : c.polities[r.id]?.founded;
+  const born = (c: Civ, r: ResolvedKey) => {
+    if (r.kind === 'settlement') return c.settlements[r.id]?.founded;
+    if (r.kind === 'culture') return c.cultures[r.id]?.born;
+    if (r.kind === 'faith') {
+      const f = c.religion?.faiths[r.id];
+      return f && (f.kind === 'folk' ? c.cultures[f.culture ?? f.id]?.born : f.founded);
+    }
+    return c.polities[r.id]?.founded;
+  };
   const ba = born(a, x);
   const bb = born(b, y);
   if (ba === undefined || bb === undefined || Math.floor(ba) !== Math.floor(bb)) return false;

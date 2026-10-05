@@ -331,6 +331,22 @@
   opacity: 0.5;
   cursor: default;
 }
+/* 只是一行字(信仰组里合成的「民间信仰」):不能点 */
+.sb-row.static {
+  cursor: default;
+}
+.sb-row.static:hover {
+  background: none;
+}
+/* 信仰组里的教派:缩进跟在本教后面,色块小一点 */
+.sb-row.sect {
+  padding-left: 34px;
+  min-height: 40px;
+}
+.sb-row.sect .sb-sw {
+  width: 10px;
+  height: 10px;
+}
 .sb-sw {
   width: 12px;
   height: 12px;

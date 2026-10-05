@@ -361,6 +361,81 @@ export interface Civ {
    * 下标 = Person.id;先是君主(按国家编号、即位先后),再是统帅(按第一次领兵的先后)。没有文明 = 空
    */
   people?: Person[];
+  /**
+   * 信仰(religion.ts):各族的民间信仰、几个大教的创立和传播、各国的国教、教派分立。
+   * 推演结束后按历史"贴"上去,国界、兴亡、战争、人物一个都不变。没有文明 = 不给
+   */
+  religion?: Religion;
+}
+
+/** 信仰的种类:民间信仰(每个民族自带)、大教、从大教分出的教派 */
+export type FaithKind = 'folk' | 'great' | 'sect';
+/** 大教 / 教派的类型 */
+export type FaithForm = '一神' | '多神' | '二元' | '哲理' | '修行';
+
+/** 一种信仰。下标 = Faith.id:先是各族的民间信仰(编号 = 民族编号),再是大教和教派(按创立先后) */
+export interface Faith {
+  id: number;
+  kind: FaithKind;
+  /** 教名;民间信仰 = 族名 + 祖灵(东方)/ 旧神(西幻) */
+  name: string;
+  /** 大教 / 教派 */
+  form?: FaithForm;
+  /** 民间信仰:哪个民族的 */
+  culture?: number;
+  /** 教派:从哪个大教分出来 */
+  parent?: number;
+  /** 大教 / 教派:创立(分出)的年份 */
+  founded?: Year;
+  /** 大教:圣城(Settlement 编号,创教的那座城) */
+  holy?: number;
+  /** 大教:创教者 */
+  founder?: { name: string; born: Year; died: Year };
+  /** 教派:在哪一国分出来的(Polity 编号) */
+  polity?: number;
+  /** 教派:分出时那国的国都(Settlement 编号) */
+  seat?: number;
+  color: [number, number, number];
+}
+
+/** 信仰的大事:创教、传入一国、立为国教、教派分立、圣城被异教之国夺取 */
+export type FaithEventKind = 'found' | 'enter' | 'state' | 'schism' | 'holy';
+
+export interface FaithEvent {
+  year: Year;
+  kind: FaithEventKind;
+  /** 哪种信仰(教派分立 = 新的教派) */
+  faith: number;
+  /** 哪一国(创教 = 圣城当时的主人;没有 = −1) */
+  polity: number;
+  /** 事发的州(−1 = 没有) */
+  region: number;
+  /** 事发的城(−1 = 没有) */
+  settlement: number;
+  /** 立国教、教派分立:当时在位的君主(Person 编号) */
+  ruler?: number;
+  /** 圣城易手:从哪国手里夺来 */
+  from?: number;
+}
+
+/** 一国奉某种信仰为国教的一段时间 */
+export interface StateFaith {
+  polity: number;
+  faith: number;
+  from: Year;
+  /** 结束的年份(改奉别的、分出教派、亡国);到结束年份还奉着 = 不给 */
+  until?: Year;
+}
+
+export interface Religion {
+  faiths: Faith[];
+  /** 按年份排好 */
+  events: FaithEvent[];
+  states: StateFaith[];
+  /** 各州信仰的变化日志(年份、州、新的信仰;−1 = 没人住),按年份排好 */
+  log: { size: number; year: Float32Array; region: Int32Array; value: Int16Array };
+  /** 每 100 年一份各州的信仰(按年份递增;那一年的变化已经算进去) */
+  checkpoints: { year: Year; faith: Int16Array }[];
 }
 
 /**

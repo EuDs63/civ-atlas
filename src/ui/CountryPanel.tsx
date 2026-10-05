@@ -5,7 +5,7 @@
  *   顶部  颜色块、国名(可改,输入时预览国号变迁)、"国家，1045 年立国"、关闭
  *   按钮  干预历史(主操作;窄屏点了底部抽屉展开)/ 设为中心 / 改名 / 更多(在编年史中查看、让 AI 写国史、让 AI 讲名字由来;
  *         有主体民族时还有讲它的族名由来、给它起族名)
- *   概况  国都、疆域(历年州数的小柱图,和概览"国家"表同一份)、人口(境内城镇)、主体民族、邻国(可点),
+ *   概况  国都、疆域(历年州数的小柱图,和概览"国家"表同一份)、人口(境内城镇)、主体民族、国教(可点,"某年起";没有写"没有")、邻国(可点),
  *         来历 / 结局 / 历任国都(有才写)
  *   朝代  改朝换代过才有:一朝一行(新的在上),当前那一朝标"当前";点一行 = 时间轴跳到它开始的那年
  *   大事  到当前年份为止最近 5 条(可点:跳到那一年,地图上闪出事发地);"全部 N 件"打开概览的编年史页、只看这国的"全部"
@@ -23,7 +23,9 @@ import type { World } from '../gen/world';
 import { cultureLabel } from '../gen/civ/display';
 import { capitalAt, dynastyIndexAt, polityAlive, polityName, polityTitleChain, populationAt, populationLabel } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
-import { buildChronicle, filterChronicle, polityChronicle } from '../gen/civ/chronicle';
+import { filterChronicle, polityChronicle } from '../gen/civ/chronicle';
+import { fullChronicle } from '../gen/civ/religionText';
+import { stateFaithAt } from '../gen/civ/religion';
 import { dynastyKey, polityKey } from '../gen/edits';
 import { setCivTime } from './civView';
 import type { AiName } from './AiNamePanel';
@@ -182,9 +184,9 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
   const hist = polityHistory(civ);
   const spark = hist.years.map((y, i) => ({ year: y, n: hist.spark[id * SPARK_N + i] }));
   const segs = useMemo(() => dynastySegments(civ, p), [civ, p]);
-  const related = useMemo(() => filterChronicle(buildChronicle(civ), { polity: id }), [civ, id]);
+  const related = useMemo(() => filterChronicle(fullChronicle(civ), { polity: id }), [civ, id]);
   // "全部 N 件":和编年史页只看这一国时的"全部"同一份(连同历代君主继位),点开就是这么多条
-  const allCount = useMemo(() => polityChronicle(civ, buildChronicle(civ), id).length, [civ, id]);
+  const allCount = useMemo(() => polityChronicle(civ, fullChronicle(civ), id).length, [civ, id]);
   const upTo = related.filter((e) => e.year <= year + 1e-6);
   const maxN = Math.max(1, hist.peak[id] ?? 0);
   const span = Math.max(1, (p.ended ?? civ.endYear) - p.founded);
@@ -199,6 +201,7 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
     }
     return null;
   }, [civ, id]);
+  const stateFaith = stateFaithAt(civ.religion, id, shownYear);
   const other = (q: number, y: number) => (civ.polities[q] ? <Link to={{ kind: 'polity', id: q }}>{polityName(civ.polities[q], y)}</Link> : null);
   const capitals = p.capitals?.length ? p.capitals : [{ year: p.founded, settlement: p.capital }];
   const popText = pop > 0 ? populationLabel(pop) : '—';
@@ -255,6 +258,18 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
             {top ? cultureLabel(top) : '—'}
             {share !== null && <em className="cp-num-note">{share}%</em>}
           </Row>
+          {civ.religion && (
+            <Row k="国教">
+              {stateFaith && civ.religion.faiths[stateFaith.faith] ? (
+                <>
+                  <Link to={{ kind: 'faith', id: stateFaith.faith }}>{civ.religion.faiths[stateFaith.faith].name}</Link>
+                  <em className="cp-num-note">{Math.floor(stateFaith.from)} 年起</em>
+                </>
+              ) : (
+                <span className="cp-none">没有</span>
+              )}
+            </Row>
+          )}
           <Row k="邻国" className="cp-links">
             {near.length ? (
               near

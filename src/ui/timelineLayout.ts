@@ -4,9 +4,10 @@
  * 不碰 DOM,单测直接测(tests/timeline-layout.test.ts);组件在 CivTimeline.tsx、TimelineMarks.tsx、
  * RecentEvents.tsx、EventPins.tsx。
  *
- * - 事件类型:史事种类(types.ts 的 AnnalKind)归成五类 + 干预,颜色用 CSS 变量(timeline.css 的 [data-ev=…]):
+ * - 事件类型:史事种类(types.ts 的 AnnalKind)归成五类 + 宗教 + 干预,颜色用 CSS 变量(timeline.css 的 [data-ev=…]):
  *   战争(打仗、战役、攻占、议和、洗劫、毁城、灭亡)/ 改朝(改朝换代、君主继位、迁都、旧都衰落)/ 立国(立国、分裂自立、复国、重建)/
- *   称帝(升格、称帝、降格、合并)/ 同化(同化、迁徙、民族消亡)/ 干预(主色)。卡片上的类型名按一字标签细分("攻占""迁都"……)。
+ *   称帝(升格、称帝、降格、合并)/ 同化(同化、迁徙、民族消亡)/ 宗教(创教、立国教、传入、教派分立、圣城易主)/ 干预(主色)。
+ *   卡片上的类型名按一字标签细分("攻占""迁都"……)。
  * - 刻度:每条纪事一个小菱形(战争画在开战那年);挨得太近(DIAMOND_GAP 像素以内)合并成一个,
  *   颜色取其中分量最重的那一件,悬停列出每一件。干预单独一种"令"标记,不和菱形合并。
  */
@@ -19,8 +20,8 @@ import { nearX, wrapOf } from '../render/common';
 // ---------------------------------------------------------------------------
 // 事件类型
 
-/** 五类事件 + 干预(order);CSS 里 [data-ev=war] 等配色 */
-export type EvType = 'war' | 'dynasty' | 'found' | 'empire' | 'assim' | 'order';
+/** 五类事件 + 宗教(faith)+ 干预(order);CSS 里 [data-ev=war] 等配色 */
+export type EvType = 'war' | 'dynasty' | 'found' | 'empire' | 'assim' | 'faith' | 'order';
 
 const KIND_TYPE: Readonly<Record<string, EvType>> = {
   war: 'war',
@@ -42,6 +43,7 @@ const KIND_TYPE: Readonly<Record<string, EvType>> = {
   assimilate: 'assim',
   migrate: 'assim',
   vanish: 'assim',
+  faith: 'faith',
   intervene: 'order',
 };
 
@@ -76,6 +78,11 @@ const TAG_LABEL: Readonly<Record<string, string>> = {
   建: '重建',
   衰: '衰落',
   干: '干预',
+  创: '创教',
+  皈: '国教',
+  传: '传入',
+  派: '教派',
+  圣: '圣城',
 };
 
 /** 卡片 / 最近事件 / 提示里的类型名:"战争""改朝""称帝"…… */
@@ -117,6 +124,7 @@ const KIND_WEIGHT: Readonly<Record<string, number>> = {
   rebuild: 2,
   decline: 2,
   sack: 1,
+  faith: 2,
   intervene: 9,
 };
 

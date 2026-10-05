@@ -1,23 +1,24 @@
 /**
- * 右上"搜索"的查找(纯计算,不碰 DOM;单测直接调):按名字找国家(含已亡)、城、民族、山河湖海岛。
+ * 右上"搜索"的查找(纯计算,不碰 DOM;单测直接调):按名字找国家(含已亡)、城、民族、信仰、山河湖海岛。
  *
  * - 用改过名的那份历史(editsStore 套过的 civ):改过的名字能搜到
  * - 国家按它实际用过的国号找(改朝换代前的"大景"也算),显示时间轴这一年的国号(已亡的写最后的国号)
- * - 排序:名字完全相同 > 开头就对上 > 名字里有;同样对得上时 国家 > 城 > 民族 > 山河;同类里大的在前
+ * - 排序:名字完全相同 > 开头就对上 > 名字里有;同样对得上时 国家 > 城 > 民族 > 信仰 > 山河;同类里大的在前
  * - 什么都没输:列出这一年最大的几个国家
  */
 import type { Civ, Place, Polity } from '../gen/civ/types';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
 import { cultureLabel } from '../gen/civ/display';
 import { capitalAt, polityAlive, polityName, populationAt } from '../gen/civ/growth';
+import { faithCounts } from '../gen/civ/religion';
 import type { MapSelection } from './civView';
 
 export interface SearchHit {
-  kind: 'polity' | 'settlement' | 'culture' | 'place';
+  kind: 'polity' | 'settlement' | 'culture' | 'faith' | 'place';
   id: number;
   /** 显示的名字 */
   name: string;
-  /** 右侧小字:"12 州" / "国都 竹影城" / "城，属大澜王朝" / "民族" / "山脉" */
+  /** 右侧小字:"12 州" / "国都 竹影城" / "城，属大澜王朝" / "民族" / "宗教" / "山脉" */
   sub: string;
   /** 颜色块 */
   color: string;
@@ -121,7 +122,7 @@ interface Scored extends SearchHit {
   weight: number;
 }
 
-const KIND_ORDER: Record<SearchHit['kind'], number> = { polity: 0, settlement: 1, culture: 2, place: 3 };
+const KIND_ORDER: Record<SearchHit['kind'], number> = { polity: 0, settlement: 1, culture: 2, faith: 3, place: 4 };
 
 /** 按名字找;q 为空 = 这一年最大的几个国家 */
 export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARCH_LIMIT): SearchHit[] {
@@ -208,6 +209,24 @@ export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARC
       select: { kind: 'region', id: cultureRegion(civ, cu.id, year, owners) },
       score: m,
       weight: n,
+    });
+  }
+  // 信仰:大教、教派、各族的民间信仰
+  let fn: Int32Array | null = null;
+  for (const f of civ.religion?.faiths ?? []) {
+    const m = matchScore(f.name, q);
+    if (m < 0) continue;
+    fn ??= faithCounts(civ, year, undefined, owners).n;
+    const later = f.kind !== 'folk' && (f.founded ?? 0) > year;
+    out.push({
+      kind: 'faith',
+      id: f.id,
+      name: f.name,
+      sub: f.kind === 'folk' ? '民间信仰' : `${f.kind === 'sect' ? '教派' : '宗教'}${later ? `，${Math.floor(f.founded ?? 0)} 年${f.kind === 'sect' ? '分出' : '创立'}` : ''}`,
+      color: rgb(f.color),
+      select: { kind: 'faith', id: f.id },
+      score: m,
+      weight: fn[f.id] ?? 0,
     });
   }
   // 山河湖海岛、荒漠

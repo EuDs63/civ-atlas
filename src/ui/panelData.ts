@@ -15,7 +15,8 @@ import { populationAt } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
 import { KM_PER_UNIT } from '../gen/civ/geo';
 import { geometryOf } from '../gen/geometry';
-import { buildChronicle, type ChronicleEntry } from '../gen/civ/chronicle';
+import type { ChronicleEntry } from '../gen/civ/chronicle';
+import { fullChronicle } from '../gen/civ/religionText';
 
 // ---------------------------------------------------------------------------
 // 这一年各州的归属(面板共用一份;下一次换了年份再查会覆盖掉,要用的数当场取出来)
@@ -168,7 +169,7 @@ const PEAK_SAMPLES = 400;
 const entryCache = new WeakMap<readonly ChronicleEntry[], Map<string, ChronicleEntry[]>>();
 
 function entriesOf(civ: Civ, key: string, test: (e: ChronicleEntry) => boolean): ChronicleEntry[] {
-  const all = buildChronicle(civ);
+  const all = fullChronicle(civ);
   let m = entryCache.get(all);
   if (!m) entryCache.set(all, (m = new Map()));
   let hit = m.get(key);

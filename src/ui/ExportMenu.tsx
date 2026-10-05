@@ -21,6 +21,7 @@ import { DEFAULT_PARAMS, type World, type WorldParams } from '../gen/world';
 import { rasterize, type Raster } from '../gen/raster';
 import type { Civ } from '../gen/civ/types';
 import { chronicleDocument } from '../gen/civ/chronicle';
+import { fullChronicle } from '../gen/civ/religionText';
 import { AZGAAR_SEA_GRAY, heightmapNote, type HeightmapBits } from '../gen/heightmap';
 import { LAYERS, type LayerId } from '../render/layers';
 import type { CivShow, CivStyle } from '../render/civ/overlay';
@@ -347,7 +348,7 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
       } else if (job === 'md' || job === 'txt') {
         if (!civ) throw new Error('文明还没推演完');
         const name = `${base}-编年史.${job === 'md' ? 'md' : 'txt'}`;
-        const text = chronicleDocument(civ, { format: job, seed: seedN, params });
+        const text = chronicleDocument(civ, { format: job, seed: seedN, params, entries: fullChronicle(civ) });
         const blob = new Blob([text], { type: job === 'md' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8' });
         download(blob, name);
         dbg = { job, name, bytes: blob.size, ms: performance.now() - t0 };

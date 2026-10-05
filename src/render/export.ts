@@ -8,7 +8,7 @@
  *      地图按世界宽(2048 CSS 像素)显示、2× 时像素密度 × 2:2× 和 1× 排出来一模一样,只是更清楚。
  *      排版、避让和屏幕上是同一套(render/labels/draw.ts 的 placeMap),文字之间不重叠、国名落在国土上。
  *
- * 图例(drawLegend):国家 / 民族列表 + 颜色(和世界概览的国家页一样按当年的州数排)、道路和城镇符号,和地图用同一套字体与配色。
+ * 图例(drawLegend):国家 / 民族列表 + 颜色(和世界概览的国家页一样按当年的州数排;信仰图层再列信仰)、道路和城镇符号,和地图用同一套字体与配色。
  *
  * 投影(和屏幕上一样):等距圆柱按当前中心左右转;弯边投影(罗宾森、摩尔威德……)按投影重画(和屏幕上停着时一样:
  * 面按行重投影,海岸、河、国界、道路逐点投影,符号正立,见 drawProjectedBase),外框换成投影轮廓、罗盘在轮廓外的左下角,
@@ -30,6 +30,7 @@ import { ensureFonts, familyFor, fontCss } from './labels/fonts';
 import { capitalAt, polityAlive, polityName } from '../gen/civ/growth';
 import { ownersAt } from '../gen/civ/timeline';
 import { KIND_INFO, cultureLabel } from '../gen/civ/display';
+import { faithRows } from '../gen/civ/religionText';
 import { drawGraticule, labelProjection, mapProj, outlineOnCanvas, pageColor, projector, reprojectImage, type MapProj, type ProjectionId } from './projection';
 import { drawTerrainProjected } from './detail';
 import { compassSpot, drawProjFrame } from './fantasy';
@@ -365,6 +366,15 @@ export function legendRows(civ: Civ, year: Year): { polities: LegendRow[]; cultu
   return { polities, cultures, tribal };
 }
 
+/** 信仰图层的图例:和侧栏信仰列表同样的几行(大教按信众排,教派跟在本教后面,各族民间信仰合成一行) */
+export function faithLegendRows(civ: Civ, year: Year): LegendRow[] {
+  const F = civ.religion?.faiths ?? [];
+  return faithRows(civ, Math.floor(year)).map((r) => {
+    const form = r.id >= 0 && !r.sect ? F[r.id]?.form : undefined;
+    return { color: [r.color[0], r.color[1], r.color[2]], name: r.name, note: `${r.sect ? '教派 · ' : form ? `${form} · ` : ''}${r.n} 州` };
+  });
+}
+
 interface LegendLook {
   paper: string;
   edge: string;
@@ -398,8 +408,8 @@ const SYMBOL_ROWS: { kind: SettlementKind; name: string }[] = [
 ];
 
 /**
- * 图例图片:标题(第 N 年)、国家(色块 + 当年国号 + 州数、国都)、民族(色块 + 族名 + 类型、州数)、城镇符号、道路。
- * 地图上开着"民族"时色块是民族的,国家只画国界 —— 国家的色块就画成空心框。
+ * 图例图片:标题(第 N 年)、国家(色块 + 当年国号 + 州数、国都)、民族(色块 + 族名 + 类型、州数)或信仰(色块 + 名字 + 类型、州数)、城镇符号、道路。
+ * 地图上开着"民族"或"信仰"时色块是民族 / 信仰的,国家只画国界 —— 国家的色块就画成空心框。
  * 两个表都没开时两个都列。行多了分两栏。
  */
 export async function drawLegend(p: LegendParams, scale: ExportScale): Promise<HTMLCanvasElement> {
@@ -410,13 +420,16 @@ export async function drawLegend(p: LegendParams, scale: ExportScale): Promise<H
   const look = LEGEND_LOOK[style];
   const family = familyFor(style);
   const rows = legendRows(civ, y);
-  const wantPol = show.polities || !show.cultures;
-  const wantCul = show.cultures || !show.polities;
-  const outline = show.cultures;
+  // 信仰图层:地图铺的是信仰(国家只画国界),图例列国家(空心框)和信仰
+  const faithOn = show.faiths && !!civ.religion?.faiths.length;
+  const faiths = faithOn ? faithLegendRows(civ, y) : [];
+  const wantPol = show.polities || (!show.cultures && !faithOn);
+  const wantCul = !faithOn && (show.cultures || !show.polities);
+  const outline = show.cultures || faithOn;
   const withMarks = show.polities || show.routes;
   const withRoutes = show.routes;
 
-  const allText = [...rows.polities, ...rows.cultures].map((r) => r.name + r.note).join('') + '图例第年国家民族城镇道路大路小路航线部落地带种子州都';
+  const allText = [...rows.polities, ...rows.cultures, ...faiths].map((r) => r.name + r.note).join('') + '图例第年国家民族信仰教派城镇道路大路小路航线部落地带种子州都';
   await ensureFonts(style, allText, 15000);
 
   // ---- 版式(CSS 像素,最后 × S)----
@@ -424,10 +437,11 @@ export async function drawLegend(p: LegendParams, scale: ExportScale): Promise<H
   const COL = 300;
   const ROW = 26;
   const HEAD = 34;
-  type Block = { title: string; rows: LegendRow[]; kind: 'pol' | 'cul' };
+  type Block = { title: string; rows: LegendRow[]; kind: 'pol' | 'cul' | 'faith' };
   const blocks: Block[] = [];
   if (wantPol) blocks.push({ title: '国家', rows: rows.polities, kind: 'pol' });
   if (wantCul) blocks.push({ title: '民族', rows: rows.cultures, kind: 'cul' });
+  if (faithOn) blocks.push({ title: '信仰', rows: faiths, kind: 'faith' });
   const most = Math.max(1, ...blocks.map((b) => b.rows.length));
   const cols = most > 14 ? 2 : 1;
   const W = PAD * 2 + COL * cols + (cols - 1) * 24;
@@ -485,7 +499,7 @@ export async function drawLegend(p: LegendParams, scale: ExportScale): Promise<H
     text(b.title, PAD, cy + HEAD / 2 - 2, 17, look.ink, style === 'fantasy' ? 500 : 700);
     cy += HEAD;
     if (!b.rows.length) {
-      text(b.kind === 'pol' ? '这一年还没有国家' : '这一年还没有民族', PAD, cy + ROW / 2, 14, look.muted);
+      text(`这一年还没有${b.title}`, PAD, cy + ROW / 2, 14, look.muted);
       cy += ROW;
     }
     const per = Math.ceil(b.rows.length / cols);

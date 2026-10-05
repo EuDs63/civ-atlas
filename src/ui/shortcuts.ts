@@ -4,7 +4,7 @@
  *   空格        播放 / 暂停历史
  *   ← →         往前 / 往后 10 年,按住 Shift 100 年
  *   + −         放大 / 缩小地图(和右下的 + − 一样)
- *   1 2 3 4     右上图层按钮的第 1–4 个:政区 / 民族 / 地形 / 实景(新建世界时:地形 / 实景 / 高程)
+ *   1 2 3 4 5   右上图层按钮的第 1–5 个:政区 / 民族 / 信仰 / 地形 / 实景(新建世界时:地形 / 实景 / 高程)
  *   /           光标跳进搜索框
  *   ⌘Z / ⇧⌘Z    撤销 / 重做最近一次修改(Windows 上是 Ctrl + Z / Ctrl + Shift + Z,Ctrl + Y 也是重做)
  *   ⌘S          打开「存档」菜单(世界本来就自动存着;不弹浏览器自己的"存储网页")
@@ -29,6 +29,7 @@ export type ShortcutAction =
   | 'layer2'
   | 'layer3'
   | 'layer4'
+  | 'layer5'
   | 'search'
   | 'undo'
   | 'redo'
@@ -54,10 +55,12 @@ const LAYER_CODES: Record<string, ShortcutAction> = {
   Digit2: 'layer2',
   Digit3: 'layer3',
   Digit4: 'layer4',
+  Digit5: 'layer5',
   Numpad1: 'layer1',
   Numpad2: 'layer2',
   Numpad3: 'layer3',
   Numpad4: 'layer4',
+  Numpad5: 'layer5',
 };
 
 /** 符号键:打出来的字没法用(输入法给的「、」、死键之类)时,按键位当美式键盘上的字 */
@@ -144,6 +147,8 @@ export function keyLabel(k: ShortcutKey, mac = isMacLike()): string {
       return '3';
     case 'layer4':
       return '4';
+    case 'layer5':
+      return '5';
     case 'search':
       return '/';
     case 'undo':
@@ -175,7 +180,7 @@ export const SHORTCUT_GROUPS: readonly { title: string; rows: readonly { text: s
     title: '地图',
     rows: [
       { text: '放大 / 缩小', keys: ['zoomIn', 'zoomOut'] },
-      { text: '政区、民族、地形、实景', keys: ['layer1', 'layer2', 'layer3', 'layer4'] },
+      { text: '政区、民族、信仰、地形、实景', keys: ['layer1', 'layer2', 'layer3', 'layer4', 'layer5'] },
       { text: '收起 / 展开左边的卡片', keys: ['side'] },
       { text: '取消选中，关掉弹出的东西', keys: ['esc'] },
     ],

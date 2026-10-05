@@ -4,6 +4,7 @@
  *   CivToggles     图层大图下面一行小字开关:地名、宜居度、州、城址、道路、战事(可以同时开几个,再点一次关闭);
  *                  开着宜居度 / 道路 / 战事时下面一行小图例(贫瘠 → 富饶的色带;大路 / 小路 / 航线;战线 / 战时易手 / 交战处)
  *   CultureLegend  选中"民族"图层时:这一年还在的民族,按地盘大小排的紧凑色块列表(族名 + 州数)
+ *   FaithLegend    选中"信仰"图层时:这一年的信仰,和侧栏「信仰」一组同样的顺序(大教、跟着它的教派、最后民间信仰)
  *
  * 国家的图例不再单独放:世界概览的"国家"页就是(WorldOverviewCountries.tsx)。
  */
@@ -13,9 +14,10 @@ import type { CivShow } from '../render/civ/overlay';
 import { HABITAT_RAMP } from '../render/civ/debug';
 import { KIND_INFO, cultureLabel } from '../gen/civ/display';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
+import { faithRows } from '../gen/civ/religionText';
 import { getCivTime, setCivShow, subscribeCivTime, useCivShow } from './civView';
 
-const TOGGLES: { key: Exclude<keyof CivShow, 'polities' | 'cultures'>; name: string; hint: string }[] = [
+const TOGGLES: { key: Exclude<keyof CivShow, 'polities' | 'cultures' | 'faiths'>; name: string; hint: string }[] = [
   { key: 'labels', name: '地名', hint: '海洋、山脉、大河、湖泊、大岛、荒漠的名字;放大地图显示更多' },
   { key: 'habitat', name: '宜居度', hint: '哪里适合住人:颜色越深越宜居;不上色的是冰原等不可居之地' },
   { key: 'regions', name: '州', hint: '按山脊、大河自然划分的地区,是文明扩张的基本单位' },
@@ -142,6 +144,29 @@ export function CultureLegend({ civ }: { civ: Civ | null }) {
         ))
       ) : (
         <span className="lp-none">第 {y} 年还没有民族</span>
+      )}
+    </div>
+  );
+}
+
+/** 信仰图例:跟着时间轴走 —— 这一年的大教(按信众多少)、跟在后面的教派,最后一行民间信仰:色块 + 教名 + 州数 */
+export function FaithLegend({ civ }: { civ: Civ | null }) {
+  const end = civ?.endYear ?? 0;
+  const y = useSyncExternalStore(subscribeYear, () => Math.floor(Math.min(end, Math.max(0, getCivTime().year ?? end))));
+  const rows = useMemo(() => (civ ? faithRows(civ, y) : []), [civ, y]);
+  if (!civ) return null;
+  return (
+    <div className="lp-cultures" aria-label={`第 ${y} 年的信仰`}>
+      {rows.length ? (
+        rows.map((r) => (
+          <span key={r.id} className="lp-cu" title={`${r.sub} · ${r.n} 州`}>
+            <i style={{ background: `rgb(${r.color.join(',')})` }} />
+            <b>{r.name}</b>
+            <em>{r.n}</em>
+          </span>
+        ))
+      ) : (
+        <span className="lp-none">第 {y} 年还没有人住</span>
       )}
     </div>
   );

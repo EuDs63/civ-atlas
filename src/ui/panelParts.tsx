@@ -1,5 +1,5 @@
 /**
- * 详情面板的公共零件:国家(CountryPanel)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)四种面板共用,
+ * 详情面板的公共零件:国家(CountryPanel)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)、信仰(FaithPanel)几种面板共用,
  * 保证它们看起来是同一套东西(样式都在 countryPanel.css)。
  *
  *   PanelHead    顶部:颜色块、名字、一行关键信息("国家，1446 年立国")、右上角圆形的关闭
@@ -297,12 +297,12 @@ export function Spark({ bars, title, fill }: { bars: Bar[]; title?: string; fill
 // 相关事件
 
 /**
- * 大事:upTo = 到当前年份为止的(按年份排好),显示最近 5 条(新的在上)。
+ * 大事:upTo = 到当前年份为止的(按年份排好),显示最近 limit 条(默认 5 条,新的在上)。
  * more = 标题右边的"全部 N 件"(不给 = 只写条数);empty = 一条都没有时写的一行(不给 = 整块不显示)
  */
-export function EventList({ upTo, more, empty }: { upTo: readonly ChronicleEntry[]; more?: ReactNode; empty?: string }) {
+export function EventList({ upTo, more, empty, limit = 5 }: { upTo: readonly ChronicleEntry[]; more?: ReactNode; empty?: string; limit?: number }) {
   if (!upTo.length && empty === undefined) return null;
-  const recent = upTo.slice(-5).reverse();
+  const recent = upTo.slice(-limit).reverse();
   return (
     <section className="cp-sec cp-events">
       <div className="cp-sec-head cp-events-head">

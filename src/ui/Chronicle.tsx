@@ -1,6 +1,7 @@
 /**
  * 世界概览的"编年史"页:按年份列出推演里的大事(条目由 gen/civ/chronicle.ts 写好),新的在上。
- * 一行:年份(宋体)· 类型(彩色粗体:战争 / 改朝 / 立国 / 称帝 / 同化 / 干预……)· 纪事正文。
+ * 一行:年份(宋体)· 类型(彩色粗体:战争 / 改朝 / 立国 / 称帝 / 同化 / 宗教 / 干预……)· 纪事正文。
+ * 宗教的事(创教、立国教、传入、教派分立、圣城易主)不是史事,按年份并进来(religionText.ts 的 fullChronicle)。
  *
  * - 点一条:收起概览,时间轴跳到那一年并暂停,打开"国家"图层,地图上事发的州 / 相关国家闪约两秒
  *   (高亮在 CivLayer 画;事发地不在视野里时 App 把地图平移过去)。
@@ -15,7 +16,8 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
-import { buildChronicle, chronicleText, filterChronicle, polityChronicle, yearText, type ChronicleEntry } from '../gen/civ/chronicle';
+import { chronicleText, filterChronicle, polityChronicle, yearText, type ChronicleEntry } from '../gen/civ/chronicle';
+import { fullChronicle } from '../gen/civ/religionText';
 import { polityName } from '../gen/civ/growth';
 import { getCivTime, pickChronicleEntry, setChronicle, subscribeCivTime, useChronicle, useChroniclePick, type CivTime } from './civView';
 import { evLabel, evText, evType } from './timelineLayout';
@@ -40,7 +42,7 @@ const ST = ['past', 'live', 'future'] as const;
 export function Chronicle({ civ }: { civ: Civ | null }) {
   const view = useChronicle();
   const aiOn = useAiOn();
-  const all = useMemo(() => (civ ? buildChronicle(civ) : []), [civ]);
+  const all = useMemo(() => (civ ? fullChronicle(civ) : []), [civ]);
   // 按国家筛过的"全部"和"大事"(两个按钮上各写条数),当前列出的是其中之一;只看一国时"全部"里并进这一国的君主继位
   const mine = useMemo(() => {
     if (!civ || view.polity === null) return filterChronicle(all, { polity: view.polity });

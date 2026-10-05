@@ -4,7 +4,7 @@
  *
  * 按固定顺序调用各画法;每个画法在自己的文件里:
  *   宜居度热力图(debug.ts)
- *   → 国土 / 民族色块(territory.ts;两层都开时铺民族)
+ *   → 国土 / 民族 / 信仰色块(territory.ts;两层都开时铺民族;开着信仰就铺信仰,见 faith.ts)
  *   → 战事:正在打的仗里易手的州画斜线(warfare.ts)
  *   → 州界细线(debug.ts)
  *   → 国界(borders.ts)
@@ -43,6 +43,8 @@ export interface CivShow {
   cultures: boolean;
   /** 国家:国土、国界、城镇。和"民族"一起开时只画国界和城镇,色块是民族的 */
   polities: boolean;
+  /** 信仰色块(信仰图层;开着时铺信仰,不铺民族、国土,国家只画国界和城镇) */
+  faiths: boolean;
   /** 战事:正在打的仗(战线、易手的州、交战处的双剑);要开着"国家"才画(默认打开) */
   wars: boolean;
 }
@@ -55,6 +57,7 @@ export const CIV_SHOW_OFF: CivShow = {
   labels: false,
   cultures: false,
   polities: false,
+  faiths: false,
   wars: false,
 };
 /** 打开页面时的默认显示:地名、战事(战事要开着"国家"才画) */
@@ -96,6 +99,8 @@ export interface CivDrawParams {
   pen?: number;
   /** 细节层:只画和这块(世界坐标,x 展开的 [x0, y0, x1, y1])沾边的线;不给 = 全画 */
   cull?: readonly [number, number, number, number];
+  /** 信仰图层:选中的信仰(宗教卡片开着),别的信仰变淡;不给 = 都是原色 */
+  faithFocus?: number | null;
 }
 
 export function drawCivOverlay(ctx: CanvasRenderingContext2D, p: CivDrawParams) {

@@ -9,7 +9,7 @@ import type { World } from '../gen/world';
 import type { Civ } from '../gen/civ/types';
 import { capitalAt } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
-import { placeKeyOf, polityKey, regionKey, settlementKey } from '../gen/edits';
+import { faithKey, placeKeyOf, polityKey, regionKey, settlementKey } from '../gen/edits';
 import { projectWorld, projectWorldNear, type MapProj } from '../render/projection';
 import { clampCurved, clampSphere, stageToWorld, type MapView, type StageBox } from './mapWrap';
 import type { MapSelection } from './civView';
@@ -53,6 +53,7 @@ export function selectionKey(civ: Civ, sel: MapSelection): string {
   if (sel.kind === 'polity') return civ.polities[sel.id] ? polityKey(civ, sel.id) : '';
   if (sel.kind === 'settlement') return civ.settlements[sel.id] ? settlementKey(civ, sel.id) : '';
   if (sel.kind === 'place') return civ.places[sel.id] ? placeKeyOf(civ, sel.id) : '';
+  if (sel.kind === 'faith') return civ.religion?.faiths[sel.id] ? faithKey(civ, sel.id) : '';
   return sel.id >= 0 && sel.id < civ.regions.count ? regionKey(civ, sel.id) : '';
 }
 
@@ -123,6 +124,8 @@ export function selectionFocus(world: World, civ: Civ, sel: MapSelection, year: 
     }
     return focusOf(W, H, [x0, y0, x1, y1], (x0 + x1) / 2, (y0 + y1) / 2);
   }
+  // 信仰遍布好几国:选中时地图不动(「设为中心」转到圣城)
+  if (sel.kind === 'faith') return null;
   const p = civ.polities[sel.id];
   if (!p) return null;
   const y0 = shownYearOf(p, year, civ.endYear);

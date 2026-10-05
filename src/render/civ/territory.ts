@@ -11,6 +11,8 @@
  *   离界线不远的像素再按平滑后的界线判在哪一侧(borders.ts 的 bandLabels):色块的边和画出来的国界严丝合缝。
  *   海、湖的像素不上色,海岸线和地形图严丝合缝。
  * - 两层都打开时只铺民族色块,国家只画国界(见 overlay.ts)。
+ * - 信仰图层:把信仰换进民族那一层(faith.ts 的 faithCiv),画法和民族色块一样,只是浓一点(手绘 PAINT_FAITH_*);
+ *   选中一种信仰时别的信仰变淡(faithColors)。
  * - 回放 / 拖时间轴时(fast)用半分辨率,静止时用全分辨率;刚归属的州用几十年渐入,看起来像颜料慢慢洇开。
  *
  * washPixels 是纯计算(不碰 DOM),stress 脚本在 Node 里给它计时。
@@ -28,6 +30,7 @@ import { fantasyGlobeInkMask, fantasyInkMask, fantasyInkProj, inkFromPixels, typ
 import { coastBlocks, KEEP, landCover, nearestCellPixel, nearestSide, type DetailGrid, type SegIndex } from './zoomGrid';
 import { reprojectImage } from '../projection';
 import type { CivDrawParams, CivStyle } from './overlay';
+import { faithBase, faithCiv, faithColors } from './faith';
 
 /** 刚被占的州用多少年渐入 */
 export const FADE_YEARS = 30;
@@ -50,6 +53,10 @@ const PAINT_EDGE_W = 9;
 const PAINT_POL_FILL = 0.2;
 const PAINT_POL_EDGE = 0.5;
 const PAINT_POL_EDGE_W = 12;
+/** 手绘 · 信仰:比民族色块浓一点、晕边宽一点(信仰图层上看的就是这一层) */
+const PAINT_FAITH_FILL = 0.26;
+const PAINT_FAITH_EDGE = 0.5;
+const PAINT_FAITH_EDGE_W = 12;
 /** 手绘:边缘"水痕"宽度(像素)、加深多少、额外不透明度 */
 const PAINT_RIM_W = 1.1;
 const PAINT_RIM_DARK = 0.78;
@@ -151,6 +158,8 @@ export interface WashInput {
   label?: Int16Array;
   /** 国土:写实风换成更淡的罩染 + 紧贴国界的色带 */
   polity?: boolean;
+  /** 信仰:手绘风浓一点(见 PAINT_FAITH_*) */
+  faith?: boolean;
   /** 手绘:符号"让位"遮罩(全分辨率,见 fantasyInkMask):水彩在符号上减淡,不把墨线、树林染脏 */
   ink?: InkMask | null;
   /** 主图东西相连:离边界的距离左右相通(粗网格左右各接上一截另一头);不给 = 不相连(单测用的小图) */
@@ -274,7 +283,7 @@ export function edgeField(inp: WashInput, out?: EdgeField | null): EdgeField {
 }
 
 /** 浓淡查表(按全分辨率像素距离,步长 1/4 像素):不透明度 0–1 */
-export function washLut(style: CivStyle, polity: boolean): Float32Array {
+export function washLut(style: CivStyle, polity: boolean, faith = false): Float32Array {
   const paint = style === 'fantasy';
   const lut = new Float32Array(LUT_N);
   for (let i = 0; i < LUT_N; i++) {
@@ -282,7 +291,9 @@ export function washLut(style: CivStyle, polity: boolean): Float32Array {
     lut[i] = paint
       ? polity
         ? PAINT_POL_FILL + PAINT_POL_EDGE * Math.exp(-d / PAINT_POL_EDGE_W)
-        : PAINT_FILL + PAINT_EDGE * Math.exp(-d / PAINT_EDGE_W)
+        : faith
+          ? PAINT_FAITH_FILL + PAINT_FAITH_EDGE * Math.exp(-d / PAINT_FAITH_EDGE_W)
+          : PAINT_FILL + PAINT_EDGE * Math.exp(-d / PAINT_EDGE_W)
       : polity
         ? REAL_POL_FILL + REAL_POL_EDGE * Math.exp(-d / REAL_POL_EDGE_W)
         : REAL_FILL + REAL_EDGE * Math.exp(-d / REAL_EDGE_W);
@@ -302,7 +313,7 @@ export function washPixels(inp: WashInput, out: Uint8ClampedArray): void {
 
   // ---- 浓淡查表(按全分辨率像素距离,步长 1/4 像素) ----
   const paint = style === 'fantasy';
-  const lut = washLut(style, !!polity);
+  const lut = washLut(style, !!polity, !!inp.faith);
   const gr = paint ? grain() : null;
   const hard = ink?.hard;
   const soft = ink?.soft;
@@ -423,7 +434,7 @@ export function washDetail(
   const { G, GW, GH, PAD, dist } = fl.edge;
   const off = f >> 1;
   const paint = style === 'fantasy';
-  const lut = washLut(style, polity);
+  const lut = washLut(style, polity, fl.faith);
   const gr = paint ? grain() : null;
   const hard = ink?.hard;
   const soft = ink?.soft;
@@ -733,10 +744,13 @@ function cacheOf(p: CivDrawParams): Cache {
   let c = caches.get(civ);
   if (!c || c.raster !== raster) {
     const R = civ.regions.count;
-    let weak: Uint8Array;
+    // 信仰图层换出来的 Civ 和原来的州一样:像素 → 州(连同借来的像素)借原来那一份
+    const base = faithBase(civ);
+    const from = base ? cacheOf({ world, raster, civ: base } as CivDrawParams) : null;
+    const weak = from ? from.weak : new Uint8Array(raster.w * raster.h);
     c = {
       raster,
-      pix: pixelRegions(world.mesh, raster, civ.regions.of, (weak = new Uint8Array(raster.w * raster.h))),
+      pix: from ? from.pix : pixelRegions(world.mesh, raster, civ.regions.of, weak),
       weak,
       own: { culture: new Int16Array(R), polity: new Int16Array(R) },
       looks: [lookOf(civ.cultures, R), lookOf(civ.polities, R)],
@@ -779,8 +793,9 @@ export function fadeIn(civ: Civ, year: number, since: Float32Array, out: Float32
   return out;
 }
 
-/** 这一帧铺哪一层:民族打开就铺民族(国家只画国界),只开国家就铺国土 */
+/** 这一帧铺哪一层:信仰打开就铺信仰(换进民族那一层,见 faithParams),民族打开就铺民族(国家只画国界),只开国家就铺国土 */
 export function washLayer(p: CivDrawParams): Layer | null {
+  if (p.show.faiths && p.civ.religion?.faiths.length) return Layer.Culture;
   if (p.show.cultures && p.civ.cultures.length) return Layer.Culture;
   if (p.show.polities && p.civ.polities.length) return Layer.Polity;
   return null;
@@ -809,14 +824,24 @@ export interface WashFields {
   polity: boolean;
   /** 像素 → 州(全分辨率,水 = −1) */
   pix: Int16Array;
+  /** 信仰图层(浓一点) */
+  faith: boolean;
 }
 
-export function washFields(p: CivDrawParams, f: number): WashFields | null {
+/** 信仰图层:换成把信仰换进民族那一层的参数(faithCiv);不是信仰图层 = null */
+function faithParams(p: CivDrawParams): CivDrawParams | null {
+  if (!p.show.faiths || !p.civ.religion?.faiths.length || faithBase(p.civ)) return null;
+  return { ...p, civ: faithCiv(p.civ), show: { ...p.show, cultures: true, faiths: false } };
+}
+
+export function washFields(p0: CivDrawParams, f: number): WashFields | null {
+  const fp = faithParams(p0);
+  const p = fp ?? p0;
   const layer = washLayer(p);
   if (layer === null) return null;
   const { civ, raster } = p;
   const c = cacheOf(p);
-  const key = `${layer}|${p.year}|${p.style}`;
+  const key = `${layer}|${p.year}|${p.style}${fp ? `|${p0.faithFocus ?? ''}` : ''}`;
   const old = c.fields.get(f);
   if (old?.key === key) return old;
   const W = Math.ceil(raster.w / f);
@@ -839,7 +864,8 @@ export function washFields(p: CivDrawParams, f: number): WashFields | null {
     label: new Int16Array(0),
     dist: new Float32Array(0),
   });
-  const out: WashFields = { key, layer, f, label, W, H, edge, owner, fade, fading, colors: look.colors, lines, polity: layer === Layer.Polity, pix: c.pix };
+  const colors = fp ? faithColors(p0.civ, p0.faithFocus) : look.colors;
+  const out: WashFields = { key, layer, f, label, W, H, edge, owner, fade, fading, colors, lines, polity: layer === Layer.Polity, pix: c.pix, faith: !!fp };
   c.fields.set(f, out);
   return out;
 }
@@ -849,7 +875,9 @@ function inkOf(p: CivDrawParams): InkMask | null {
   return p.style === 'fantasy' ? fantasyInkMask(p.world, p.raster, SYM_FOREST, SYM_PAPER) : null;
 }
 
-export function drawTerritory(ctx: CanvasRenderingContext2D, p: CivDrawParams): void {
+export function drawTerritory(ctx: CanvasRenderingContext2D, p0: CivDrawParams): void {
+  const fp = faithParams(p0);
+  const p = fp ?? p0;
   const layer = washLayer(p);
   if (layer === null) return;
   const { civ, raster } = p;
@@ -868,9 +896,9 @@ export function drawTerritory(ctx: CanvasRenderingContext2D, p: CivDrawParams): 
       canvas: typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(W, H) : Object.assign(document.createElement('canvas'), { width: W, height: H }),
     };
   }
-  const key = `${layer}|${p.year}|${p.style}|${projInk ? 1 : 0}`;
+  const key = `${layer}|${p.year}|${p.style}|${projInk ? 1 : 0}${fp ? `|${p0.faithFocus ?? ''}` : ''}`;
   if (b.key !== key) {
-    const fl = washFields(p, f)!;
+    const fl = washFields(p0, f)!;
     washPixels(
       {
         w: raster.w,
@@ -883,6 +911,7 @@ export function drawTerritory(ctx: CanvasRenderingContext2D, p: CivDrawParams): 
         style: p.style,
         label: fl.label,
         polity: fl.polity,
+        faith: fl.faith,
         ink: projInk ? null : globeInk ? fantasyGlobeInkMask(p.world, p.raster, SYM_FOREST, SYM_PAPER) : inkOf(p),
         wrap: fl.edge.PAD > 0,
         keepOut: projInk ? b.keep!.img.data : undefined,

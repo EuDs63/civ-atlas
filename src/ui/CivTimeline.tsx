@@ -17,7 +17,8 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
-import { buildChronicle, filterChronicle } from '../gen/civ/chronicle';
+import { filterChronicle } from '../gen/civ/chronicle';
+import { fullChronicle } from '../gen/civ/religionText';
 import {
   clearChroniclePick,
   getCivTime,
@@ -69,8 +70,8 @@ export function CivTimeline({ civ, hidden, dock = 'bottom' }: CivTimelineProps) 
     if (has && takeAutoplay()) startAutoplay(replayStart(end));
   }, [has, end]);
 
-  // 刻度用的纪事:和编年史面板列出的一致(buildChronicle 按 civ 缓存;只在换世界 / 换筛选时重算,播放时不变)
-  const all = useMemo(() => (has ? buildChronicle(civ) : []), [civ, has]);
+  // 刻度用的纪事:和编年史面板列出的一致(fullChronicle 按 civ 缓存;只在换世界 / 换筛选时重算,播放时不变)
+  const all = useMemo(() => (has ? fullChronicle(civ) : []), [civ, has]);
   const marks = useMemo(() => filterChronicle(all, { major: chron.major, polity: chron.polity }), [all, chron.major, chron.polity]);
 
   // 播放:每帧按真实流逝的时间推进年份
@@ -80,7 +81,7 @@ export function CivTimeline({ civ, hidden, dock = 'bottom' }: CivTimelineProps) 
       setCivTime({ year: null, playing: false, story: false });
       return;
     }
-    if (t.story) setCivShow({ cultures: true, polities: true });
+    if (t.story) setCivShow({ cultures: true, polities: true, faiths: false });
     const rate = t.story ? end / STORY_SECONDS : PLAY_RATE[t.speed] ?? PLAY_RATE[1];
     let last = performance.now();
     let raf = 0;

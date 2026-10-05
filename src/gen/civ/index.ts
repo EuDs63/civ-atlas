@@ -8,6 +8,7 @@
  *   ④ 道路网               routes.ts              → routes
  *   ⑤ 地理名称             places.ts              → places
  *   ⑥ 人物                 people.ts              → people(历代君主、战争里的统帅;按推出来的历史排,不改历史)
+ *   ⑦ 信仰                 religion.ts            → religion(民间信仰、大教、国教、教派;照推出来的历史贴上去,不改历史)
  *
  * 阶段 4 干预(params.interventions,interventions.ts):带着干预从第 0 年整段重推;干预年份之前和不干预时逐字节一致。
  * 阶段 4 改地形(world.terrain):扩张节拍按没改地形时的同一颗星球定(planetTempo),只有改动附近的历史跟着地形变。
@@ -31,6 +32,7 @@ import { installCities } from './cities';
 import { warModelOf } from './wars';
 import { installInterventions, scheduleInterventions } from './interventions';
 import { buildPeople } from './people';
+import { buildReligion } from './religion';
 
 export * from './types';
 
@@ -125,7 +127,7 @@ export function generateCiv(world: World, params: Partial<CivParams> = {}, progr
   const places: Place[] = findPlaces(world, regions, { cultures, culture }); // ⑤ places.ts(山海湖岛是地理,不看 viable)
   const people = buildPeople({ seed: world.params.seed, endYear: p.endYear, polities, settlements, cultures, annals }); // ⑥ people.ts
 
-  return {
+  const civ: Civ = {
     seed: world.params.seed,
     endYear: p.endYear,
     habitat,
@@ -146,6 +148,9 @@ export function generateCiv(world: World, params: Partial<CivParams> = {}, progr
     ...(iv ? { interventions: iv.list.slice() } : {}),
     people,
   };
+  // ⑦ religion.ts:要整份 civ(按年份查归属、国都、君主)
+  if (viable && cultures.length) civ.religion = buildReligion(world, civ);
+  return civ;
 }
 
 export function emptyLog(): ChangeLog {

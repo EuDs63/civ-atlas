@@ -1,8 +1,8 @@
 /**
  * 浮在地图上的按钮(宽屏的主体界面在左边的侧栏里,见 Sidebar.tsx):
  *
- *   右上 MapBar       图层分段按钮(政区 / 民族 / 地形 / 实景 / 更多图层)、导出、编年史、助手;写史书时最前面是写作进度
- *                     新建世界这一步还没有历史:只有地形 / 实景 / 高程 / 更多图层、助手(没有政区、民族,不放导出、编年史)
+ *   右上 MapBar       图层分段按钮(政区 / 民族 / 信仰 / 地形 / 实景 / 更多图层)、导出、编年史、助手;写史书时最前面是写作进度
+ *                     新建世界这一步还没有历史:只有地形 / 实景 / 高程 / 更多图层、助手(没有政区、民族、信仰,不放导出、编年史)
  *                     「助手」开关右边的助手面板(Assistant.tsx),开着时按钮是按下去的样子
  *   右下 MapControls  "地球 / 平面"切换、放大、缩小(触屏不放 + −,窄屏整个不放)
  *   窄屏(手机):
@@ -28,7 +28,7 @@ import { useAiOn } from '../ai/client';
 import './book.css';
 
 /** 右上图层分段按钮里直接列出的几个图层(其余的在"更多图层"里) */
-export const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'terrain', 'realistic'];
+export const SEG_LAYERS: MapLayer[] = ['political', 'cultures', 'faith', 'terrain', 'realistic'];
 /** 新建世界时(还没有历史) */
 export const DRAFT_SEG: MapLayer[] = ['terrain', 'realistic', 'elevation'];
 

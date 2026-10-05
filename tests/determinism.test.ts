@@ -58,7 +58,7 @@ function fingerprint(seed: number): Record<string, string> {
 }
 
 /**
- * 期望值是 GENERATOR_VERSION 7 算的。经纬度换算、沿大圆走、球面三角形面积这些三角函数都舍入到 24 位,
+ * 期望值是 GENERATOR_VERSION 8 算的(civ.religion 是后加的字段,加它时别的字段一个没变)。经纬度换算、沿大圆走、球面三角形面积这些三角函数都舍入到 24 位,
  * 推演里的超越函数也一样,所以各 CPU、各浏览器逐位一致
  */
 const EXPECTED: Record<number, Record<string, string>> = {
@@ -96,6 +96,7 @@ const EXPECTED: Record<number, Record<string, string>> = {
     'civ.polity': 'd506de907789',
     'civ.polityYears': 'e5d380617183',
     'civ.regions': 'dd42d93b1659',
+    'civ.religion': 'cd1a039d64b0',
     'civ.routes': 'aea43b3d4e9b',
     'civ.seed': '3ff6de7b7854',
     'civ.settlements': '34890b8a1c48',
@@ -136,6 +137,7 @@ const EXPECTED: Record<number, Record<string, string>> = {
     'civ.polity': '62c35f67f5cf',
     'civ.polityYears': 'e5d380617183',
     'civ.regions': '502f2d0d6efc',
+    'civ.religion': 'dce903487339',
     'civ.routes': 'ddbde57733ec',
     'civ.seed': '0096064c9137',
     'civ.settlements': 'c512f50f96fe',

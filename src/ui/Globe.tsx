@@ -34,7 +34,7 @@
  * 开关就是"投影"切换里的 globe(ui/projection.ts;"图层与投影"弹层的投影、地图右下角的"地球仪 / 平面地图"按钮都改它,网址 proj=globe,旧的 view=globe 也认);
  * 经纬网和平面投影共用一个开关;中心经度和 mapWrap.ts 的中心互通(打开时从当前中心转起,停下来就记下正对着的经度)。
  */
-import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { World } from '../gen/world';
 import type { Raster } from '../gen/raster';
 import type { Civ } from '../gen/civ/types';
@@ -118,6 +118,8 @@ import type { GlobeTexRequest, GlobeTexResponse } from '../globeWorker';
 import { fileBaseName } from '../gen/savefile';
 import { currentWorld } from './saveStore';
 import { createWheelReader, inGesturePinch, wheelSample } from './wheel';
+import { drawHolyDot, holyCities } from '../render/civ/faith';
+import { faithFocusOf, selectionOnMap } from './faithSelection';
 import './globe.css';
 
 const D = Math.PI / 180;
@@ -390,6 +392,8 @@ interface OverlayInput {
   war: CivDrawParams | null;
   /** 编年史高亮的描边、圆圈(不闪的时候 = null),alpha = 闪到多亮 */
   hl: { strokes: GlobeLineStroke[]; ring: { box: [number, number, number, number]; colors: [string, string, string] } | null; alpha: number } | null;
+  /** 信仰图层:圣城的小圆点(世界坐标、这个教的颜色) */
+  holy: { wx: number; wy: number; color: readonly number[] }[];
 }
 
 /** 排版要用的东西 */
@@ -527,6 +531,10 @@ function drawOverlay(ctx: CanvasRenderingContext2D, o: OverlayInput): GlobePlace
   drawSelectionLabels(ctx, pl.placed, lv, sel, style, at);
   drawSettlementMarks(ctx, pl.placed.marks, style);
   drawPlacedLabels(ctx, pl.placed.labels, lv, globeGlyphAlpha(lv));
+  for (const h of o.holy) {
+    const [x, y, d] = globeToCanvas(lv, h.wx, h.wy);
+    if (d > MARK_MIN_D) drawHolyDot(ctx, x, y, h.color, dpr);
+  }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   // 点选用:CSS 像素
   for (const m of pl.placed.marks) {
@@ -584,11 +592,20 @@ function drawHighlightRing(ctx: CanvasRenderingContext2D, box: [number, number, 
 }
 
 /** 文明贴图、矢量线要用的参数(和主图文明层同一年、同样的开关;世界和文明对不上时 = null) */
-function civParamsOf(p: { world: World; raster: Raster; civ: Civ | null; geo?: Civ | null; style: CivDrawParams['style']; show: CivShow }): CivDrawParams | null {
+function civParamsOf(p: {
+  world: World;
+  raster: Raster;
+  civ: Civ | null;
+  geo?: Civ | null;
+  style: CivDrawParams['style'];
+  show: CivShow;
+  faithFocus?: number | null;
+}): CivDrawParams | null {
   const base = p.geo ?? p.civ;
   if (!p.civ || !base || base.habitat.suitability.length !== p.world.mesh.n || base.regions !== p.civ.regions) return null;
   const t = getCivTime();
-  return { world: p.world, raster: p.raster, civ: base, style: p.style, year: t.year ?? base.endYear, show: p.show, fast: t.playing || t.scrubbing };
+  const faithFocus = p.show.faiths ? (p.faithFocus ?? null) : null;
+  return { world: p.world, raster: p.raster, civ: base, style: p.style, year: t.year ?? base.endYear, show: p.show, fast: t.playing || t.scrubbing, faithFocus };
 }
 
 /**
@@ -629,7 +646,10 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   // 经纬网:和平面投影共用一个开关(ui/projection.ts)
   const graticule = useGraticule();
   const [hiLoading, setHiLoading] = useState(false);
-  const { sel } = useSelection();
+  const { sel: picked } = useSelection();
+  // 选中一种信仰:圈它的城,信仰图层上别的信仰变淡(faithSelection.ts)
+  const sel = useMemo(() => selectionOnMap(civ, picked), [civ, picked]);
+  const faithFocus = faithFocusOf(picked);
   const hl = useCivHighlight();
   const show = useCivShow();
 
@@ -718,8 +738,8 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   }).current;
 
   // 最新的 props(帧回调里读)
-  const props = useRef({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, rightRoom, hl });
-  props.current = { world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, rightRoom, hl };
+  const props = useRef({ world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, rightRoom, hl, faithFocus });
+  props.current = { world, raster, civ, geo, style, layer, terrain, terrainKey, replay, graticule, sel, show, leftRoom, rightRoom, hl, faithFocus };
 
   /** 左边被侧栏卡片挡住的宽度(画布太窄就不让) */
   const leftOf = () => (s.size.w > 2 * props.current.leftRoom ? props.current.leftRoom : 0);
@@ -784,7 +804,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     // 回放 / 拖时间轴时和主图共用同一年算好的那份(省一次计算,高纬度林块上的让位略有错位,动着看不出)
     const cp = civParamsOf(p);
     const globeInk = !!cp && !cp.fast && s.tex === 'globe';
-    const ck = cp ? [cp.world, cp.raster, cp.civ, cp.style, cp.year, cp.show, cp.fast, globeInk] : [p.world];
+    const ck = cp ? [cp.world, cp.raster, cp.civ, cp.style, cp.year, cp.show, cp.fast, globeInk, cp.faithFocus] : [p.world];
     if (!sameKey(s.civTex.key, ck)) {
       s.civTex.key = ck;
       const t0 = performance.now();
@@ -1054,6 +1074,13 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       placement: pl,
       shift: s.shift,
       glyphs,
+      holy:
+        cp && cp.show.faiths
+          ? holyCities(cp.civ, cp.year, cp.faithFocus).map((x) => {
+              const c = cp.civ.settlements[x.settlement].cell;
+              return { wx: p.world.mesh.x[c], wy: p.world.mesh.y[c], color: x.color };
+            })
+          : [],
     };
   };
 
@@ -1311,7 +1338,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   }, []);
 
   // 贴图来源、开关变了:下一帧上传、重画
-  useEffect(invalidate, [terrain, terrainKey, replay, raster, graticule, style, civ, geo, sel, show, leftRoom, rightRoom, hl]);
+  useEffect(invalidate, [terrain, terrainKey, replay, raster, graticule, style, civ, geo, sel, show, leftRoom, rightRoom, hl, faithFocus]);
   useEffect(() => subscribeCivFeed(invalidate), []);
   // 时间轴一动:文明贴图、国界道路的矢量线换成那一年的
   useEffect(() => subscribeCivTime(invalidate), []);

@@ -3,7 +3,7 @@
  *
  *   顶部  颜色块(当年所属国)、州名(可改)、"州，属 大昌，第 12 州"(没有国家 = "无主之地")、关闭
  *   按钮  在这里立国(主操作)/ 划给… / 改名 / 更多(设为中心、让 AI 讲名字由来)(每个面板只有一个主操作,和国家面板一样)
- *   概况  主体民族(族名可改)、宜居度、人口(州里的城;一州同一时刻最多一座城)、州里的城(可点;故城标出来)、地貌、
+ *   概况  主体民族(族名可改)、宜居度、人口(州里的城;一州同一时刻最多一座城)、信仰(可点)、州里的城(可点;故城标出来)、地貌、
  *         民族(族名由来 / 起族名)
  *   历任归属 按时长分段的色条,点一段跳到它开始的那年
  *   大事  最近 5 条(可点)、这一州的干预(可撤销)
@@ -18,6 +18,7 @@ import { BIOMES } from '../gen/biomes';
 import { KIND_INFO, cultureLabel, regionLabel, regionNamed } from '../gen/civ/display';
 import { SETTLEMENT_RANKS, capitalAt, polityAlive, polityName, populationAt, populationLabel, settlementRank } from '../gen/civ/growth';
 import { ownersAt } from '../gen/civ/timeline';
+import { faithAt } from '../gen/civ/religion';
 import { cleanName, cultureKey, polityKey, regionKey, type Intervention } from '../gen/edits';
 import { addIntervention, editBlock, interventionKeys, useEdits } from './editsStore';
 import { habitatScore, habitatWord } from './civDescribe';
@@ -150,6 +151,7 @@ function RegionInfo({ civ, raw, raster, id, year, names, ai, aiRef }: DetailProp
   const upTo = entriesUpTo(regionEntries(civ, id), year);
   const mine = regionOrders(civ, id, edits.interventions);
   const elev = civ.regions.elevation[id];
+  const faith = civ.religion?.faiths[faithAt(civ, year)[id]];
   return (
     <div className="cp-body">
       <Stats
@@ -175,6 +177,11 @@ function RegionInfo({ civ, raw, raster, id, year, names, ai, aiRef }: DetailProp
           { k: '人口', v: pop > 0 ? populationLabel(pop) : '—' },
         ]}
       >
+        {civ.religion && (
+          <Row k="信仰">
+            {faith ? <Link to={{ kind: 'faith', id: faith.id }}>{faith.name}</Link> : '—'}
+          </Row>
+        )}
         {cities.length > 0 && (
           <Row k="城" className="cp-links">
             {cities.map((s) => {

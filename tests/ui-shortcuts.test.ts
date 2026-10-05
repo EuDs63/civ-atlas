@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe('快捷键 · 按键', () => {
-  it('不带修饰键:空格、← →(Shift 100 年)、+ −、1–4、/、?', () => {
+  it('不带修饰键:空格、← →(Shift 100 年)、+ −、1–5、/、?', () => {
     expect(matchShortcut(key('Space', ' '))).toBe('play');
     expect(matchShortcut(key('ArrowLeft', 'ArrowLeft'))).toBe('back');
     expect(matchShortcut(key('ArrowRight', 'ArrowRight'))).toBe('forward');
@@ -52,9 +52,10 @@ describe('快捷键 · 按键', () => {
     expect(matchShortcut(key('NumpadAdd', '+'))).toBe('zoomIn');
     expect(matchShortcut(key('Minus', '-'))).toBe('zoomOut');
     expect(matchShortcut(key('NumpadSubtract', '-'))).toBe('zoomOut');
-    expect(['Digit1', 'Digit2', 'Digit3', 'Digit4'].map((c) => matchShortcut(key(c, c.slice(-1))))).toEqual(['layer1', 'layer2', 'layer3', 'layer4']);
+    expect(['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].map((c) => matchShortcut(key(c, c.slice(-1))))).toEqual(['layer1', 'layer2', 'layer3', 'layer4', 'layer5']);
     expect(matchShortcut(key('Numpad3', '3'))).toBe('layer3');
-    expect(matchShortcut(key('Digit5', '5'))).toBeNull();
+    expect(matchShortcut(key('Numpad5', '5'))).toBe('layer5');
+    expect(matchShortcut(key('Digit6', '6'))).toBeNull();
     expect(matchShortcut(key('Digit0', '0'))).toBeNull();
     expect(matchShortcut(key('Slash', '/'))).toBe('search');
     expect(matchShortcut(key('Slash', '?', { shiftKey: true }))).toBe('help');

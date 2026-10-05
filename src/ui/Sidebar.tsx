@@ -6,7 +6,7 @@
  *   下面   三选一 ——
  *          搜索框里有字:搜索结果(点一条 = 选中它,地图飞过去)
  *          地图上选中了东西:它的详情(Inspector:国家 / 城 / 地理实体 / 州的面板)
- *          什么都没选:整个世界(WorldHome:国家按大小排、最近大事、我的干预、这颗星球)
+ *          什么都没选:整个世界(WorldHome:信仰(只在信仰图层)、国家按大小排、最近大事、我的干预、这颗星球)
  * 收起:卡片右上角的侧栏图标 → 卡片往左滑走,左上角留一个小按钮(侧栏图标 + 世界名),点它滑回来;记在浏览器里(sideStore.ts)。
  *       收起时选中了东西,卡片弹出来显示它,取消选中又收回去;收起时搜索框跟着卡片一起收起。
  * 新建世界这一步左边是另一张卡片(NewWorld.tsx),不收起。
@@ -19,8 +19,9 @@ import type { Raster } from '../gen/raster';
 import type { World, WorldParams } from '../gen/world';
 import { capitalAt, polityAlive, polityName } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
-import { buildChronicle, filterChronicle } from '../gen/civ/chronicle';
-import { getCivTime, pickChronicleEntry, setSelection, subscribeCivTime, useSelection } from './civView';
+import { filterChronicle } from '../gen/civ/chronicle';
+import { faithRows, fullChronicle } from '../gen/civ/religionText';
+import { getCivTime, pickChronicleEntry, setSelection, subscribeCivTime, useCivShow, useSelection } from './civView';
 import { useEdits } from './editsStore';
 import { currentWorld, useSavesVersion } from './saveStore';
 import { SaveMenu } from './SaveMenu';
@@ -324,7 +325,7 @@ const RECENT_N = 3;
 
 let owners: Owners | undefined;
 
-/** 什么都没选时的整个世界:国家按大小排、最近大事、我的干预、这颗星球(宽屏侧栏、手机的世界卡片拉到顶时共用) */
+/** 什么都没选时的整个世界:信仰(信仰图层)、国家按大小排、最近大事、我的干预、这颗星球(宽屏侧栏、手机的世界卡片拉到顶时共用) */
 export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'generating' | 'replay' | 'onReplay'>) {
   const { civ } = p;
   const year = useYear(civ);
@@ -350,13 +351,46 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
     for (const x of civ!.polities) if (x.founded > year && (!first || x.founded < first.founded)) first = x;
     return first;
   }, [ok, civ, year, top.alive]);
-  const entries = useMemo(() => (ok ? filterChronicle(buildChronicle(civ!), { major: true }) : []), [ok, civ]);
+  const entries = useMemo(() => (ok ? filterChronicle(fullChronicle(civ!), { major: true }) : []), [ok, civ]);
+  // 信仰图层:「国家」上面一组「信仰」(大教按信众多少,教派缩进跟在后面,最后一行民间信仰;数字是这一年的州数)
+  const faithOn = useCivShow().faiths && ok && !!civ!.religion;
+  const faiths = useMemo(() => (faithOn ? faithRows(civ!, year) : []), [faithOn, civ, year]);
   const k = countUpTo(entries, year);
   const recent = entries.slice(Math.max(0, k - RECENT_N), k).reverse();
   const nIv = edits.interventions.length;
   const nTerrain = edits.terrain.length;
   return (
     <div className="sb-home">
+      {faiths.length > 0 && (
+        <section className="sb-sec">
+          <div className="sb-sec-head">
+            <span>信仰</span>
+          </div>
+          <div className="sb-group" data-testid="faiths">
+            {faiths.map((f) =>
+              f.id < 0 ? (
+                <div key="folk" className="sb-row two static">
+                  <i className="sb-sw" style={{ background: rgb(f.color) }} />
+                  <span className="sb-row-main">
+                    <b>{f.name}</b>
+                    <small>{f.sub}</small>
+                  </span>
+                  <span className="sb-row-side">{f.n} 州</span>
+                </div>
+              ) : (
+                <button key={f.id} className={`sb-row${f.sect ? ' sect' : ' two'}`} data-faith={f.id} onClick={() => setSelection({ kind: 'faith', id: f.id })}>
+                  <i className="sb-sw" style={{ background: rgb(f.color) }} />
+                  <span className="sb-row-main">
+                    <b>{f.name}</b>
+                    {!f.sect && <small>{f.sub}</small>}
+                  </span>
+                  <span className="sb-row-side">{f.n} 州</span>
+                </button>
+              ),
+            )}
+          </div>
+        </section>
+      )}
       {ok && (
         <section className="sb-sec">
           <div className="sb-sec-head">
