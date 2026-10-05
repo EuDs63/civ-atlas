@@ -10,7 +10,6 @@ import {
   SHARE_BROKEN,
   SHARE_KEY,
   SHARE_WARN_LENGTH,
-  STALE_WARNING,
   decodeShare,
   editsLost,
   encodeShare,
@@ -19,6 +18,7 @@ import {
   makeSave,
   parseSave,
   saveText,
+  versionNote,
   type SaveFile,
 } from '../src/gen/savefile';
 
@@ -106,11 +106,12 @@ describe('分享链接:编码 / 解码', () => {
     expect(hasShareData(onlyTerrain)).toBe(true);
   });
 
-  it('旧版本生成器的链接照样打开,附提示', async () => {
-    const save = { ...sample(), generator: GENERATOR_VERSION - 1 };
+  it('旧版本生成器的链接照样打开,附提示(说清变了什么)', async () => {
+    const save = { ...sample(), generator: 6 };
     const r = await decodeShare(await encodeShare(save));
     expect(r.ok).toBe(true);
-    expect(r.ok && r.warnings).toContain(STALE_WARNING);
+    expect(r.ok && r.warnings).toContain(versionNote(6, save.edits.terrain.length > 0));
+    expect(r.ok && r.warnings[0]).toMatch(/^来自旧版本：/);
   });
 });
 

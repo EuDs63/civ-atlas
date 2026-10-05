@@ -89,7 +89,8 @@
  * 折线的第一个点 x 在 [0, 2048) 里,之后每个点按离上一个点近的那边写(跨 180° 经线的一笔 x 可以超出 [0, 2048),是连着的一笔)。
  * 读进来的列表先过 terrainEdits.ts 的 cleanTerrainOps(种类不认识、坐标不是数的丢掉;x 按上面的规则规整,y、大小、强度夹回范围内)。
  *
- * GENERATOR_VERSION:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对,不一致就提示"存档来自旧版本")。
+ * GENERATOR_VERSION:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对,不一致就提示"来自旧版本"和变了什么;
+ * 每一版改了什么记在下面的 GENERATOR_CHANGES,提示照它说)。
  *   2:名字按位置取(gen/civ/naming.ts、places.ts;地形、历史不变,默认的名字换了一遍),稳定键改按地块定位(c 格式)。
  *   3:推演里的随机数按位置锚取(gen/civ/rand.ts:州 = 治所地块,国家 / 城 / 民族 = 它们的锚点地块,不按编号),
  *      超越函数舍入到 24 位(不同 CPU、浏览器逐位一致);民族的语感、配色按发源地位置先后挑;
@@ -108,8 +109,30 @@
 import type { Civ, Culture, Faith, Place, Polity, Settlement } from './civ/types';
 import { polityRootAt } from './civ/growth';
 
-/** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对) */
+/** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对);加一时在 GENERATOR_CHANGES 里补一条 */
 export const GENERATOR_VERSION = 8;
+
+/**
+ * 一版生成器的改动有多大(从小到大):打开旧存档、旧链接时,按跨过的几版里最大的那一种说清变了什么(savefile.ts 的 versionNote)
+ *   names      地形、历史不变,默认的名字换了
+ *   chronicle  疆域、兴亡不变,编年史里添了内容
+ *   history    地形、气候不变,历史重新推演
+ *   climate    陆地和山不变,气候、河流、历史变了
+ *   terrain    地形有局部变化,历史重新推演
+ *   planet     整颗星球重新生成
+ */
+export type GeneratorChange = 'names' | 'chronicle' | 'history' | 'climate' | 'terrain' | 'planet';
+
+/** 每一版(加到这个号时)改了什么;edited = 只有改过地形的世界变了,没改地形的和上一版一样 */
+export const GENERATOR_CHANGES: Readonly<Record<number, { change: GeneratorChange; edited?: true }>> = {
+  2: { change: 'names' },
+  3: { change: 'terrain' },
+  4: { change: 'planet' },
+  5: { change: 'planet' },
+  6: { change: 'chronicle' },
+  7: { change: 'climate' },
+  8: { change: 'history', edited: true },
+};
 
 /** 干预的种类(见文件头的表) */
 export type InterventionKind = 'protect' | 'ally' | 'declare' | 'unity' | 'cede' | 'found' | 'move' | 'halt';

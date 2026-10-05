@@ -11,12 +11,11 @@ import { generateCiv } from '../src/gen/civ';
 import type { Civ } from '../src/gen/civ/types';
 import { buildChronicle, chronicleText, interventionOutcome } from '../src/gen/civ/chronicle';
 import { regionLabel } from '../src/gen/civ/display';
-import { EMPTY_EDITS, GENERATOR_VERSION, applyNames, regionKey, resolveKey, upgradeLegacyKeys, type WorldEdits } from '../src/gen/edits';
+import { EMPTY_EDITS, GENERATOR_CHANGES, GENERATOR_VERSION, applyNames, regionKey, resolveKey, upgradeLegacyKeys, type WorldEdits } from '../src/gen/edits';
 import {
   CHECK_WARNING,
-  NEWER_WARNING,
+  NEWER_NOTE,
   SAVE_APP,
-  STALE_WARNING,
   DEFAULT_VIEW,
   checkWarning,
   cleanView,
@@ -28,6 +27,7 @@ import {
   parseSave,
   saveFileName,
   saveText,
+  versionNote,
   worldCheck,
   worldKey,
 } from '../src/gen/savefile';
@@ -141,13 +141,35 @@ describe('存档文件 · 坏文件、别的 JSON、别的版本', () => {
     expect(err(JSON.stringify(a))).toMatch(/更新版本.*刷新页面/);
   });
 
-  it('生成器版本不同:照样打开,提示"来自旧版本 / 更新的版本"', () => {
-    const old = parseSave(JSON.stringify({ ...good(), generator: GENERATOR_VERSION - 1 }));
-    expect(old.ok && old.warnings).toEqual([STALE_WARNING]);
-    expect(STALE_WARNING).toBe('这个存档来自旧版本,地形可能不同,改过的名字会尽量套上');
+  it('生成器版本不同:照样打开,提示"来自旧版本"和变了什么 / "来自更新的版本"', () => {
+    const old = parseSave(JSON.stringify({ ...good(), generator: 6 }));
+    expect(old.ok && old.warnings).toEqual(['来自旧版本：陆地和山没变，气候、河流和历史都重算了']);
     const newer = parseSave(JSON.stringify({ ...good(), generator: GENERATOR_VERSION + 1 }));
-    expect(newer.ok && newer.warnings).toEqual([NEWER_WARNING]);
+    expect(newer.ok && newer.warnings).toEqual([NEWER_NOTE]);
     expect(old.ok && old.save.edits).toEqual(EDITS);
+  });
+
+  it('只动了改过地形的世界的那一版:没改地形的世界不提示,改过的提示', () => {
+    const plain = parseSave(JSON.stringify({ ...good(), generator: 7 }));
+    expect(plain.ok && plain.warnings).toEqual([]);
+    const g = good();
+    g.generator = 7;
+    (g.edits as Record<string, unknown>).terrain = [{ kind: 'volcano', pts: [812, 403], r: 28, s: 1.05 }];
+    const edited = parseSave(JSON.stringify(g));
+    expect(edited.ok && edited.warnings).toEqual(['来自旧版本：地形和气候没变，历史重新推演了']);
+    // 地形修改全是坏的(读进来一处都没有)= 按没改地形生成,也就没变
+    (g.edits as Record<string, unknown>).terrain = [{ kind: 'meteor', pts: [1, 2] }];
+    const bad = parseSave(JSON.stringify(g));
+    expect(bad.ok && bad.warnings).toEqual(['有 1 处地形修改格式不对,已跳过']);
+  });
+
+  it('版本提示排在参数提示之后、改名提示之前', () => {
+    const a = good();
+    a.generator = 4;
+    a.params = { ...(a.params as object), plates: 'many' };
+    (a.edits as Record<string, unknown>).names = { 'region:r7': '九嶷州', bad: 3 };
+    const r = parseSave(JSON.stringify(a));
+    expect(r.ok && r.warnings).toEqual(['存档里的板块数量不对,已改成合理的值', versionNote(4, false), '有 1 处改名格式不对,已跳过']);
   });
 
   it('参数超出范围 / 不是数:调回合理的值并提示', () => {
@@ -192,11 +214,11 @@ describe('地形校验', () => {
     expect(worldCheck(generateWorld({ ...SMALL, seed: 7, mountains: 1.05 }))).not.toBe(a);
   });
 
-  it('checkWarning:同版本地形对不上才提示(版本不同 parseSave 已经提示过)', () => {
+  it('checkWarning:同版本地形对不上才提示(版本不同、世界变了的 parseSave 已经提示过)', () => {
     const s = makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EMPTY_EDITS, 'aaaa');
     expect(checkWarning(s, 'aaaa')).toBeNull();
     expect(checkWarning(s, 'bbbb')).toBe(CHECK_WARNING);
-    expect(checkWarning({ ...s, generator: GENERATOR_VERSION - 1 }, 'bbbb')).toBeNull();
+    expect(checkWarning({ ...s, generator: 6 }, 'bbbb')).toBeNull();
     expect(checkWarning({ ...s, check: '' }, 'bbbb')).toBeNull();
   });
 });
@@ -878,10 +900,42 @@ describe('浏览器存储(saveStore)', () => {
   });
 });
 
+describe('旧版本的提示:照实说变了什么', () => {
+  it('每一版都记了改了什么(加 GENERATOR_VERSION 时忘了补就不过)', () => {
+    for (let v = 2; v <= GENERATOR_VERSION; v++) expect(GENERATOR_CHANGES[v], `第 ${v} 版`).toBeDefined();
+  });
+  it('按跨过的几版里最大的那种改动说', () => {
+    expect(versionNote(GENERATOR_VERSION, false)).toBeNull();
+    expect(versionNote(GENERATOR_VERSION, true)).toBeNull();
+    // 第 8 版只动了改过地形的世界
+    expect(versionNote(7, false)).toBeNull();
+    expect(versionNote(7, true)).toBe('来自旧版本：地形和气候没变，历史重新推演了');
+    // 第 6、7 版:人物和战役 < 洋流(气候、河流、历史)
+    expect(versionNote(6, false)).toBe('来自旧版本：陆地和山没变，气候、河流和历史都重算了');
+    expect(versionNote(5, true)).toBe(versionNote(6, true));
+    // 第 4、5 版换了整颗星球,再往前的都算进去
+    for (const v of [4, 3, 2, 1, 0, -3]) expect(versionNote(v, false)).toBe('来自旧版本：整颗星球重新生成了，地形和历史都和原来不同');
+    expect(versionNote(GENERATOR_VERSION + 1, false)).toBe(NEWER_NOTE);
+    // 不是整数的版本号认不出:按整颗星球说,不当成哪一版
+    expect(versionNote(7.5, false)).toBe(versionNote(0, false));
+    // 比现在大的也一样,不叫人刷新
+    expect(versionNote(GENERATOR_VERSION + 0.5, false)).toBe(versionNote(0, false));
+  });
+  it('版本不同、但世界应该一样时照样核对地形', () => {
+    const save = makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EMPTY_EDITS, 'aaaaaaaaaaaa');
+    expect(checkWarning({ ...save, generator: 7 }, 'aaaaaaaaaaaa')).toBeNull();
+    expect(checkWarning({ ...save, generator: 7 }, 'bbbbbbbbbbbb')).toBe(CHECK_WARNING);
+    // 世界本来就变了(已经说过变了什么):不重复
+    expect(checkWarning({ ...save, generator: 6 }, 'bbbbbbbbbbbb')).toBeNull();
+    const edited = { ...save, generator: 7, edits: { ...save.edits, terrain: [{ kind: 'lake' as const, pts: [300, 400], r: 16, s: 1 }] } };
+    expect(checkWarning(edited, 'bbbbbbbbbbbb')).toBeNull();
+  });
+});
+
 describe('读档提示的短说法', () => {
-  it('版本不同、地形对不上:缩成一行小字里的短句;认不出的原样', () => {
-    expect(saveStore.briefWarning(STALE_WARNING)).toBe('来自旧版本,地形可能不同');
-    expect(saveStore.briefWarning(NEWER_WARNING)).toBe('来自更新的版本,地形可能不同');
+  it('地形对不上:缩成一行小字里的短句;版本提示本来就短,和认不出的一样原样', () => {
+    expect(saveStore.briefWarning(versionNote(6, false)!)).toBe(versionNote(6, false));
+    expect(saveStore.briefWarning(NEWER_NOTE)).toBe(NEWER_NOTE);
     expect(saveStore.briefWarning(CHECK_WARNING)).toBe('地形和存档时对不上');
     expect(saveStore.briefWarning('有 2 处改名格式不对,已跳过')).toBe('有 2 处改名格式不对,已跳过');
   });
@@ -924,7 +978,7 @@ describe('平面时代的存档(GENERATOR_VERSION 4 及以前)', () => {
     const r = parseSave(OLD);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.warnings).toEqual([STALE_WARNING]);
+    expect(r.warnings).toEqual(['来自旧版本：整颗星球重新生成了，地形和历史都和原来不同']);
     // 地形修改的坐标按经纬度读:x = 2048 就是 180° 经线,跨接缝的一笔展开成连着的
     expect(r.save.edits.terrain[1].pts).toEqual([2000, 300, 2048, 340, 2078, 380]);
     const w = generateWorld(r.save.params, undefined, r.save.edits.terrain);
@@ -947,7 +1001,7 @@ describe('平面时代的存档(GENERATOR_VERSION 4 及以前)', () => {
     expect(r0.ok).toBe(true);
     if (!r0.ok) return;
     const r = await decodeShare(await encodeShare(JSON.parse(OLD)));
-    expect(r.ok && r.warnings).toEqual([STALE_WARNING]);
+    expect(r.ok && r.warnings).toEqual([versionNote(4, true)]);
     expect(r.ok && r.save.edits).toEqual(r0.save.edits);
   });
 });

@@ -28,9 +28,7 @@ import type { WorldParams } from '../gen/world';
 import type { WorldEdits } from '../gen/edits';
 import {
   CHECK_WARNING,
-  NEWER_WARNING,
   SHARE_BROKEN,
-  STALE_WARNING,
   TITLE_MAX,
   cleanTitle,
   editCount,
@@ -346,8 +344,6 @@ export function useSaveNotice(): SaveNotice | null {
 // 读档提示的短说法:gen/savefile.ts 的原话是完整的句子,提示条上只留一行小字里的几个短句
 
 const BRIEF_WARNING: Record<string, string> = {
-  [STALE_WARNING]: '来自旧版本,地形可能不同',
-  [NEWER_WARNING]: '来自更新的版本,地形可能不同',
   [CHECK_WARNING]: '地形和存档时对不上',
 };
 /** 读档的警告(版本不同、地形对不上……)→ 短句;认不出的原样 */

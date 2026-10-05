@@ -39,6 +39,7 @@ pnpm dev        # 打开 http://localhost:5188
 
 网址参数可以直接指定世界和画面,比如 `?seed=7&layer=cultures`(种子 7、民族图层)、`?seed=2024&layer=realistic&proj=robinson`(实景、罗宾森投影);
 图层名见 `src/ui/mapLayers.ts`。
+看世界时网页写进地址栏、复制出来的网址还带 `gen=`(生成器版本,`src/gen/edits.ts` 的 `GENERATOR_VERSION`;新建中的 `new=1` 不带):以后打开比现在旧的网址,提示条会说清世界变了什么。
 
 ## 开发命令
 

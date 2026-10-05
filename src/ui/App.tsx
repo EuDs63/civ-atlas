@@ -111,14 +111,14 @@ import { TipLayer } from './Tips';
 import { openSaveMenu } from './SaveMenu';
 import { replayStart } from './timelineLayout';
 import {
-  NEWER_WARNING,
-  STALE_WARNING,
   checkWarning,
   cleanTitle,
   decodeShare,
   editCount,
+  GEN_KEY,
   isShareHash,
   parseSave,
+  versionNote,
   worldCheck,
   worldKey,
   type ParseResult,
@@ -238,7 +238,11 @@ function readUrl() {
   const lq = Number(q.get('lon'));
   const lon = q.get('lon') !== null && Number.isFinite(lq) ? wrapLon(lq) : null;
   const grat = q.get('grat') === '1';
-  return { params, style, layer, mapLayer, share, shortShare, proj, lon, grat };
+  // 生成器版本(gen=):这个网址是哪一版画出来的世界;和现在的不同,打开时说清变了什么。旧网址没有 = 不知道,不提示;
+  // 带了却认不出(不是整数之类)当成第 0 版:认不出的旧版本,照样提示,也不当成没带 gen 的老网址
+  const gq = q.get(GEN_KEY);
+  const gen = gq === null ? null : /^\d{1,6}$/.test(gq) ? Number(gq) : 0;
+  return { params, style, layer, mapLayer, share, shortShare, proj, lon, grat, gen };
 }
 
 /**
@@ -276,7 +280,9 @@ interface Target {
   /** 换成存档里的投影和中央经线(undefined = 不动;null = 等距圆柱、0°) */
   view?: SaveView | null;
   /** 从哪打开的(生成完的提示按它说) */
-  from?: 'file' | 'link' | 'stored' | 'restore';
+  from?: 'file' | 'link' | 'stored' | 'restore' | 'url';
+  /** 网址里带的生成器版本(from = 'url':打开带种子的网址) */
+  gen?: number;
   /** 打开的存档(核对版本、地形) */
   save?: SaveFile;
   /** 读档时的警告 */
@@ -318,8 +324,9 @@ function storedTarget(w: StoredWorld, from: 'stored' | 'restore'): Target {
 }
 
 /** 网址里带种子的(别人发的网址、截图脚本):直接看这个世界,先不存,改了才存 */
-function visitTarget(params: WorldParams): Target {
-  return { id: newWorldId(), kind: 'visit', params, edits: EMPTY_EDITS };
+function visitTarget(params: WorldParams, gen: number | null = null): Target {
+  const t: Target = { id: newWorldId(), kind: 'visit', params, edits: EMPTY_EDITS };
+  return gen === null ? t : { ...t, from: 'url', gen };
 }
 
 /**
@@ -340,10 +347,10 @@ function firstRoute(init: ReturnType<typeof readUrl>): { stage: Stage; target: T
   if (stored) return { stage: stored.draft ? 'draft' : 'world', target: storedTarget(stored, 'restore') };
   if (q.get('new') === '1') return { stage: 'draft', target: draftTarget(init.params) };
   if (q.has('seed')) {
-    // 改版前自动存的世界:那时的网址只带种子、参数,刷新照旧回到它
-    const old = legacyWorld(init.params);
+    // 改版前自动存的世界:那时的网址只带种子、参数,刷新照旧回到它(带 gen= 的是改版后的网址,不是它)
+    const old = init.gen === null ? legacyWorld(init.params) : null;
     if (old) return { stage: old.draft ? 'draft' : 'world', target: storedTarget(old, 'restore') };
-    return { stage: 'world', target: visitTarget(init.params) };
+    return { stage: 'world', target: visitTarget(init.params, init.gen) };
   }
   if (listWorlds().length) return { stage: 'home', target: null };
   return { stage: 'draft', target: draftTarget({ ...init.params, seed: randomSeedValue() }) };
@@ -368,6 +375,11 @@ function writeWorldUrl(t: Target) {
   const w = isStored(t.id) ? loadWorld(t.id) : null;
   if (w && worldKey(w.save.params) === worldKey(t.params)) q.set('w', t.id);
   else if (t.kind === 'draft') q.set('new', '1');
+  // 生成器版本:复制这个网址发给别人,以后版本更新了对方打开会说清变了什么。
+  // 网址来自更新的版本(页面是旧的)就留着那个号:刷新还是旧页面照样提示,换到新页面就对上了。
+  // 新建中还没存的(new=1)不带:打开这种网址是接着新建,用的总是现在的版本
+  if (q.has('new')) q.delete(GEN_KEY);
+  else q.set(GEN_KEY, String(t.gen !== undefined && t.gen > GENERATOR_VERSION ? t.gen : GENERATOR_VERSION));
   const next = `?${q}`;
   if (next !== location.search) history.replaceState(null, '', next);
 }
@@ -375,7 +387,7 @@ function writeWorldUrl(t: Target) {
 /** 回到"我的世界":网址里去掉这个世界(种子、参数、编号、年份……),留着图层、投影这些看法 */
 function writeHomeUrl() {
   const q = new URLSearchParams(location.search);
-  for (const k of [...Object.keys(DEFAULT_PARAMS), 'w', 'new', 's', 'civYear', 'play', 'chron']) q.delete(k);
+  for (const k of [...Object.keys(DEFAULT_PARAMS), 'w', 'new', 's', GEN_KEY, 'civYear', 'play', 'chron']) q.delete(k);
   const rest = q.toString();
   history.replaceState(null, '', rest ? `?${rest}` : location.pathname);
 }
@@ -1052,9 +1064,18 @@ export function App() {
     attachWorld({ id: t.id, params: world.params, check, kind: t.kind, title: t.title, saved: t.saved ?? edits, view: t.view ?? undefined, pristine: t.pristine, base: t.base });
     if (t.kind !== 'draft') setWorldStats(aliveAtEnd(rc));
     const save = t.save;
+    // 带种子的网址(别人发的普通链接):是旧版本画的就说清现在变了什么
+    if (t.from === 'url') {
+      const note = t.gen !== undefined ? versionNote(t.gen, false) : null;
+      if (note) say({ kind: 'warn', text: `已打开「种子 ${world.params.seed}」`, more: [note] });
+      return;
+    }
     if (!save || !t.from) return;
     const more: string[] = [...(t.warnings ?? [])];
-    if ((t.from === 'stored' || t.from === 'restore') && save.generator !== GENERATOR_VERSION) more.push(save.generator < GENERATOR_VERSION ? STALE_WARNING : NEWER_WARNING);
+    if (t.from === 'stored' || t.from === 'restore') {
+      const note = versionNote(save.generator, (save.edits.terrain?.length ?? 0) > 0);
+      if (note) more.push(note);
+    }
     // 地形校验只在"生成时带的地形修改就是存档里的"时才核对
     const cw = sameT ? checkWarning(save, check) : null;
     if (cw) more.push(cw);
