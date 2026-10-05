@@ -1730,6 +1730,14 @@ export function mergeChronicle(a: readonly ChronicleEntry[], b: readonly Chronic
   return out;
 }
 
+/**
+ * 只看一国时的"全部":这一国的纪事,按年份并进这一国的历代君主继位。
+ * 编年史页按国家看时列的、国家面板"全部 N 件"数的都是这一份(两边条数对得上)
+ */
+export function polityChronicle(civ: Civ, all: readonly ChronicleEntry[], polity: number): ChronicleEntry[] {
+  return mergeChronicle(filterChronicle(all, { polity }), filterChronicle(reignEntries(civ), { polity }));
+}
+
 export interface ChronicleFilter {
   /** 只看大事(重要度 ≥ MAJOR) */
   major?: boolean;

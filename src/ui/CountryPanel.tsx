@@ -7,7 +7,8 @@
  *   概况  国都、疆域(历年州数的小柱图,和概览"国家"表同一份)、人口(境内城镇)、主体民族、邻国(可点),
  *         来历 / 结局 / 历任国都(有才写)
  *   朝代  改朝换代过才有:一朝一行(新的在上),当前那一朝标"当前";点一行 = 时间轴跳到它开始的那年
- *   大事  到当前年份为止最近 5 条(可点:跳到那一年,地图上闪出事发地);"全部 N 件"打开概览的编年史页、只看这国
+ *   大事  到当前年份为止最近 5 条(可点:跳到那一年,地图上闪出事发地);"全部 N 件"打开概览的编年史页、只看这国的"全部"
+ *         (N 和那里"全部"的条数一样,连同历代君主继位)
  *   名字由来(AI 释名,点了才出;先"生成中…"再出结果;没设置 AI 时一行提示 + "设置 AI")、AI 起名(改名时的入口)
  *
  * 顶部、按钮、概况、小柱图、大事这些零件在 panelParts.tsx,城 / 地理实体 / 州的面板(CityPanel、PlacePanel、RegionPanel)
@@ -20,7 +21,7 @@ import type { World } from '../gen/world';
 import { cultureLabel } from '../gen/civ/display';
 import { capitalAt, dynastyIndexAt, polityAlive, polityName, polityTitleChain, populationAt, populationLabel } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
-import { buildChronicle, filterChronicle } from '../gen/civ/chronicle';
+import { buildChronicle, filterChronicle, polityChronicle } from '../gen/civ/chronicle';
 import { dynastyKey, polityKey } from '../gen/edits';
 import { setCivTime } from './civView';
 import type { AiName } from './AiNamePanel';
@@ -175,6 +176,8 @@ function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: 
   const spark = hist.years.map((y, i) => ({ year: y, n: hist.spark[id * SPARK_N + i] }));
   const segs = useMemo(() => dynastySegments(civ, p), [civ, p]);
   const related = useMemo(() => filterChronicle(buildChronicle(civ), { polity: id }), [civ, id]);
+  // "全部 N 件":和编年史页只看这一国时的"全部"同一份(连同历代君主继位),点开就是这么多条
+  const allCount = useMemo(() => polityChronicle(civ, buildChronicle(civ), id).length, [civ, id]);
   const upTo = related.filter((e) => e.year <= year + 1e-6);
   const maxN = Math.max(1, hist.peak[id] ?? 0);
   const span = Math.max(1, (p.ended ?? civ.endYear) - p.founded);
@@ -204,7 +207,7 @@ function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: 
           改名
         </Act>
         <MoreAct>
-          <MenuItem icon={<Icon name="scroll" size={16} />} act="chronicle" disabled={!related.length} onClick={() => openOverview('chronicle', { polity: id })}>
+          <MenuItem icon={<Icon name="scroll" size={16} />} act="chronicle" disabled={!allCount} onClick={() => openOverview('chronicle', { polity: id, major: false })}>
             在编年史中查看
           </MenuItem>
           <MenuSep />
@@ -309,9 +312,9 @@ function InfoPage({ civ, world, id, year, p, shared }: CountryPanelProps & { p: 
           upTo={upTo}
           empty={year < p.founded ? '尚未立国' : '还没有'}
           more={
-            related.length > 0 && (
-              <button className="ins-link cp-more" data-act="chronicle" onClick={() => openOverview('chronicle', { polity: id })}>
-                全部 {related.length} 件
+            allCount > 0 && (
+              <button className="ins-link cp-more" data-act="chronicle" onClick={() => openOverview('chronicle', { polity: id, major: false })}>
+                全部 {allCount} 件
               </button>
             )
           }

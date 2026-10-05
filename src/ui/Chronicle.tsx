@@ -15,7 +15,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Civ } from '../gen/civ/types';
-import { buildChronicle, chronicleText, filterChronicle, mergeChronicle, reignEntries, yearText, type ChronicleEntry } from '../gen/civ/chronicle';
+import { buildChronicle, chronicleText, filterChronicle, polityChronicle, yearText, type ChronicleEntry } from '../gen/civ/chronicle';
 import { polityName } from '../gen/civ/growth';
 import { getCivTime, pickChronicleEntry, setChronicle, subscribeCivTime, useChronicle, useChroniclePick, type CivTime } from './civView';
 import { evLabel, evText, evType } from './timelineLayout';
@@ -41,9 +41,8 @@ export function Chronicle({ civ }: { civ: Civ | null }) {
   const all = useMemo(() => (civ ? buildChronicle(civ) : []), [civ]);
   // 按国家筛过的"全部"和"大事"(两个按钮上各写条数),当前列出的是其中之一;只看一国时"全部"里并进这一国的君主继位
   const mine = useMemo(() => {
-    const own = filterChronicle(all, { polity: view.polity });
-    if (!civ || view.polity === null) return own;
-    return mergeChronicle(own, filterChronicle(reignEntries(civ), { polity: view.polity }));
+    if (!civ || view.polity === null) return filterChronicle(all, { polity: view.polity });
+    return polityChronicle(civ, all, view.polity);
   }, [civ, all, view.polity]);
   const majors = useMemo(() => filterChronicle(mine, { major: true }), [mine]);
   const list = view.major ? majors : mine;

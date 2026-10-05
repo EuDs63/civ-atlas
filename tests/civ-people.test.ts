@@ -8,7 +8,7 @@ import { DEFAULT_PARAMS, generateWorld, type World } from '../src/gen/world';
 import { generateCiv, type Civ } from '../src/gen/civ';
 import type { Person } from '../src/gen/civ/types';
 import { dynastyIndexAt, polityShortTitle, polityTierAt } from '../src/gen/civ/growth';
-import { buildChronicle, filterChronicle, mergeChronicle, reignEntries, type ChronicleEntry } from '../src/gen/civ/chronicle';
+import { buildChronicle, filterChronicle, mergeChronicle, polityChronicle, reignEntries, type ChronicleEntry } from '../src/gen/civ/chronicle';
 import { rulerRef } from '../src/gen/civ/peopleText';
 import { polityKey } from '../src/gen/edits';
 
@@ -212,6 +212,8 @@ describe.each([7, 2024])('人物 · seed=%i', (seed) => {
     const merged = mergeChronicle(filterChronicle(list, { polity: p }), filterChronicle(reigns, { polity: p }));
     for (let i = 1; i < merged.length; i++) expect(merged[i].year).toBeGreaterThanOrEqual(merged[i - 1].year);
     expect(filterChronicle(merged, { major: true }).some((e) => e.kind === 'reign')).toBe(false);
+    // 编年史页只看一国的"全部"、国家面板"全部 N 件"都用 polityChronicle:就是这一份
+    expect(polityChronicle(civ, list, p).map((e) => e.id)).toEqual(merged.map((e) => e.id));
   });
 
   it('称呼:按当年的君号写(部落首领写名字,有称号的写称号);帝国的君主带当年的国号简称', () => {
