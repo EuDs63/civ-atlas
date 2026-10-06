@@ -3,7 +3,7 @@
  * (一改三千年的历史就要整个重来)。想换个样子:"以它为底稿新建…"(回到新建这一步,设定照原样带过去,存成另一个世界)。
  * 右栏还有"回放世界形成"。
  *
- * 世界参数的滑条(SLIDERS、ParamSlider)在这里定义,新建世界的卡片(NewWorld.tsx)用。
+ * 世界参数的滑条(SLIDERS、ParamSlider)在这里定义,新建世界(studio/Studio.tsx)用。
  */
 import { useEffect, useState } from 'react';
 import type { WorldParams } from '../gen/world';

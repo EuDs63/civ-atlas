@@ -1,0 +1,785 @@
+/*
+ * 新建世界(Studio.tsx):深色、和平常的地图页面分开的一套界面。
+ *
+ *   .app.studio-on   整页是太空底(深色渐变 + 一层淡淡的星星);平常的地图藏起来,
+ *                    摊平改地形 / 没有 WebGL 时(.studio-flat)地图铺在中间那一块(位置由 App 按 studioStore 写在舞台上)
+ *   .studio          盖在地图上面的一层:星球画布、光晕、左边设定、右边样式和投影、底下字幕、确认框
+ *                    开场(.intro)两边面板先滑出去;收起(.collapsed)左边滑出去、左上角留小按钮;创建后(.out)两边都滑出去
+ * 行、分组、小标题、输入框照侧栏的零件(sidebar.css 的 .sb-*、worlds.css 的 .nw-*),颜色全用 theme.css 的深色变量。
+ */
+.app.studio-on {
+  background:
+    radial-gradient(1px 1px at 23px 41px, rgba(255, 255, 255, 0.55), transparent),
+    radial-gradient(1px 1px at 97px 133px, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1.2px 1.2px at 151px 19px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 61px 181px, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 189px 87px, rgba(255, 255, 255, 0.4), transparent) 0 0 / 211px 211px,
+    radial-gradient(1px 1px at 47px 211px, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1.3px 1.3px at 233px 59px, rgba(255, 255, 255, 0.45), transparent),
+    radial-gradient(1px 1px at 141px 263px, rgba(255, 255, 255, 0.28), transparent) 0 0 / 293px 293px,
+    radial-gradient(ellipse 70% 70% at 55% 48%, #0d1119 0%, #070a10 55%, #05070b 100%);
+  background-color: #05070b;
+}
+.app.studio-on .stage {
+  visibility: hidden;
+}
+.app.studio-on.studio-flat .stage {
+  visibility: visible;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+
+.studio {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  /* 滑出去的面板不撑出滚动(输入框拿到焦点时整页不会被挪开) */
+  overflow: hidden;
+  overflow: clip;
+  pointer-events: none;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  animation: st-in 0.35s ease-out;
+  transition: opacity 0.4s ease;
+}
+@keyframes st-in {
+  from {
+    opacity: 0;
+  }
+}
+.studio.fade {
+  opacity: 0;
+}
+.studio button {
+  font: inherit;
+  color: inherit;
+}
+.studio > * {
+  pointer-events: auto;
+}
+.studio > .st-glow,
+.studio > .st-cap.off,
+.studio.out > * {
+  pointer-events: none;
+}
+
+/* 星球画布:铺满整个窗口,面板盖在上面;摊平时淡出,露出下面平常的地图 */
+.st-gl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+  transition: opacity 0.25s ease;
+}
+.st-gl.dragging {
+  cursor: grabbing;
+}
+.studio.flat .st-gl {
+  opacity: 0;
+  pointer-events: none;
+}
+/* 大气光:越接近地球仪越亮 */
+.st-glow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(
+    circle,
+    rgba(70, 140, 255, 0) 52%,
+    rgba(110, 175, 255, 0.55) 55.5%,
+    rgba(70, 140, 255, 0.22) 58.5%,
+    rgba(60, 120, 255, 0.07) 63%,
+    rgba(60, 120, 255, 0) 70%
+  );
+}
+.studio.flat .st-glow {
+  visibility: hidden;
+}
+
+/* ---- 左边:设定(贴着窗口左边、从上到下) ---- */
+.st-left {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  box-sizing: content-box;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-right: 0.5px solid var(--line);
+  transition: transform 0.36s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.studio.intro .st-left,
+.studio.collapsed .st-left,
+.studio.out .st-left {
+  transform: translateX(calc(-100% - 2px));
+}
+.studio.collapsed .st-left {
+  visibility: hidden;
+  transition:
+    transform 0.36s cubic-bezier(0.3, 0.7, 0.2, 1),
+    visibility 0s linear 0.36s;
+}
+.st-in {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px 14px 10px;
+}
+.st-in > *,
+.st-in .sb-sec > * {
+  flex-shrink: 0;
+}
+.st-in .sb-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+}
+.st-top {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  margin-bottom: -6px;
+  padding-right: 34px;
+}
+.studio .nw-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: -5px;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 500;
+}
+.studio .nw-back:hover {
+  text-decoration: underline;
+}
+.st-in .nw-intro {
+  margin-top: -10px;
+  line-height: 1.5;
+}
+.st-foot {
+  flex: none;
+  padding: 12px 14px 16px;
+  border-top: 0.5px solid var(--line);
+}
+.studio .nw-create {
+  height: 44px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+.studio .nw-create:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.studio .nw-create:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* 行首的图标是灰的;「让助手改」:助手开着时这一行是选中的样子(字和图标变蓝);改地形工具底下单独一组 */
+.studio .sb-row .sb-ico {
+  color: var(--ink-2);
+}
+.studio .st-ask.on,
+.studio .st-ask.on:hover {
+  background: var(--accent-soft);
+}
+.studio .st-ask.on b,
+.studio .st-ask.on .sb-ico {
+  color: var(--link);
+}
+.st-ask .sb-row-main small {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.st-ask-group {
+  margin-top: 10px;
+}
+/* 标题右边的「···」:灰色胶囊 */
+.studio .sb-more > .pm-btn {
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 14px;
+}
+/* 种子:窄一点的输入框,「换一颗」是灰底蓝字 */
+.studio .nw-seed-ctl .nw-seed-input {
+  width: 84px;
+}
+.studio .nw-seed-ctl .nw-btn.tint {
+  background: var(--btn);
+  color: var(--link);
+}
+/* 改地形工具:四行等距排开,说明和"改了几处"之间不画线;没得撤销时链接是灰的 */
+.studio .tp-tools {
+  gap: 10px;
+  padding: 12px 12px 0;
+}
+.studio .tp-hint {
+  padding: 10px 12px 0;
+  border-bottom: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.studio .tp-count {
+  gap: 14px;
+  padding: 10px 12px 12px;
+  font-size: 13.5px;
+}
+.studio .tp-count .sb-link:disabled {
+  opacity: 1;
+  color: var(--ink-3) !important;
+}
+/* 收起以后左上角的小按钮(和平常页面收起侧栏同一个样子,sidebar.css 的 .side-open) */
+.studio:not(.collapsed) .st-pill,
+.studio.intro .st-pill,
+.studio.out .st-pill {
+  display: none;
+}
+
+/* ---- 右边:样式和投影 ---- */
+.st-right {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 228px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left: 0.5px solid var(--line);
+  transition: transform 0.36s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.studio.intro .st-right,
+.studio.out .st-right {
+  transform: translateX(calc(100% + 2px));
+}
+.st-right > * {
+  flex-shrink: 0;
+}
+.st-right .sb-sec-head {
+  padding-top: 2px;
+}
+.st-right .sb-sec-head + .sb-group {
+  margin-bottom: 12px;
+}
+.studio .st-opt {
+  min-height: 46px;
+  padding: 6px 10px;
+  gap: 10px;
+}
+.st-opt .sb-row-main small {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.35;
+}
+.st-thumb {
+  flex: none;
+  width: 48px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--btn) center / cover no-repeat;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+}
+.st-shape {
+  flex: none;
+  width: 48px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+}
+.st-shape i {
+  display: block;
+  box-sizing: border-box;
+  border: 1.5px solid var(--ink-2);
+}
+/* 选中的那一行鼠标停上去也还是选中的底色 */
+.st-opt[aria-checked='true'],
+.studio .st-opt[aria-checked='true']:hover {
+  background: var(--accent-soft);
+}
+.st-opt[aria-checked='true'] .st-thumb {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.st-opt[aria-checked='true'] .st-shape i {
+  border-color: var(--link);
+  background: rgba(10, 132, 255, 0.18);
+}
+.st-opt[aria-checked='true'] b {
+  color: var(--link);
+}
+.st-opt:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.st-opt:disabled:hover {
+  background: transparent;
+}
+.st-opt[aria-checked='true']:disabled:hover {
+  background: var(--accent-soft);
+}
+.st-note {
+  margin: -6px 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+/* ---- 底下的字幕:开场时"板块漂移 约 1.8 亿年前 ━━ 跳过",之后一句提示 ---- */
+.st-cap {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 8px 0 16px;
+  border-radius: 20px;
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 14px;
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+.st-cap.off {
+  opacity: 0;
+}
+.st-cap b {
+  font-weight: 600;
+}
+.st-yr {
+  min-width: 7.5em;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.st-bar {
+  width: 150px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.st-bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+}
+.st-skip {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--btn);
+  font-size: 13px;
+}
+.st-skip:hover {
+  background: var(--hover-bg);
+}
+.st-cap.st-tip {
+  padding: 0 16px;
+}
+
+/* ---- 创建前的确认框(照 Mac 的确认框:图标、粗体标题、一句说明、两个按钮,右边蓝色是确认) ---- */
+.st-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+  animation: st-in 0.2s ease-out;
+}
+.st-dlg {
+  width: min(420px, 100%);
+  box-sizing: border-box;
+  padding: 22px 20px 18px;
+  border-radius: 14px;
+  background: #232325;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: st-pop 0.2s ease-out;
+}
+@keyframes st-pop {
+  from {
+    transform: scale(0.96);
+  }
+}
+.st-dlg-ico {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 10px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--link);
+}
+.st-dlg h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+}
+.st-dlg p {
+  margin: 8px 0 14px;
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.st-dlg .sb-group {
+  background: rgba(118, 118, 128, 0.2);
+}
+.st-dlg .sb-row {
+  min-height: 40px;
+}
+.st-dlg .sb-ico {
+  color: var(--ink-2);
+}
+.st-dlg p.st-dlg-note {
+  margin: 12px 0 0;
+}
+.st-dlg-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+.st-dlg-btns button {
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.st-dlg-btns .st-b2 {
+  background: var(--btn);
+}
+.st-dlg-btns .st-b2:hover {
+  background: var(--hover-bg);
+}
+.st-dlg-btns .st-b1 {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.st-dlg-btns .st-b1:hover {
+  background: var(--accent-hover);
+}
+
+/* ---- 手机:左边的设定变成底部卡片,样式和投影收进右上两个按钮 ---- */
+.st-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 82%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-top: 0.5px solid var(--line);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.35);
+  transition: transform 0.36s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.studio.intro .st-sheet,
+.studio.out .st-sheet {
+  transform: translateY(105%);
+}
+.st-grip {
+  flex: none;
+  position: relative;
+  width: 100%;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.st-grip i {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  width: 36px;
+  height: 5px;
+  margin-left: -18px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.3);
+}
+.st-sheet .st-in {
+  padding: 10px 16px 10px;
+  gap: 14px;
+}
+.st-sheet .nw-title {
+  font-size: 22px;
+}
+.st-sheet .nw-intro {
+  font-size: 14px;
+}
+/* 卡片里的行和名字框:和电脑上一样高 */
+.studio .st-sheet .sb-row {
+  min-height: 42px;
+  font-size: 14.5px;
+}
+.studio .st-sheet .nw-name {
+  height: 34px;
+  border-radius: 8px;
+}
+.st-sheet .st-foot {
+  padding: 8px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 0;
+}
+.st-sheet.tools .st-in {
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+}
+.st-ph-btns {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: opacity 0.3s ease;
+}
+.studio.intro .st-ph-btns,
+.studio.out .st-ph-btns {
+  opacity: 0;
+  pointer-events: none;
+}
+.st-ph-btn {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.st-ph-btn.on {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.st-ph-btn .st-thumb {
+  width: 30px;
+  height: 22px;
+  border-radius: 4px;
+}
+.st-ph-btn .st-shape {
+  width: 30px;
+  height: 24px;
+}
+.st-ph-btn .st-shape i {
+  border-color: var(--ink);
+}
+.st-dismiss {
+  position: absolute;
+  inset: 0;
+}
+.st-phone .st-right {
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: 68px;
+  bottom: auto;
+  width: 188px;
+  max-height: calc(100% - var(--sheet-h, 260px) - 24px);
+  border: 0;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.studio.st-phone.drawer-style .st-right,
+.studio.st-phone.drawer-proj .st-right {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.studio.st-phone.drawer-proj .st-right {
+  top: calc(66px + env(safe-area-inset-top, 0px));
+}
+.st-phone .st-right .sb-sec-head + .sb-group {
+  margin-bottom: 0;
+}
+.st-phone .st-opt {
+  min-height: 42px;
+  padding: 5px 8px;
+}
+.st-phone .st-opt .st-thumb,
+.st-phone .st-opt .st-shape {
+  width: 40px;
+  height: 27px;
+}
+.st-phone .st-opt small {
+  display: none;
+}
+.st-phone .st-cap {
+  bottom: calc(var(--sheet-h, 260px) + 14px);
+  max-width: calc(100% - 24px);
+  gap: 8px;
+  padding-left: 12px;
+  font-size: 13px;
+}
+.st-phone.intro .st-cap {
+  bottom: auto;
+}
+.st-phone .st-bar {
+  width: 64px;
+}
+.st-phone .st-yr {
+  min-width: 6.5em;
+}
+.st-phone .st-cap.st-tip {
+  width: max-content;
+  white-space: normal;
+  height: auto;
+  min-height: 40px;
+  padding: 8px 14px;
+  text-align: center;
+}
+
+/* ---- 助手(Assistant.tsx 的面板,深色):电脑上贴着右边、换掉样式和投影;手机上盖住设定卡片,上面留出星球 ---- */
+.studio.ast .st-right {
+  transform: translateX(calc(100% + 2px));
+}
+.studio > .ast-panel {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9;
+  width: 372px;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left: 0.5px solid var(--line);
+  animation: st-ast-in 0.36s cubic-bezier(0.3, 0.7, 0.2, 1);
+  transition: transform 0.36s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+@keyframes st-ast-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+.studio.intro > .ast-panel,
+.studio.out > .ast-panel {
+  transform: translateX(calc(100% + 2px));
+}
+/* 手机:屏幕下面 58%(和 Studio.tsx 的 AST_SHEET 一致) */
+.st-phone > .ast-panel.phone {
+  top: 42%;
+  z-index: 9;
+  left: 0;
+  right: 0;
+  width: auto;
+  border-left: 0;
+  border-radius: 14px 14px 0 0;
+  /* 盖着设定卡片:实色底,底下的字不透上来 */
+  background: var(--panel-solid);
+  box-shadow:
+    0 0 0 0.5px var(--line),
+    0 -6px 30px rgba(0, 0, 0, 0.35);
+  animation-name: st-ast-up;
+  transition: transform 0.2s ease;
+}
+@keyframes st-ast-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+.st-phone.intro > .ast-panel,
+.st-phone.out > .ast-panel {
+  transform: translateY(100%);
+}
+.st-phone.ast .st-ph-btns,
+.st-phone.ast .st-cap.st-tip {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio,
+  .st-left,
+  .st-right,
+  .st-sheet,
+  .st-gl,
+  .st-cap,
+  .st-ph-btns,
+  .st-scrim,
+  .st-dlg,
+  .studio > .ast-panel {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* 星球上的地名:停住时淡入;一动就马上藏起来(不跟着星球晃) */
+.st-labels {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+}
+.studio > .st-labels {
+  pointer-events: none;
+}
+.st-labels.on {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}

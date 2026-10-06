@@ -104,22 +104,31 @@ export function useLayerThumbs(src: ThumbSource, current: MapLayer) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 缓存是哪个世界的。换了世界:排着的、做好的全部作废 */
+  const haveFor = useRef(src.data);
+  const reset = useCallback(() => {
+    queue.current = [];
+    have.current = {};
+    haveFor.current = srcRef.current.data;
+    setThumbs({});
+  }, []);
+
   /** 把这几张排进队(已有的、已排着的跳过) */
   const request = useCallback(
     (ids: MapLayer[]) => {
+      // 子组件的 effect 比下面换世界的 effect 先跑:这时缓存还是上一个世界的,先作废再排
+      if (haveFor.current !== srcRef.current.data) reset();
       for (const id of ids) if (!have.current[id] && !queue.current.includes(id)) queue.current.push(id);
       pump();
     },
-    [pump],
+    [pump, reset],
   );
 
-  // 换世界:全部作废;文明重推:政区、民族、信仰作废
+  // 换世界:全部作废(request 已经作废过就不再清,不然刚排上的又没了);文明重推:政区、民族、信仰作废
   const { data, civ } = src;
   useEffect(() => {
-    queue.current = [];
-    have.current = {};
-    setThumbs({});
-  }, [data]);
+    if (haveFor.current !== data) reset();
+  }, [data, reset]);
   const civSeen = useRef<Civ | null>(null);
   useEffect(() => {
     if (civSeen.current && civSeen.current !== civ) {

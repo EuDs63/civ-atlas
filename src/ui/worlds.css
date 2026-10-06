@@ -1,9 +1,10 @@
 /*
- * 我的世界(MyWorlds.tsx)、新建世界的卡片(NewWorld.tsx)、卡片里的改地形(TerrainTools.tsx 的 TerrainPanel)。
+ * 我的世界(MyWorlds.tsx)、新建世界里设定的零件(studio/Studio.tsx 用这里的 .nw-*,摆放和深色在 studio.css)、
+ * 卡片里的改地形(TerrainTools.tsx 的 TerrainPanel)。
  *
- *   我的世界   盖住整个页面的一页:浅灰底,右上新建世界 / 打开存档文件,下面缩略图网格(宽屏三列,手机两列),名字和时间在图下面
- *   新建世界   宽屏:和侧栏同一张卡片(位置、宽度见 desktop.css),底部一条白底放「创建世界」;
- *             手机:底部卡片(比世界卡片高,收起时只露标题那一行;改地形时只放改地形那一组)
+ *   我的世界   盖住整个页面的一页:浅灰底,右上新建世界 / 打开存档文件,下面缩略图网格(宽屏三列,手机两列),名字和时间在图下面;
+ *             一个都没有时中间一颗自转的星球、一段话、「新建世界」大按钮
+ *   新建世界   种子框和「换一颗」、世界参数的滑块、名字框、左上返回;手机底部卡片(.nw-sheet)里字号、行高大一点
  * 行、分组、小标题照侧栏的零件(sidebar.css 的 .sb-*);这里只写新加的。
  */
 
@@ -293,6 +294,74 @@
   margin-left: auto;
 }
 
+/* ---- 一个都没有:中间一颗慢慢转的星球、一段话、「新建世界」大按钮 ---- */
+.mw-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px 0 40px;
+}
+.mw-globe {
+  flex: none;
+  margin-bottom: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #2a5a8c, #0e2440 70%);
+  box-shadow: 0 12px 32px rgba(0, 30, 80, 0.2);
+}
+.mw-globe canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.mw-globe.on canvas {
+  opacity: 1;
+}
+.mw-empty h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.mw-empty p {
+  margin: 10px 0 22px;
+  max-width: 30em;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+/* 一句一段:放得下就接着排,窄了在句子之间换行(不从词中间断开) */
+.mw-empty p span {
+  display: inline-block;
+}
+.mw .mw-btn.big {
+  height: 44px;
+  padding: 0 22px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  gap: 8px;
+}
+.mw .mw-or {
+  margin-top: 14px;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 13.5px;
+}
+.mw .mw-or:hover {
+  text-decoration: underline;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mw-globe canvas {
+    transition: none;
+  }
+}
+
 /* ---- 手机:两列,新建世界在右上(圆角药丸),打开存档文件在列表下面 ---- */
 .mw.mw-phone {
   padding: calc(14px + var(--safe-t, 0px)) calc(16px + var(--safe-r, 0px)) calc(24px + var(--safe-b, 0px)) calc(16px + var(--safe-l, 0px));
@@ -384,10 +453,7 @@
   bottom: calc(12px + var(--safe-b));
 }
 
-/* ==== 新建世界:宽屏左边的卡片 ==== */
-.sidebar .nw-head {
-  gap: 10px;
-}
+/* ==== 新建世界的设定 ==== */
 /* 左上返回(新建世界、世界卡片共用) */
 .sidebar .nw-back,
 .psheet .nw-back {
@@ -448,12 +514,8 @@
 }
 /* 内容比卡片高时整块滚动(分组不压扁) */
 .nw-body > *,
-.nw-body .sb-sec > *,
-.nw-in > * {
+.nw-body .sb-sec > * {
   flex-shrink: 0;
-}
-.app.has-side .nw-card .sb-body {
-  border-radius: 0;
 }
 .sb-sec-head small {
   font-size: 12.5px;
@@ -635,36 +697,6 @@
 .nw-name {
   width: 100%;
 }
-.nw-foot {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px 14px;
-  border-top: 0.5px solid var(--line);
-  border-radius: 0 0 14px 14px;
-  background: var(--surface);
-}
-.nw-foot .nw-create,
-.nw-bottom .nw-create {
-  height: 44px;
-  width: 100%;
-  border: 0;
-  border-radius: 10px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 16px;
-  font-weight: 600;
-}
-.nw-foot .nw-create:hover:not(:disabled),
-.nw-bottom .nw-create:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-.nw-foot .nw-create:disabled,
-.nw-bottom .nw-create:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
 
 /* ---- 改地形(卡片里的一组):工具、大小、说明、改了几处 / 撤销 / 全部清除;标题右边"完成" ---- */
 .tp .tp-done {
@@ -746,53 +778,7 @@
   color: var(--err) !important;
 }
 
-/* 新建时地图底部的一句提示(宽屏,地图那一块居中) */
-.draft-tip {
-  position: absolute;
-  left: var(--map-mid, 50%);
-  bottom: 26px;
-  z-index: 6;
-  transform: translateX(-50%);
-  padding: 9px 16px;
-  border-radius: 12px;
-  background: var(--panel);
-  box-shadow: var(--shadow-toast);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: 13.5px;
-  white-space: nowrap;
-  pointer-events: none;
-  animation: toast-in 0.18s ease-out;
-}
-
-/* ==== 新建世界:手机底部的卡片 ==== */
-.psheet.nw-sheet {
-  top: max(calc(var(--top-room) + 120px), calc(100% - 492px));
-}
-/* 收起(点拖动条;回放这颗星球的形成时)/ 改地形:卡片只有内容那么高 */
-.psheet.nw-sheet.down,
-.psheet.nw-sheet.tools {
-  top: auto;
-}
-.nw-in {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 2px 16px calc(16px + var(--safe-b));
-}
-.nw-sheet.down .nw-in {
-  padding-bottom: calc(14px + var(--safe-b));
-}
-.psheet.nw-sheet .nw-back {
-  margin: 0 0 -10px -5px;
-  font-size: 15px;
-}
+/* ==== 新建世界:手机底部的卡片(摆放、收起拉开在 studio.css 的 .st-sheet) ==== */
 .nw-sheet .nw-title {
   font-size: 22px;
 }
@@ -822,24 +808,9 @@
   height: 42px;
   border-radius: 10px;
 }
-.nw-bottom {
-  margin-top: 2px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.nw-bottom p {
-  margin: 0 2px;
-  font-size: 12.5px;
-  color: var(--ink-2);
-  line-height: 1.5;
-}
-.nw-sheet .nw-bottom .nw-create {
-  flex: none;
-  height: 48px;
-  border-radius: 12px;
-  font-size: 17px;
-}
 .nw-sheet .tp .sb-sec-head {
   font-size: 13.5px;
+}
+.mw-phone .mw-empty p {
+  font-size: 14px;
 }

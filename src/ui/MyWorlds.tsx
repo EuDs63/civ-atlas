@@ -7,14 +7,15 @@
  *            右上"···"(电脑悬停时出现;手机长按卡片)= 改名、复制一份、存成文件、删除(点两下确认)。没建完的只有改名、删除
  *   底部     源代码、隐私政策、用户协议、版本号(手机上不放,在世界卡片的"更多"里)
  * 手机:两列卡片,新建世界在右上,打开存档文件在列表下面。
+ * 一个都没有(第一次来)时:中间一颗慢慢自转的星球、一段话说清能做什么、「新建世界」大按钮,下面"或者打开存档文件"。
  *
  * 标题下那句话:没登录的说清楚世界只存在这个浏览器里、清理浏览器数据会一起删掉;后面跟蓝字「全部存成文件」
  * (所有世界存成一个文件,「打开存档文件」选它全部放回来,见 bundle.ts;一个世界都没有、也没有只在页面里的时不出现)。
  * 登录了的:标题下那句话说世界存在账号里(不再提醒,「全部存成文件」照样在);卡片时间那个位置在没同步好时换成"正在同步""还没同步上"(同步好了不标);
  * 账号窗里点「最近删除」,这一页换成最近删除(30 天内能找回,点一张卡片找回)。
  *
- * 存、读、列都在 saveStore.ts;打开一个世界(生成 + 套上修改)由 App 做。一个世界都不剩时 App 直接进新建
- * (刚才那个世界存不进浏览器、只在页面里的除外:停在这一页,好把它存成文件)。
+ * 存、读、列都在 saveStore.ts;打开一个世界(生成 + 套上修改)由 App 做。一个都没有时也停在这一页
+ * (刚才那个世界存不进浏览器、只在页面里的,标题下有「全部存成文件」)。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_WORLDS, currentUnsaved, deleteWorld, duplicateWorld, listWorlds, loadWorld, notify, persistent, renameWorld, restoreWorld, storedCount, syncable, useSavesVersion, type StoredWorld } from './saveStore';
@@ -30,6 +31,7 @@ import { Icon } from './icons';
 import { TitleInput, when } from './worldParts';
 import { PRIVACY_URL, SOURCE_URL, TERMS_URL } from './links';
 import { APP_VERSION } from './version';
+import { HomeGlobe } from './studio/HomeGlobe';
 import './worlds.css';
 
 export interface MyWorldsProps {
@@ -75,18 +77,25 @@ export function MyWorlds({ phone, onOpen, onNew, onOpenText }: MyWorldsProps) {
   const sync = useSyncView();
   const trash = useTrashView();
   const n = list.length;
+  const empty = n === 0;
   // 没登录:世界只在这个浏览器里,清理浏览器数据就没了 —— 直说,后面跟「全部存成文件」;登录了存在账号里,不再提醒
   const sub = !keep
     ? '浏览器不让网页存数据，关掉页面前请把世界存成文件。'
     : session
-      ? phone
-        ? `${n} 个世界，存在你的账号里`
-        : `${n} 个世界，存在你的账号里。换电脑、换手机，登录同一个账号就能打开。`
-      : phone
-        ? `${n} 个世界只存在这个浏览器里，清理浏览器数据会删掉。`
-        : server
-          ? `${n} 个世界，只存在这个浏览器里，清理浏览器数据会一起删掉。登录以后存进账号，换电脑、换手机都能接着改。`
-          : `${n} 个世界，只存在这个浏览器里，清理浏览器数据会把它们一起删掉。`;
+      ? empty
+        ? '建好的世界存在你的账号里，换电脑、换手机登录同一个账号就能打开。'
+        : phone
+          ? `${n} 个世界，存在你的账号里`
+          : `${n} 个世界，存在你的账号里。换电脑、换手机，登录同一个账号就能打开。`
+      : empty
+        ? server
+          ? '建好的世界存在这个浏览器里。登录以后，换电脑、换手机都能接着改。'
+          : '建好的世界存在这个浏览器里；换电脑请用存档文件。'
+        : phone
+          ? `${n} 个世界只存在这个浏览器里，清理浏览器数据会删掉。`
+          : server
+            ? `${n} 个世界，只存在这个浏览器里，清理浏览器数据会一起删掉。登录以后存进账号，换电脑、换手机都能接着改。`
+            : `${n} 个世界，只存在这个浏览器里，清理浏览器数据会把它们一起删掉。`;
   // 正在看的世界存不进浏览器(存储满了)、一个都没存下时,也能把它存成文件
   const saveAll = (n > 0 || currentUnsaved()) && (
     <button className="mw-link" data-act="save-all" onClick={downloadAll}>
@@ -112,13 +121,15 @@ export function MyWorlds({ phone, onOpen, onNew, onOpenText }: MyWorldsProps) {
     <div className={`mw${phone ? ' mw-phone' : ''}`} role="main" aria-label="我的世界" onPointerDown={stop} onClick={stop} onDoubleClick={stop} onWheel={stop}>
       <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} data-testid="save-file-input" />
       <header className="mw-top">
-        {phone && (
+        {phone && (!empty || acctBtn) && (
           <div className={`mw-bar${server ? ' has-acct' : ''}`}>
             {acctBtn}
-            <button className="mw-btn blue round" data-act="new-world" onClick={onNew}>
-              <Icon name="plus" size={16} />
-              新建世界
-            </button>
+            {!empty && (
+              <button className="mw-btn blue round" data-act="new-world" onClick={onNew}>
+                <Icon name="plus" size={16} />
+                新建世界
+              </button>
+            )}
           </div>
         )}
         <div className="mw-heading">
@@ -129,42 +140,68 @@ export function MyWorlds({ phone, onOpen, onNew, onOpenText }: MyWorldsProps) {
             {saveAll}
           </p>
         </div>
-        {!phone && (
+        {/* 一个都没有时,打开存档、新建在中间的大按钮那里;右上只剩账号 */}
+        {!phone && (!empty || acctBtn) && (
           <div className="mw-acts">
-            <button className="mw-btn" data-act="open-file" onClick={pickFile}>
-              <Icon name="file" size={16} />
-              打开存档文件
-            </button>
-            <button className="mw-btn blue" data-act="new-world" onClick={onNew}>
-              <Icon name="plus" size={16} />
-              新建世界
-            </button>
+            {!empty && (
+              <>
+                <button className="mw-btn" data-act="open-file" onClick={pickFile}>
+                  <Icon name="file" size={16} />
+                  打开存档文件
+                </button>
+                <button className="mw-btn blue" data-act="new-world" onClick={onNew}>
+                  <Icon name="plus" size={16} />
+                  新建世界
+                </button>
+              </>
+            )}
             {acctBtn && (
               <>
-                <span className="mw-sep" aria-hidden="true" />
+                {!empty && <span className="mw-sep" aria-hidden="true" />}
                 {acctBtn}
               </>
             )}
           </div>
         )}
       </header>
-      <div className="mw-grid" role="list">
-        {list.map((w) => (
-          <WorldCard
-            key={w.id}
-            w={w}
-            phone={phone}
-            menuOpen={menu === w.id}
-            onMenu={(o) => setMenu(o ? w.id : null)}
-            renaming={renaming === w.id}
-            onRename={(o) => setRenaming(o ? w.id : null)}
-            onOpen={() => onOpen(w.id)}
-            sync={syncOf(w.id)}
-            loggedIn={!!session}
-          />
-        ))}
-      </div>
-      {phone && (
+      {empty && (
+        <div className="mw-empty">
+          <HomeGlobe size={phone ? 150 : 188} />
+          <h2>还没有世界</h2>
+          <p>
+            <span>打造一颗独属于你的星球，</span>
+            <span>它有大陆、海洋、气候、洋流……</span>
+            <span>还有城市、文明、种族……</span>
+            <span>以及在你引导下推演出来的历史。</span>
+          </p>
+          <button className="mw-btn blue big" data-act="new-world" onClick={onNew}>
+            <Icon name="plus" size={18} />
+            新建世界
+          </button>
+          <button className="mw-or" data-act="open-file" onClick={pickFile}>
+            或者打开存档文件
+          </button>
+        </div>
+      )}
+      {!empty && (
+        <div className="mw-grid" role="list">
+          {list.map((w) => (
+            <WorldCard
+              key={w.id}
+              w={w}
+              phone={phone}
+              menuOpen={menu === w.id}
+              onMenu={(o) => setMenu(o ? w.id : null)}
+              renaming={renaming === w.id}
+              onRename={(o) => setRenaming(o ? w.id : null)}
+              onOpen={() => onOpen(w.id)}
+              sync={syncOf(w.id)}
+              loggedIn={!!session}
+            />
+          ))}
+        </div>
+      )}
+      {phone && !empty && (
         <div className="mw-open-file sb-group">
           <button className="sb-row" data-act="open-file" onClick={pickFile}>
             <Icon name="file" size={18} className="sb-ico" />

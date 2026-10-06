@@ -85,18 +85,57 @@ const projOn = async (p: Page = page) => {
   return v;
 };
 /**
- * 进入改地形:只有新建世界时能改(网址 new=1,左边是新建卡片);点卡片上的"改地形",卡片里换成改地形工具(.tp)。
+ * 新建界面(网址 new=1、我的世界里点「新建世界」)准备好:世界生成出来了,开场(板块漂移 → 卷成地球仪)在放就点「跳过」,
+ * 等两边面板(手机:底部卡片)滑进来
+ */
+const studioReady = async (p: Page = page) => {
+  await p.locator('.studio').waitFor({ timeout: 30000 });
+  await p.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await p
+    .waitForFunction(() => !document.querySelector('.studio.intro') || document.querySelector('.st-cap:not(.off) [data-act=skip-intro]'), null, { timeout: 20000 })
+    .catch(() => {});
+  if (await p.locator('.studio.intro').count()) await p.click('.st-cap:not(.off) [data-act=skip-intro]').catch(() => {});
+  await p.locator('.studio:not(.intro)').waitFor({ timeout: 15000 });
+  await p.waitForTimeout(450);
+};
+/**
+ * 进入改地形:只有新建世界时能改(网址 new=1);点左边(手机:拉开底部卡片)的"火山、山脉、湖……",卡片里换成改地形工具(.tp),
+ * 星球摊成平面、换成平常的平面地图铺在中间那块;转到 0° 经线在正中(主图正好铺满那一块)。
  * 已经创建的世界没有这个入口(地形是创建时定下的)
  */
 const terrainOn = async (p: Page = page) => {
-  await p.click('.sidebar [data-act=terrain], .psheet [data-act=terrain]');
+  await studioReady(p);
+  if (await p.locator('.st-sheet.peek').count()) {
+    await p.click('.st-sheet [data-act=new-sheet]');
+    await p.waitForTimeout(350);
+  }
+  await p.click('.studio [data-act=terrain]');
   await p.locator('.tp').waitFor({ timeout: 5000 });
-  await p.waitForTimeout(150);
+  await p.locator('.app.studio-flat').waitFor({ timeout: 10000 });
+  await p
+    .waitForFunction(
+      () => {
+        const st = document.querySelector('main.stage')!.getBoundingClientRect();
+        const v = (window as any).__wfView;
+        return !!v && Math.abs(v.sw - st.width) < 1.5 && v.k === 1;
+      },
+      null,
+      { timeout: 5000 },
+    )
+    .catch(() => {});
+  await p.waitForTimeout(200);
+  await p.evaluate(() => (window as any).__wfSetCenter?.(0));
+  await p.waitForTimeout(250);
 };
-/** 回放世界形成(创建好的世界:概览"世界设定"页的按钮,点了概览收起;新建中:卡片上的"回放世界形成") */
+/** 新建界面里创建:点「创建世界」→ 确认框里点「确认创建」→ 星球展开、新建界面淡出 */
+const createNow = async (p: Page = page) => {
+  await studioReady(p);
+  await p.click('.studio [data-act=create-world]');
+  await p.click('.st-dlg [data-act=confirm-create]');
+  await p.locator('.studio').waitFor({ state: 'detached', timeout: 15000 });
+};
+/** 回放世界形成(创建好的世界:概览"世界设定"页的按钮,点了概览收起) */
 const replayClick = async (p: Page = page) => {
-  const nw = p.locator('.nw-body [data-act=replay], .nw-sheet [data-act=replay]');
-  if (await nw.count()) return nw.click();
   await openOverview(p, 'genesis');
   await p.click('.ov [data-act=replay]');
 };
@@ -680,55 +719,201 @@ const cached = await wf();
 console.log('切回画过的画风 renderMs:', cached.renderMs.toFixed(1));
 if (!(cached.renderMs < 20)) errs.push(`切回画过的画风仍在重画(renderMs=${cached.renderMs.toFixed(1)})`);
 
-// 回放中点概览"世界设定"页的"以它为底稿新建…":概览收起,左边换成新建卡片(种子锁着,地形、参数带过去);
+// 回放中点概览"世界设定"页的"以它为底稿新建…":概览收起,换成新建界面(左边设定:种子锁着,地形、参数带过去;不放开场);
 // 带着东西、起好了名,一开始就存成没建完的(网址 w=编号,刷新不丢);什么都没动就点返回,这一份删掉
 await replayClick();
 await page.waitForTimeout(1000);
 await openOverview(page, 'genesis');
 await page.click('.ov [data-act=draft-from]');
-const fromCard = await page.locator('.sidebar.nw-card').waitFor({ timeout: 5000 }).then(() => true, () => false);
+const fromCard = await page.locator('.studio:not(.intro) .st-left').waitFor({ timeout: 5000 }).then(() => true, () => false);
 const fromClosed = !(await page.locator('.ov-root:not([hidden])').count());
-const fromSeed = (await page.locator('.nw-card [data-act=seed-locked]').innerText().catch(() => '')).replace(/\n/g, ' ');
+const fromSeed = (await page.locator('.st-left [data-act=seed-locked]').innerText().catch(() => '')).replace(/\n/g, ' ');
 const fromUrl = page.url();
 const fromId = new URL(fromUrl).searchParams.get('w');
 const fromKey = `wenming-ditu:world:${fromId}`;
 const fromStored = !!fromId && (await page.evaluate((k) => localStorage.getItem(k) !== null, fromKey));
-await page.click('.nw-card [data-act=back]').catch(() => {});
-await page.locator('.sidebar.nw-card').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+await page.click('.st-left [data-act=back]').catch(() => {});
+await page.locator('.studio').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
 const fromLeft = !!fromId && (await page.evaluate((k) => localStorage.getItem(k) !== null, fromKey));
 console.log(`以它为底稿新建:卡片 ${fromCard}、概览收起 ${fromClosed}、种子「${fromSeed}」、网址 ${fromUrl.split('?')[1]}、存下了 ${fromStored};没动就返回后还在 ${fromLeft}`);
-if (!fromCard || !fromClosed) errs.push('点"以它为底稿新建"后没有换成新建卡片 / 概览没收起');
+if (!fromCard || !fromClosed) errs.push('点"以它为底稿新建"后没有换成新建界面(或放了开场) / 概览没收起');
 if (!/种子.*7/.test(fromSeed)) errs.push(`以它为底稿新建:种子应锁着、还是 7(${fromSeed})`);
 if (!fromStored) errs.push(`以它为底稿新建:应一开始就存成没建完的、网址带 w=编号(${fromUrl})`);
 if (fromLeft) errs.push('以它为底稿新建后什么都没动就返回,没建完的那一份没有删掉');
 
-// 新建中回放时点"换一颗":新星球出来后回放按钮要恢复正常、还能再点
+// 新建界面:开场放板块漂移(字幕上有年代、进度、跳过;两边面板先不出来),跳过 → 卷成地球仪、面板滑进来;
+// 「重看星球形成」= 再放一遍开场(放的时候「换一颗」「创建世界」点不了);「换一颗」:种子、网址换了,生成时顶部提示条上有进度,
+// 新星球上放一遍漂移,放完各个按钮恢复
 await page.goto(`${dev.url}/?new=1&seed=7&style=realistic`);
 await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-const replayBtn = page.locator('.nw-body [data-act=replay]');
-const IDLE = '回放这颗星球的形成';
-await replayClick();
-await page.waitForTimeout(1000);
-await markWf();
-await page.click('.nw-body [data-act=new-seed]');
-// 生成新世界时顶部提示条上有进度
-const genToast = await page.locator('.toast[data-toast=progress]').innerText({ timeout: 5000 }).catch(() => '');
-await waitRedraw();
-const seed2 = await page.locator('.nw-seed-input').inputValue();
-console.log(`换一颗:种子 7 → ${seed2},生成时提示条「${genToast.replace(/\n/g, ' ')}」`);
-if (!genToast) errs.push('生成新世界时顶部提示条上没有进度');
-if (seed2 === '7' || !new RegExp(`[?&]seed=${seed2}(&|$)`).test(page.url())) errs.push(`点"换一颗"后种子 / 网址没变(${seed2},${page.url()})`);
-await page.waitForFunction((t) => document.querySelector('.nw-body [data-act=replay]')?.textContent === t, IDLE, { timeout: 15000 }).catch(() => {});
-const txt = await replayBtn.innerText();
-const off = await replayBtn.isDisabled();
-console.log('回放中换一颗后按钮:', JSON.stringify(txt), off ? '(禁用)' : '(可点)');
-if (txt !== IDLE || off) errs.push(`回放中换一颗后按钮卡住了:${txt}${off ? '(禁用)' : ''}`);
-else {
-  await replayBtn.click();
-  const replays = await page
-    .waitForFunction(() => /百万年前|今天/.test(document.querySelector('.caption .big')?.textContent ?? ''), null, { timeout: 15000 })
+{
+  const capOn = await page
+    .waitForFunction(() => /亿年前|万年前/.test(document.querySelector('.st-cap:not(.off) .st-yr')?.textContent ?? ''), null, { timeout: 20000 })
     .then(() => true, () => false);
-  if (!replays) errs.push('新世界点回放没有开始播放');
+  const introPanels = await page.locator('.studio.intro').count();
+  await studioReady();
+  const theme = await page.locator('.app').getAttribute('data-theme');
+  const styles = await page.locator('.st-right [data-style]').count();
+  const projs = await page.locator('.st-right [data-proj]').count();
+  await page.click('.studio [data-act=replay]');
+  await page.waitForTimeout(400);
+  const replaying = (await page.locator('.studio.intro').count()) === 1;
+  const lockedSeed = await page.locator('.studio [data-act=new-seed]').isDisabled();
+  await studioReady();
+  await markWf();
+  await page.click('.studio [data-act=new-seed]');
+  // 生成新世界时顶部提示条上有进度
+  const genToast = await page.locator('.toast[data-toast=progress]').innerText({ timeout: 5000 }).catch(() => '');
+  await waitRedraw();
+  const seed2 = await page.locator('.nw-seed-input').inputValue();
+  await page.waitForFunction(() => !document.querySelector('.studio [data-act=replay]')?.hasAttribute('disabled'), null, { timeout: 15000 }).catch(() => {});
+  const replayOk = !(await page.locator('.studio [data-act=replay]').isDisabled());
+  console.log(
+    `新建界面:开场字幕 ${capOn}、面板藏着 ${introPanels === 1};跳过后主题 ${theme}、样式 ${styles} 种、投影 ${projs} 种;重看星球形成 → 开场 ${replaying}、换一颗点不了 ${lockedSeed};` +
+      `换一颗:种子 7 → ${seed2},生成时提示条「${genToast.replace(/\n/g, ' ')}」,之后重看按钮可点 ${replayOk}`,
+  );
+  if (!capOn || introPanels !== 1) errs.push('新建界面:开场没有放板块漂移的字幕,或两边面板没藏起来');
+  if (theme !== 'dark' || styles !== 7 || projs !== 6) errs.push(`新建界面:不是深色(${theme}),或右边样式 / 投影不全(${styles} / ${projs})`);
+  if (!replaying || !lockedSeed) errs.push('新建界面:「重看星球形成」没有重放开场,或放的时候还能换一颗');
+  if (!genToast) errs.push('生成新世界时顶部提示条上没有进度');
+  if (seed2 === '7' || !new RegExp(`[?&]seed=${seed2}(&|$)`).test(page.url())) errs.push(`点"换一颗"后种子 / 网址没变(${seed2},${page.url()})`);
+  if (!replayOk) errs.push('新建界面:换一颗以后「重看星球形成」一直点不了');
+}
+
+// 第一次来(什么都没存):先到「我的世界」,中间一颗星球、一段话、「新建世界」;点了进新建界面;
+// 「创建世界」先弹确认框(列出种子、世界参数、地形三样不能再改),「再改改」关掉、「确认创建」才建好,回到平常的世界页面(浅色、政区)
+{
+  const fctx = await browser.newContext({ viewport: { width: 1400, height: 820 } });
+  const fp = await fctx.newPage();
+  fp.on('pageerror', (e) => errs.push(`第一次来:${e.message}`));
+  await fp.goto(`${dev.url}/?play=0`);
+  const empty = await fp.locator('.mw-empty').waitFor({ timeout: 15000 }).then(() => true, () => false);
+  const emptyText = (await fp.locator('.mw-empty').innerText().catch(() => '')).replace(/\n/g, '');
+  const globe = await fp.locator('.mw-empty .mw-globe canvas').count();
+  await fp.click('.mw-empty [data-act=new-world]');
+  await studioReady(fp);
+  const draftUrl = fp.url();
+  await fp.click('.studio [data-act=create-world]');
+  const dlg = (await fp.locator('.st-dlg').innerText().catch(() => '')).replace(/\n/g, ' ');
+  const dlgSeed = await fp.locator('.st-dlg [data-confirm=seed]').innerText().catch(() => '');
+  await fp.click('.st-dlg [data-act=confirm-back]');
+  const closed = !(await fp.locator('.st-dlg').count());
+  const stillDraft = (await fp.locator('.studio').count()) === 1;
+  await createNow(fp);
+  await fp.locator('.sidebar .sb-title').waitFor({ timeout: 15000 }).catch(() => {});
+  const worldUrl = fp.url();
+  const theme = await fp.locator('.app').getAttribute('data-theme');
+  const layer = await fp.locator('.app').getAttribute('data-layer');
+  console.log(
+    `第一次来:我的世界空的 ${empty}、星球 ${globe}、「${emptyText.slice(0, 40)}…」;新建 → ${draftUrl.split('?')[1]};确认框「${dlg.slice(0, 60)}…」种子 ${dlgSeed};` +
+      `再改改 → 关掉 ${closed}、还在新建 ${stillDraft};确认创建 → ${worldUrl.split('?')[1]}、${theme}、${layer}`,
+  );
+  if (!empty || !globe || !emptyText.includes('还没有世界') || !emptyText.includes('打造一颗独属于你的星球')) errs.push(`第一次来:我的世界空着时不是"星球 + 一段话 + 新建世界"(${emptyText})`);
+  if (!/[?&]new=1/.test(draftUrl)) errs.push(`第一次来:点「新建世界」没进新建(${draftUrl})`);
+  if (!['不能再改', '种子', '世界参数', '地形'].every((w) => dlg.includes(w)) || !new RegExp(`[?&]seed=${dlgSeed}(&|$)`).test(draftUrl)) errs.push(`新建界面:确认框没列出不能再改的三样(${dlg},种子 ${dlgSeed})`);
+  if (!closed || !stillDraft) errs.push('新建界面:确认框点「再改改」没有关掉、回到新建');
+  if (!/[?&]w=w/.test(worldUrl) || theme !== 'light' || layer !== 'political') errs.push(`新建界面:确认创建后没回到平常的世界页面(${worldUrl},${theme},${layer})`);
+  await fctx.close();
+}
+
+// 手机新建:第一眼星球整个在底部卡片上面(不是只露一角);创建以后正中看到的是陆地(展开的同时转到陆地最多的那一面)
+{
+  const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const pp = await pctx.newPage();
+  pp.on('pageerror', (e) => errs.push(`手机新建:${e.message}`));
+  await pp.goto(`${dev.url}/?new=1&seed=7&play=0`);
+  await studioReady(pp);
+  const g = await pp.locator('.st-glow').boundingBox();
+  const sheet = await pp.locator('.st-sheet').boundingBox();
+  // 光晕的直径 = 星球直径 × 2.4
+  const R = g ? g.width / 2.4 : 0;
+  const gcx = g ? g.x + g.width / 2 : 0;
+  const gcy = g ? g.y + g.height / 2 : 0;
+  await createNow(pp);
+  await pp.waitForTimeout(500);
+  const land = await pp.evaluate(() => {
+    let n = 0;
+    let hit = 0;
+    for (let i = 0; i < 5; i++)
+      for (let j = 0; j < 5; j++) {
+        const r = ((window as any).__wfProbe?.(40 + i * 77, 120 + j * 110) ?? []).join(' ');
+        n++;
+        if (r.includes('海拔')) hit++;
+      }
+    return hit / n;
+  });
+  console.log(`手机新建:星球 ${Math.round(gcx)},${Math.round(gcy)} 半径 ${Math.round(R)},底部卡片上边 ${sheet ? Math.round(sheet.y) : '-'};创建后屏幕上取样陆地 ${(land * 100).toFixed(0)}%`);
+  if (!g || !sheet || gcy + R > sheet.y + 1 || gcy - R < 0 || Math.abs(gcx - 195) > 2 || R < 120) errs.push(`手机新建:星球没有整个摆在底部卡片上面(中心 ${gcx},${gcy} 半径 ${R},卡片 ${sheet?.y})`);
+  if (!(land >= 0.3)) errs.push(`手机新建:创建以后正中对着的大半是海(陆地 ${(land * 100).toFixed(0)}%)`);
+  await pctx.close();
+}
+
+// 新建时让助手改(测试用假 AI):左边「地形」里「让助手改」→ 右边的样式和投影换成助手面板;说一句要改的 →
+// 列出改地形的两条(带编号),星球转过去、圈出这两处;勾掉一条,圈跟着少一个;执行 → 按新地形重新生成,左边「地形」写"改了 2 处",
+// 不放提示条,清单收起、助手里只留一行"已执行 2 条"带撤销;撤销 → 回到"还没改"。打开改地形工具时助手收起;换一颗,对话清掉
+{
+  const actx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+  const ap = await actx.newPage();
+  ap.on('pageerror', (e) => errs.push(`新建时让助手改:${e.message}`));
+  const row = () => ap.locator('.studio [data-act=terrain] .sb-row-side').innerText().catch(() => '');
+  await ap.goto(`${dev.url}/?new=1&seed=7&play=0&ai=mock`);
+  await studioReady(ap);
+  await ap.click('.studio [data-act=ask-assistant]');
+  const shown = await ap.locator('.studio > .ast-panel').waitFor({ timeout: 5000 }).then(() => true, () => false);
+  await ap.waitForTimeout(500);
+  const panel = await ap.locator('.studio > .ast-panel').boundingBox();
+  const rightGone = await ap.evaluate(() => (document.querySelector('.st-right')?.getBoundingClientRect().left ?? 0) >= innerWidth - 1);
+  const hint = await ap.locator('.ast-hint').innerText().catch(() => '');
+  await ap.fill('.ast-field textarea', '在最大的那块陆地中间挖个大湖，湖北边再加一道山脉');
+  await ap.press('.ast-field textarea', 'Enter');
+  await ap.waitForSelector('[data-act=ast-apply]', { timeout: 30000 }).catch(() => null);
+  const nos = (await ap.locator('.ast-items .ast-no').allInnerTexts().catch(() => [] as string[])) as string[];
+  const marksAt = (n: string) =>
+    ap
+      .waitForFunction((v) => document.querySelector('.st-marks.on')?.getAttribute('data-marks') === v, n, { timeout: 8000 })
+      .then(() => true, () => false);
+  const marks2 = await marksAt('2');
+  await ap.click('.ast-items .ast-ck >> nth=1');
+  const marks1 = await marksAt('1');
+  await ap.click('.ast-items .ast-ck >> nth=1');
+  await ap.click('[data-act=ast-apply]');
+  await ap.waitForFunction(() => /改了 2 处/.test(document.querySelector('.studio [data-act=terrain] .sb-row-side')?.textContent ?? ''), null, { timeout: 30000 }).catch(() => {});
+  await ap.waitForFunction(() => !document.querySelector('.toast[data-toast=progress]'), null, { timeout: 30000 }).catch(() => {});
+  await ap.waitForTimeout(600);
+  const row2 = await row();
+  const applied = (await ap.locator('.ast-applied').innerText().catch(() => '')).replace(/\n/g, ' ');
+  const toast = await ap.locator('.toast[data-toast=terrain]').count();
+  const marksGone = !(await ap.locator('.st-marks.on').count());
+  const listGone = !(await ap.locator('.ast-items').count());
+  await ap.click('.ast-applied [data-act=ast-undo]').catch(() => {});
+  await ap.waitForFunction(() => /还没改/.test(document.querySelector('.studio [data-act=terrain] .sb-row-side')?.textContent ?? ''), null, { timeout: 30000 }).catch(() => {});
+  const row0 = await row();
+  await ap.waitForFunction(() => !document.querySelector('.toast[data-toast=progress]'), null, { timeout: 30000 }).catch(() => {});
+  await ap.click('.studio [data-act=terrain]');
+  await ap.locator('.tp').waitFor({ timeout: 5000 }).catch(() => {});
+  const closedByTool = !(await ap.locator('.ast-panel').count());
+  await ap.click('.tp [data-act=terrain-done]');
+  await ap.waitForTimeout(1200);
+  await ap.click('.studio [data-act=ask-assistant]');
+  const turns = await ap.locator('.ast-turn').count();
+  await ap.click('.studio [data-act=new-seed]');
+  await ap.waitForFunction(() => !document.querySelector('.ast-turn'), null, { timeout: 10000 }).catch(() => {});
+  const turnsAfter = await ap.locator('.ast-turn').count();
+  console.log(
+    `新建时让助手改:面板 ${shown}(左边 ${panel ? Math.round(panel.x) : '-'}、宽 ${panel ? Math.round(panel.width) : '-'}),右边样式投影让开 ${rightGone};「${hint.slice(0, 16)}…」;` +
+      `编号 ${nos.join(',')},星球上圈 ${marks2 ? 2 : '?'} → 勾掉一条 ${marks1 ? 1 : '?'};执行 → 左边「${row2}」、「${applied}」、清单收起 ${listGone}、提示条 ${toast}、圈没了 ${marksGone};` +
+      `撤销 → 「${row0}」;开改地形工具助手收起 ${closedByTool};换一颗对话 ${turns} → ${turnsAfter} 轮`,
+  );
+  if (!shown || !panel || Math.abs(panel.x + panel.width - 1600) > 1 || Math.abs(panel.width - 372) > 1 || !rightGone)
+    errs.push(`新建时让助手改:助手面板没有换掉右边的样式和投影(${shown},${JSON.stringify(panel)},${rightGone})`);
+  if (!hint.includes('圈出')) errs.push(`新建时让助手改:空的时候的说明不对(${hint})`);
+  if (nos.join(',') !== '1,2' || !marks2 || !marks1) errs.push(`新建时让助手改:确认单没编号,或星球上没圈出要改的地方 / 勾掉一条圈没跟着少(${nos},${marks2},${marks1})`);
+  if (row2 !== '改了 2 处' || !applied.includes('已执行 2 条') || !listGone || toast || !marksGone)
+    errs.push(`新建时让助手改:执行后左边没写"改了 2 处" / 助手里没写已执行 / 清单没收起 / 放了提示条(${row2},${applied},${listGone},${toast},${marksGone})`);
+  if (row0 !== '还没改') errs.push(`新建时让助手改:撤销以后地形没回去(${row0})`);
+  if (!closedByTool) errs.push('新建时让助手改:打开改地形工具时助手没收起');
+  if (!turns || turnsAfter) errs.push(`新建时让助手改:换一颗以后对话没清掉(${turns} → ${turnsAfter})`);
+  await actx.close();
 }
 
 // 打开"民族"视图:悬停在有人住的地方要显示"XX族"
@@ -1337,16 +1522,16 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(`我的世界里删除:${cardsBefore} 个 → 删后 ${cardsGone} 个(提示「${delNote}」)→ 撤销后 ${cardsBack} 个,存档 ${keptKeys} 个`);
   if (cardsBefore !== 1 || cardsGone !== 0 || !/已删除.*撤销/.test(delNote) || cardsBack !== 1 || keptKeys !== 1)
     errs.push(`"我的世界"里点一下删除、再点撤销不对(${cardsBefore} → ${cardsGone} → ${cardsBack},存档 ${keptKeys} 个,提示「${delNote}」)`);
-  // 删的是最后一个:提示条还在(还能撤销)的时候停在"我的世界",提示收起了才新建
+  // 删的是最后一个:停在"我的世界"(提示条上还能撤销);提示收起了也不自动新建,留在空的首页等用户点「新建世界」
   await page.locator('.mw [data-act=world-menu]').first().click().catch(() => {});
   await page.locator('[data-act=world-delete]').click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(1500);
   const waitHome = (await page.locator('.mw').count()) > 0 && /撤销/.test(await toastText(page, 'save'));
-  const t0 = Date.now();
-  await page.waitForFunction(() => !document.querySelector('.mw'), null, { timeout: 20000 }).catch(() => null);
-  const newAfter = (await page.locator('.mw').count()) === 0 ? ((Date.now() - t0 + 1500) / 1000).toFixed(1) : null;
-  console.log(`删掉最后一个世界:提示条在的时候停在我的世界 ${waitHome},${newAfter ? `${newAfter} 秒后新建` : '没有新建'}`);
-  if (!waitHome || !newAfter) errs.push(`删掉最后一个世界:提示条在时应停在"我的世界"、收起后新建(停住 ${waitHome},新建 ${newAfter})`);
+  await page.waitForFunction(() => !document.querySelector('[data-act=world-undelete]'), null, { timeout: 20000 }).catch(() => null);
+  await page.waitForTimeout(500);
+  const emptyHome = (await page.locator('.mw-empty [data-act=new-world]').count()) > 0 && !(await page.locator('.studio').count());
+  console.log(`删掉最后一个世界:提示条在的时候停在我的世界 ${waitHome},提示收起后是空的首页 ${emptyHome}`);
+  if (!waitHome || !emptyHome) errs.push(`删掉最后一个世界:应停在"我的世界"(提示条上能撤销),提示收起后是空的首页、不自动新建(停住 ${waitHome},空首页 ${emptyHome})`);
   await page.evaluate(() => localStorage.clear());
 }
 // 世界换成球面以前(生成器版本 4 及以前)的存档文件、分享链接:照常打开成同一个种子的球面世界,提示"来自旧版本",
@@ -1995,7 +2180,7 @@ for (const style of ['realistic', 'fantasy']) {
   await page.evaluate(() => localStorage.clear());
 }
 
-// 改地形(阶段 4):只在新建世界时能改。新建卡片上点"改地形" → 卡片里换成改地形工具 → 在海里点一下放火山 → 后台按新地形重新生成 →
+// 改地形(阶段 4):只在新建世界时能改。新建界面左边点"火山、山脉、湖……" → 卡片里换成改地形工具、星球摊成平面 → 在海里点一下放火山 → 后台按新地形重新生成 →
 // 那里成了陆地(悬停显示海拔);撤销 → 又变回海,再放一次;"完成"收起工具;动过的新建世界存下来了,刷新后自动恢复(直接带着地形修改生成);
 // 创建以后没有改地形的入口,概览"世界设定"页写着改过的地形;分享链接在另一个浏览器里打开,地形修改在(也是直接带着修改生成)
 {
@@ -2031,7 +2216,7 @@ for (const style of ['realistic', 'fantasy']) {
   await terrainOn();
   const panel = await page.locator('.tp').innerText().catch(() => '');
   const barBox = await page.locator('.tp').boundingBox();
-  const sideBox = await page.locator('.sidebar').boundingBox();
+  const sideBox = await page.locator('.st-left').boundingBox();
   const t = await volcano();
   const after = await probeSea();
   const count = await page.locator('.tp .tp-n').innerText().catch(() => '');
@@ -2058,7 +2243,7 @@ for (const style of ['realistic', 'fantasy']) {
     const u = await regen(() => page.click('.tp [data-act=terrain-undo]'));
     const undone = await probeSea();
     const t2 = await volcano();
-    // "完成":工具收起,卡片上写着改过几处
+    // "完成":工具收起,左边「地形」那行写着改了几处
     await page.click('.tp [data-act=terrain-done]');
     await page.waitForTimeout(200);
     const barGone = !(await page.locator('.tp').count());
@@ -2066,7 +2251,7 @@ for (const style of ['realistic', 'fantasy']) {
     console.log(`改地形:撤销 → 「${undone.split(' / ')[1] ?? ''}」;再放一次 ${!!t2};点"完成"工具收起 ${barGone}、卡片上「${row}」`);
     if (!u || !undone.includes('水深')) errs.push(`改地形:撤销后没有变回海(${undone})`);
     if (!barGone) errs.push('改地形:点"完成"后工具没收起');
-    if (!row.includes('改过 1 处')) errs.push(`改地形:收起后卡片上没写改过几处(${row})`);
+    if (!row.includes('改了 1 处')) errs.push(`改地形:收起后左边「地形」那行没写改了几处(${row})`);
     // 自动存:动过的新建世界存下来了(网址换成 w=编号),刷新后还在新建、直接带着地形修改生成(只生成一次),那里还是陆地
     await page.waitForFunction(() => /[?&]w=w/.test(location.search), null, { timeout: 5000 }).catch(() => {});
     const urlStored = page.url();
@@ -2076,7 +2261,7 @@ for (const style of ['realistic', 'fantasy']) {
     await page.waitForTimeout(500);
     const again = await probeSea();
     const regenAfterReload = await page.evaluate(() => (window as any).__wfTerrain ?? null);
-    const stillDraft = (await page.locator('.sidebar.nw-card').count()) === 1;
+    const stillDraft = (await page.locator('.studio .st-left').count()) === 1;
     console.log(
       `改地形:网址 ${urlBefore.split('?')[1]} → ${urlStored.split('?')[1]};刷新后「${again.split(' / ')[1] ?? ''}」、还在新建 ${stillDraft},刷新后又重新生成了 ${regenAfterReload ? '是' : '否'}`,
     );
@@ -2084,8 +2269,8 @@ for (const style of ['realistic', 'fantasy']) {
     if (!again.includes('海拔') || !stillDraft) errs.push('改地形:刷新页面后没回到新建 / 地形修改没有自动恢复');
     if (regenAfterReload) errs.push('改地形:刷新后先生成原样再按地形修改重新生成了一遍(应该直接带着修改生成)');
     // 创建:没有改地形的入口了;世界设定页写着改过的地形
-    await page.click('[data-act=create-world]');
-    await page.locator('.sidebar:not(.nw-card) .sb-title').waitFor({ timeout: 10000 }).catch(() => {});
+    await createNow();
+    await page.locator('.sidebar .sb-title').waitFor({ timeout: 10000 }).catch(() => {});
     const noEntry = (await page.locator('[data-act=terrain]').count()) === 0;
     await openOverview(page, 'genesis');
     const settings = (await page.locator('.ov-settings [data-param=terrain]').innerText().catch(() => '')).replace(/\n/g, ' ');
@@ -2107,6 +2292,10 @@ for (const style of ['realistic', 'fantasy']) {
       await p3.goto(link);
       await p3.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
       await p3.waitForTimeout(800);
+      // 建好的世界从星球展开时正对的经线接着看,分享链接里带着它:转回 0° 再按世界坐标取那一点(不然那一点可能在窗口外)
+      await p3.evaluate(() => (window as any).__wfSetCenter?.(0));
+      await p3.waitForFunction(() => Math.abs((window as any).__wfView?.lon ?? 99) < 0.01, null, { timeout: 5000 }).catch(() => {});
+      await p3.waitForTimeout(200);
       shared = await probeSea(p3);
       regenShared = await p3.evaluate(() => (window as any).__wfTerrain ?? null);
     }
@@ -3093,10 +3282,9 @@ for (const style of ['realistic', 'fantasy']) {
   {
     await page.goto(`${dev.url}/?new=1&seed=7&style=fantasy&civ=-labels`);
     await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-    await page.waitForTimeout(300);
-    await page.evaluate(() => (window as any).__wfSetCenter(180));
-    await page.waitForTimeout(150);
     await terrainOn();
+    await page.evaluate(() => (window as any).__wfSetCenter(180));
+    await page.waitForTimeout(250);
     await page.click('.tp [data-tool=range]');
     const [cx, cy] = (await page.evaluate(() => (window as any).__wfWorldToClient(0, 420))) as [number, number];
     const prev = await page.evaluate(() => (window as any).__wfTerrain?.id ?? 0);
@@ -3419,16 +3607,25 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(`导出罗宾森:${png.width}×${png.height},角上 ${corner.join(',')}(纸色 ${cornerPaper}),中部取样 ${varied} 种颜色变化`);
   if (png.width !== 2048 || png.height !== 1024) errs.push(`投影:导出的罗宾森图片尺寸不对(${png.width}×${png.height})`);
   if (!cornerPaper || varied < 20) errs.push('投影:导出的罗宾森图片不对(外轮廓外不是底色,或中部是空白)');
-  // 8. 改地形(新建世界时)切回等距圆柱(弯边投影里不改地形)
+  // 8. 新建世界时平常的地图一直是等距圆柱(改地形只在等距圆柱上改;新建界面右边的投影只换星球的样子),
+  //    改地形时右边的投影停在等距圆柱、点不了;没创建就回到我的世界,换回原来的罗宾森
   await page.goto(`${dev.url}/?new=1&seed=7&style=fantasy&proj=robinson`);
   await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await page.waitForTimeout(300);
   await terrainOn();
   await page.waitForTimeout(300);
-  const onAfter = await projOn(page);
-  console.log(`罗宾森里打开改地形 → 投影 ${onAfter}`);
-  if (onAfter !== 'equirect') errs.push('投影:弯边投影里打开改地形,没有切回等距圆柱');
-  await page.keyboard.press('Escape');
+  const onAfter = await page.evaluate(() => (window as any).__wfView?.proj);
+  const rowOn = await page.locator('.st-right [data-proj][aria-checked=true]').getAttribute('data-proj').catch(() => null);
+  const rowsOff = await page.locator('.st-right [data-proj=robinson]').isDisabled();
+  await page.click('.tp [data-act=terrain-done]');
+  await page.waitForTimeout(1200);
+  await page.click('.st-left [data-act=back]');
+  await page.locator('.mw').waitFor({ timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const projHome = await page.evaluate(() => (window as any).__wfView?.proj);
+  console.log(`罗宾森里新建、改地形 → 平常的地图 ${onAfter}、右边 ${rowOn}(点不了 ${rowsOff});回到我的世界 → ${projHome}`);
+  if (onAfter !== 'equirect') errs.push('投影:新建世界改地形时平常的地图不是等距圆柱');
+  if (projHome !== 'robinson') errs.push(`投影:没创建就回到我的世界,没有换回原来的罗宾森(${projHome})`);
+  if (rowOn !== 'equirect' || !rowsOff) errs.push(`投影:改地形时新建界面右边的投影应停在等距圆柱、点不了(${rowOn},${rowsOff})`);
   await page.evaluate(() => localStorage.clear());
 }
 
@@ -3761,10 +3958,19 @@ for (const style of ['realistic', 'fantasy']) {
     await hp.waitForFunction(() => (window as any).__wfGlobe?.style === 'realistic', null, { timeout: 30000 });
     await hp.waitForTimeout(500);
     const f = await H();
-    // 换世界(点"我的世界";一个都没存过 → 直接新建一颗随机的星球):扔掉,1 倍时也不重铺
+    // 换世界(把另一颗星球的存档文件拖进页面,在地球仪上直接打开):扔掉,1 倍时也不重铺
     await closeOverview(hp);
-    await hp.click('.sidebar [data-act=home]');
-    await hp.waitForFunction(() => (window as any).__wfGlobe?.hdCached === 0 && (window as any).__wf?.ready, null, { timeout: 60000 }).catch(() => {});
+    const op = await gBrowser.newPage({ viewport: { width: 1400, height: 820 } });
+    // 存档里记着投影:在地球仪上存的,打开时才留在地球仪上
+    await op.goto(`${dev.url}/?seed=2024&style=realistic&view=globe`);
+    await op.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+    await op.click('.save-btn');
+    const [odl] = await Promise.all([op.waitForEvent('download', { timeout: 30000 }), op.click('[data-act=save-file]')]);
+    const ofile = await odl.path();
+    // 下载的文件跟着这一页的浏览器环境走,关页面会删掉:先读完再关
+    if (ofile) await openFile(hp, ofile);
+    await op.close();
+    await hp.waitForFunction(() => (window as any).__wfGlobe?.hdCached === 0 && (window as any).__wf?.ready && /seed=2024/.test(location.search), null, { timeout: 60000 }).catch(() => {});
     await hp.waitForTimeout(1500);
     const g = await H();
     const row = (x: any) => `${x.style} ${x.k.toFixed(1)} 倍:第 ${x.tier} 档,起过 ${x.hdStarted} 次、留着 ${x.hdCached} 张`;
@@ -4054,8 +4260,8 @@ for (const style of ['realistic', 'fantasy']) {
   await hit.tap().catch(() => {});
   await mp.waitForTimeout(900);
   const searchIns = await mp.locator('.inspector').innerText().catch(() => '');
-  // 拉到顶的世界卡片里点"我的世界":整屏换成我的世界(改过的这个世界在里面);点"新建世界" → 底部是新建世界的卡片;
-  // 点"改地形" → 卡片里换成改地形工具;点"完成"退回(关掉详情卡片时世界卡片还是搜索时拉到顶的样子)
+  // 拉到顶的世界卡片里点"我的世界":整屏换成我的世界(改过的这个世界在里面);点"新建世界" → 新建界面,底部是新建世界的卡片;
+  // 拉开卡片点"火山、山脉、湖……" → 卡片里换成改地形工具;点"完成"退回(关掉详情卡片时世界卡片还是搜索时拉到顶的样子)
   await mp.tap('.inspector .cp-x').catch(() => {});
   await mp.waitForTimeout(400);
   if (!(await mp.locator('.psheet.ps-full').count())) {
@@ -4068,15 +4274,17 @@ for (const style of ['realistic', 'fantasy']) {
   const homeBox = await box('.mw');
   const homeCards = await mp.locator('.mw [data-act=open-world]').count();
   await mp.tap('.mw [data-act=new-world] >> nth=0').catch(() => {});
-  await mp.locator('.psheet.nw-sheet').waitFor({ timeout: 10000 }).catch(() => {});
-  const nwBox = await box('.psheet.nw-sheet');
-  await mp.locator('.nw-sheet [data-act=terrain]:not([disabled])').waitFor({ timeout: 60000 }).catch(() => {});
-  await mp.tap('.nw-sheet [data-act=terrain]').catch(() => {});
+  await studioReady(mp).catch(() => {});
+  const nwBox = await box('.st-sheet');
+  await mp.tap('.st-sheet [data-act=new-sheet]').catch(() => {});
   await mp.waitForTimeout(400);
-  const nwTools = (await mp.locator('.psheet.nw-sheet.tools .tp').isVisible().catch(() => false)) && !(await mp.locator('.nw-sheet [data-act=create-world]').count());
+  await mp.locator('.st-sheet [data-act=terrain]:not([disabled])').waitFor({ timeout: 60000 }).catch(() => {});
+  await mp.tap('.st-sheet [data-act=terrain]').catch(() => {});
+  await mp.waitForTimeout(400);
+  const nwTools = (await mp.locator('.st-sheet.tools .tp').isVisible().catch(() => false)) && !(await mp.locator('.st-sheet [data-act=create-world]').count());
   await mp.tap('.tp [data-act=terrain-done]').catch(() => {});
   await mp.waitForTimeout(400);
-  const nwBack = !(await mp.locator('.tp').count()) && (await mp.locator('.nw-sheet [data-act=create-world]').isVisible().catch(() => false));
+  const nwBack = !(await mp.locator('.tp').count()) && (await mp.locator('.st-sheet [data-act=create-world]').isVisible().catch(() => false));
   console.log(
     `手机布局:胶囊 ${JSON.stringify(row)},轨道 ${JSON.stringify(track)};世界卡片 ${JSON.stringify(ws0)}「${sub}」;右上 ${btnActs} ${JSON.stringify(btns)};提示「${hint0}」;+ − ${zoomBtns} 个;` +
       `上拖 → 拉到顶 ${JSON.stringify(wsFull)}、大按钮 ${tiles} 个、胶囊藏起 ${capsuleHidden};点拖动条 → 收起 ${JSON.stringify(ws1)};` +
@@ -4128,7 +4336,8 @@ for (const style of ['realistic', 'fantasy']) {
 }
 
 // 宽屏侧栏收起:卡片右上角的侧栏图标 → 卡片滑走、左上角留"图标 + 世界名"的小按钮,时间轴拉到最左,地图不动;
-// 收起时选中一个国家卡片弹出来显示它,取消选中又收回去;刷新后还是收起;点小按钮展开;新建世界那一步左边的卡片不受影响
+// 收起时选中一个国家卡片弹出来显示它,取消选中又收回去;刷新后还是收起;点小按钮展开;
+// 新建世界不受影响(新建界面左边的设定每次进来都展开着),新建里也能收起、展开
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 820 } });
   const sp = await ctx.newPage();
@@ -4169,20 +4378,30 @@ for (const style of ['realistic', 'fantasy']) {
   await sp.click('[data-act=side-expand]');
   await sp.waitForTimeout(500);
   const s5 = await state();
-  // 收起着进新建世界:左边新建世界的卡片照常在
+  // 收起着进新建世界:新建界面左边的设定照常展开着;在新建里收起 → 滑走、左上角留小按钮;点小按钮展开
   await sp.click('[data-act=side-collapse]');
   await sp.goto(`${dev.url}/?seed=7&new=1`);
-  await sp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await sp.waitForTimeout(300);
-  const nw = await sp.locator('.sidebar.nw-card').boundingBox();
-  console.log(`侧栏收起:开着 ${JSON.stringify(s0)};收起 ${JSON.stringify(s1)};选中 ${JSON.stringify(s2)};Esc ${JSON.stringify(s3)};刷新 ${JSON.stringify(s4)};展开 ${JSON.stringify(s5)};新建 ${JSON.stringify(nw)}`);
+  await studioReady(sp);
+  const nw = await sp.locator('.st-left').boundingBox();
+  await sp.click('.st-left [data-act=side-collapse]');
+  await sp.waitForTimeout(500);
+  const nwC = await sp.locator('.st-left').boundingBox();
+  const nwPill = await sp.locator('.studio [data-act=side-expand]').isVisible();
+  await sp.click('.studio [data-act=side-expand]');
+  await sp.waitForTimeout(500);
+  const nwE = await sp.locator('.st-left').boundingBox();
+  console.log(
+    `侧栏收起:开着 ${JSON.stringify(s0)};收起 ${JSON.stringify(s1)};选中 ${JSON.stringify(s2)};Esc ${JSON.stringify(s3)};刷新 ${JSON.stringify(s4)};展开 ${JSON.stringify(s5)};` +
+      `新建 ${JSON.stringify(nw)} → 收起 ${JSON.stringify(nwC)}(小按钮 ${nwPill})→ 展开 ${JSON.stringify(nwE)}`,
+  );
   if (!s0.shown || s0.pill !== null || s0.tlLeft !== SIDE_ROOM) errs.push(`侧栏收起:一开始卡片应该开着、时间轴从 ${SIDE_ROOM} 起(${JSON.stringify(s0)})`);
   if (s1.shown || !s1.pill || s1.tlLeft !== 14 || s1.view !== s0.view) errs.push(`侧栏收起:点收起后卡片没滑走 / 没有左上角的小按钮 / 时间轴没拉到最左 / 地图动了(${JSON.stringify(s1)})`);
   if (!s2.shown || s2.pill !== null || !ins) errs.push(`侧栏收起:收起时选中国家,卡片没弹出来显示它(${JSON.stringify(s2)},面板 ${ins})`);
   if (s3.shown || !s3.pill) errs.push(`侧栏收起:取消选中后卡片没收回去(${JSON.stringify(s3)})`);
   if (s4.shown || !s4.pill) errs.push(`侧栏收起:刷新后没记住收起(${JSON.stringify(s4)})`);
   if (!s5.shown || s5.pill !== null || s5.tlLeft !== SIDE_ROOM) errs.push(`侧栏收起:点左上角的小按钮没展开(${JSON.stringify(s5)})`);
-  if (!nw || nw.x < 0) errs.push(`侧栏收起:收起着进新建世界,左边新建世界的卡片不见了(${JSON.stringify(nw)})`);
+  if (!nw || Math.abs(nw.x) > 1) errs.push(`侧栏收起:收起着进新建世界,左边的设定不见了(${JSON.stringify(nw)})`);
+  if (!nwC || nwC.x + nwC.width > 1 || !nwPill || !nwE || Math.abs(nwE.x) > 1) errs.push(`侧栏收起:新建界面里收起 / 展开不对(${JSON.stringify(nwC)},${nwPill},${JSON.stringify(nwE)})`);
   await ctx.close();
 }
 

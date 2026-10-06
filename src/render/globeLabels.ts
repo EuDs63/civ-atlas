@@ -40,6 +40,8 @@ export interface GlobeLabelInput {
   reserved?: readonly Box[];
   /** 球心横向挪了多少(CSS 像素;宽屏左边有侧栏卡片时往右,见 globe.ts 的 globeFrame) */
   shift?: number;
+  /** 球心、半径(CSS 像素)直接给定(不按 globeFrame 摆;新建界面的星球) */
+  frame?: { cx: number; cy: number; R: number };
 }
 
 /** 地球仪的 LabelView,再带上画布像素下的球(球心、半径)和视图方向,画的时候、筛符号时用 */
@@ -66,7 +68,7 @@ function facing(g: GlobeLabelView['globe'], x: number, y: number): number {
 
 export function globeLabelView(o: GlobeLabelInput): GlobeLabelView {
   const { view, w, h, dpr, worldW: W, worldH: H } = o;
-  const f = globeFrame(view, w, h, o.shift ?? 0);
+  const f = o.frame ?? globeFrame(view, w, h, o.shift ?? 0);
   const cx = f.cx * dpr;
   const cy = f.cy * dpr;
   const R = f.R * dpr;

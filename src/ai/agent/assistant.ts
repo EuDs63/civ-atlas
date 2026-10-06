@@ -803,6 +803,33 @@ export async function runAssistant(ctx: AssistantContext, history: readonly Assi
 // ---------------------------------------------------------------------------
 // 测试用假 AI(网址 ai=mock):按固定的步骤调工具,好检查界面和流程
 
+/** 离海最远的陆地(按网格一步步往里数;平手取编号小的;不算两极的冰原):[经度, 纬度] */
+function farthestInland(world: World): [number, number] {
+  const { mesh, water } = world;
+  const polar = (i: number) => Math.abs(0.5 - mesh.y[i] / mesh.height) > 0.3;
+  const dist = new Int32Array(mesh.n).fill(-1);
+  const queue: number[] = [];
+  for (let i = 0; i < mesh.n; i++)
+    if (water[i]) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  let best = -1;
+  for (let h = 0; h < queue.length; h++) {
+    const i = queue[h];
+    if (!polar(i) && (best < 0 || dist[i] > dist[best])) best = i;
+    for (let k = mesh.adjStart[i]; k < mesh.adjStart[i + 1]; k++) {
+      const j = mesh.adj[k];
+      if (dist[j] < 0) {
+        dist[j] = dist[i] + 1;
+        queue.push(j);
+      }
+    }
+  }
+  if (best < 0) best = 0;
+  return [(mesh.x[best] / mesh.width) * 360 - 180, 90 - (mesh.y[best] / mesh.height) * 180];
+}
+
 /** 假 AI 一轮的回复 */
 export interface MockTurn {
   text?: string;
@@ -837,6 +864,7 @@ function namedPolity(civ: Civ, ask: string): number {
  * - 问句("？""为什么""怎么"……):查国家 → 在地图上打开它(有这个工具时)→ 回一段话
  * - 说到史书:查国家 → 写史书;说到名字:起名
  * - 其余当作要改:查国家 → 查那一年的格局 → 试推演"保护" → 试推演"保护 + 和邻国结盟" → 列确认单 → 回一句话
+ * - 还在新建(只能改地形)、不是问句:在最大那块陆地离海最远的地方挖一个大湖,北边拉一道东西走向的山脉 → 回一句话
  * 话里没点名国家时,挑亡了的国家里国祚最长的那个
  */
 export function mockAssistant(ctx: AssistantContext): (req: AiRequest) => MockTurn {
@@ -847,12 +875,22 @@ export function mockAssistant(ctx: AssistantContext): (req: AiRequest) => MockTu
     const tools = new Set((req.tools ?? []).map((t) => t.name));
     const call = (name: string, args: Record<string, unknown>): MockTurn => ({ toolCalls: [{ id: `mock_${round}`, name, args: JSON.stringify(args) }] });
     const say = (text: string): MockTurn => ({ text: `【测试用假 AI】${text}` });
+    const question = /[？?]|为什么|怎么|什么|哪/.test(ask);
+    if (ctx.lock === 'history' && !question) {
+      const [lon, lat] = farthestInland(ctx.world);
+      const north = Math.min(80, lat + 7);
+      const edits = [
+        { op: 'lake', at: [lon, lat], size: '大', why: '离海最远的地方' },
+        { op: 'range', path: [[lon - 9, north], [lon, north + 1], [lon + 9, north]], size: '中', why: '湖的北边,东西走向' },
+      ];
+      if (round === 0) return call('propose_edits', { edits });
+      return say('在最大那块陆地离海最远的地方挖湖,北边拉一道山脉;这是固定的示例,不代表真实效果。');
+    }
     if (!civ.viable || !civ.polities.length) return say('这颗星球没有长出文明,只能改地形;假 AI 不会改地形。');
     let id = namedPolity(civ, ask);
     if (id < 0) id = civ.polities.filter((p) => p.ended !== undefined).sort((a, b) => b.ended! - b.founded - (a.ended! - a.founded) || a.id - b.id)[0]?.id ?? 0;
     const p = civ.polities[id];
     const P = `P${id}`;
-    const question = /[？?]|为什么|怎么|什么|哪/.test(ask);
     if (question) {
       if (round === 0) return call('country', { country: P });
       if (round === 1 && tools.has('show')) return call('show', { target: P });

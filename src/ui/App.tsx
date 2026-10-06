@@ -134,7 +134,6 @@ import {
   attachWorld,
   briefError,
   briefWarning,
-  currentUnsaved,
   currentWorld,
   deleteWorld,
   detachWorld,
@@ -173,7 +172,8 @@ import { FLY_MS, animProgress, curvedFly, easeOutCubic, flatFly, personKey, reso
 import { collapseSide, expandSide, getSide, setSideHold, useSide } from './sideStore';
 import { getPanel, setWorldSheet, usePanel } from './panelStore';
 import { closeOverview, getPeople, setPeople } from './overviewStore';
-import { NewWorld } from './NewWorld';
+import { STUDIO_STYLES, Studio } from './studio/Studio';
+import { setFlatGeomSource, useStudioFlat } from './studio/studioStore';
 import { MyWorlds } from './MyWorlds';
 import { useCoarse, useNarrow } from './device';
 import { isDoubleTap, pinchStep, type Pt, type Tap } from './gestures';
@@ -185,12 +185,12 @@ import { interventionOutcome } from '../gen/civ/chronicle';
 import { takeRewriteNote, type RewriteNote } from './rewriteStore';
 import { AssistantPanel, PreviewBanner } from './Assistant';
 import { astRoom, closeAssistant, useAstOpen } from './astPanel';
-import { PREVIEW_EDIT_BLOCK, exitPreview, getAssistant, sameInBoth, setTrialRunner, stopAsk, syncAssistantWorld, useAssistantPreview } from './assistantStore';
+import { PREVIEW_EDIT_BLOCK, exitPreview, getAssistant, newConversation, sameInBoth, setTrialRunner, stopAsk, syncAssistantWorld, useAssistantPreview } from './assistantStore';
 import { closeBookReader, closeHistoryBook, stopBook } from './bookStore';
 import { useAiOn } from '../ai/client';
 import { Globe, getGlobeOn, setGlobeOn, useGlobeOn, type GlobeApi } from './Globe';
 import { setupAi } from '../ai/setup';
-import { ToastBar, clearToast, showToast, useToastOpen } from './Toast';
+import { ToastBar, clearToast, showToast } from './Toast';
 import { DRAFT_SEG, FirstHint, HoverCard, MapBar, MapControls, PhoneButtons, SEG_LAYERS, hintSeen, markHintSeen } from './Corners';
 import { Sidebar } from './Sidebar';
 import { PhoneSheet } from './PhoneSheet';
@@ -344,7 +344,7 @@ function visitTarget(params: WorldParams, gen: number | null = null): Target {
  *   w=世界编号(存着)   → 这个世界(没建完的回到新建)
  *   new=1             → 新建(网址里的种子、参数)
  *   带种子的网址       → 直接看这个世界(改版前存过的就回到那个存档)
- *   都没有             → 有存档就到"我的世界";第一次来直接新建(随机一颗星球)
+ *   都没有             → 我的世界(第一次来是空的那一页:一颗地球、一句话、「新建世界」;点了才生成星球)
  */
 function firstRoute(init: ReturnType<typeof readUrl>): { stage: Stage; target: Target | null } {
   const q = new URLSearchParams(location.search);
@@ -360,9 +360,11 @@ function firstRoute(init: ReturnType<typeof readUrl>): { stage: Stage; target: T
     if (old) return { stage: old.draft ? 'draft' : 'world', target: storedTarget(old, 'restore') };
     return { stage: 'world', target: visitTarget(init.params, init.gen) };
   }
-  if (listWorlds().length) return { stage: 'home', target: null };
-  return { stage: 'draft', target: draftTarget({ ...init.params, seed: randomSeedValue() }) };
+  return { stage: 'home', target: null };
 }
+
+/** 新建时能看的样式(不用历史的那几种) */
+const STUDIO_LAYERS: MapLayer[] = STUDIO_STYLES.map((x) => x.id);
 
 /** 新建时列不出来的图层(要有历史):进新建时换成"地形",建好以后换回来 */
 const HISTORY_LAYERS: MapLayer[] = ['political', 'cultures', 'faith'];
@@ -428,14 +430,15 @@ export function App() {
     // 网址里给的(或默认的)图层:国家 / 民族 / 信仰开不开跟着它;新建时只看地形
     let ml = init.mapLayer;
     let { style, layer } = init;
+    // 新建:网址里给的是新建时能看的样式就照它,否则用实景(政区、民族要有历史;建好以后换回来)
     if (route.stage === 'draft') {
       const now = ml ?? layerOf(style, layer, getCivShow());
-      if (HISTORY_LAYERS.includes(now)) {
-        draftLayerRef.current = now;
-        ml = 'terrain';
-        style = 'fantasy';
+      if (!STUDIO_LAYERS.includes(now)) {
+        if (HISTORY_LAYERS.includes(now)) draftLayerRef.current = now;
+        ml = 'realistic';
+        style = 'realistic';
         writeLayerUrl(ml);
-      }
+      } else draftLayerRef.current = now;
     }
     if (ml) {
       const d = layerDef(ml);
@@ -454,6 +457,11 @@ export function App() {
   const { stage, base: stageBase } = useStage();
   const draft = stage === 'draft';
   const home = stage === 'home';
+  /** 新建界面(Studio)创建以后还没走完:1 = 星球展开成平常的地图,2 = 新建界面淡出(底下平常的地图露出来) */
+  const [studioOut, setStudioOut] = useState<0 | 1 | 2>(0);
+  /** 新建界面盖着整页:深色、太空底,平常的地图藏起来(摊平改地形时铺在中间那块) */
+  const studioOn = draft || studioOut === 1;
+  const studioFlat = useStudioFlat();
   // 宽屏左边的卡片收起了(sideStore.ts):新建世界那一步左边是新建世界的卡片,不算收起(sideRoom 照常让出它)
   const sideUi = useSide();
   setSideHold(stage !== 'world');
@@ -500,7 +508,7 @@ export function App() {
   const mapLayer = layerOf(style, layer, civShow);
   const mapLayerRef = useRef(mapLayer);
   mapLayerRef.current = mapLayer;
-  const theme = layerDark(mapLayer) ? 'dark' : 'light';
+  const theme = studioOn || layerDark(mapLayer) ? 'dark' : 'light';
   // 挂在 body 下的弹窗(AI 设置、史书)也跟着换主题;画第一帧之前就换好(首次打开深色图层时不先闪一下浅色底)
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -519,11 +527,9 @@ export function App() {
   const [landing, setLanding] = useState<'loading' | 'gone' | { error: string } | null>(route.stage === 'home' && init.shortShare !== null && !init.share ? 'loading' : null);
   /** 打开别人分享的世界:地图下那条说明(这个世界的编号;点了"知道了"、改了存进我的世界以后不再显示) */
   const [sharedFor, setSharedFor] = useState<{ id: string; short: boolean; by: string } | null>(null);
-  /** 新建时地图底部的一句"拖动地图看看这颗星球"(第一次拖动 / 缩放 / 换一颗之后收起) */
-  const [draftTip, setDraftTip] = useState(true);
   const touchRef = useRef(() => {});
   touchRef.current = () => {
-    if (getStage().stage === 'draft') return setDraftTip(false);
+    if (getStage().stage !== 'world') return;
     if (!hintOn) return;
     setHintOn(false);
     markHintSeen();
@@ -1164,16 +1170,15 @@ export function App() {
       setHover(null);
       clearToast('created');
     }
+    // 进新建:默认实景(新建界面的开场就是实景);原来的图层记下,不建就离开时换回来
     if (next === 'draft' && was !== 'draft') {
       pausePlayback();
-      setDraftTip(true);
       const now = mapLayerRef.current;
-      if (HISTORY_LAYERS.includes(now)) {
-        draftLayerRef.current = now;
-        applyLayer('terrain');
-      }
+      // 原来就是实景也记下:新建里换了别的样式、没建就离开,也换回实景
+      draftLayerRef.current ??= now;
+      if (now !== 'realistic') applyLayer('realistic');
     }
-    if (next === 'world' && draftLayerRef.current) {
+    if (next !== 'draft' && draftLayerRef.current) {
       applyLayer(draftLayerRef.current);
       draftLayerRef.current = null;
     }
@@ -1299,8 +1304,9 @@ export function App() {
     const t = draftNow();
     if (!t || t.base) return;
     const st = draftState(t);
+    // 换一颗:改过的地形不带过去,助手的对话(说的是原来那颗)也清掉
+    newConversation();
     const plain = !st.title && worldKey({ ...t.params, seed: 0 }) === worldKey({ ...DEFAULT_PARAMS, seed: 0 });
-    setDraftTip(false);
     generate({ ...t, params: { ...t.params, seed }, edits: EMPTY_EDITS, saved: undefined, title: st.title, pristine: st.pristine || plain, view: undefined, from: undefined, save: undefined });
   };
   /** 新建中调参数:改过的地形留着(按新参数重新生成) */
@@ -1319,12 +1325,12 @@ export function App() {
     setDraftTitle(clean ?? '');
     if (currentWorld()?.id === t.id) renameWorld(t.id, clean ?? '');
   };
-  /** 创建世界:从此种子、参数、地形锁住;一直存着。从第 0 年起放一遍历史 */
-  const createWorld = (title: string) => {
+  /** 创建世界:从此种子、参数、地形锁住;一直存着。从第 0 年起放一遍历史。建成了 = true */
+  const createWorld = (title: string): boolean => {
     const t = draftNow();
     const cur = currentWorld();
     // 还在生成、在重推带过来的干预、在放这颗星球的形成:等它完
-    if (!t || !cur || cur.id !== t.id || fresh.current || regenRef.current || resim || replayOn) return;
+    if (!t || !cur || cur.id !== t.id || fresh.current || regenRef.current || resim || replayOn) return false;
     const clean = cleanTitle(title) || undefined;
     if ((clean ?? '') !== (cur.title ?? '')) renameWorld(t.id, clean ?? '');
     // 说存住了,要真的写进了浏览器(存储满了、删了旧的也写不下,或者浏览器不让存 = 只在这一页里)
@@ -1332,7 +1338,6 @@ export function App() {
     // 新建时执行过的改地形从此不能再撤销:⌘Z 也不再往回退(助手那边按锁换了,旧的确认单不能执行)
     clearEditHistory();
     targetRef.current = { ...t, kind: 'created', base: null, pristine: false, title: clean, from: undefined, save: undefined };
-    setDraftTip(false);
     enterStage('world');
     // 建好的世界看政区
     draftLayerRef.current = null;
@@ -1354,6 +1359,7 @@ export function App() {
     takeAutoplay();
     if (storyOk()) startCivReplay();
     else if (getCivTime().year === 0) resetCivTime();
+    return true;
   };
   /**
    * 以正在看的世界为底稿新建:设定、改名、干预都带过去(还是这张图,不用重新生成);存成另一个世界。
@@ -1382,19 +1388,14 @@ export function App() {
     if (!d || !t || !cur || t.id !== d.id || cur.id !== d.id) return null;
     return draftSig(t.params, getEdits(), cur.title) === d.sig ? d.id : null;
   };
-  /** 回到"我的世界"(一个都没有就直接新建;正在看的这个只在页面里、没能存进浏览器的,不新建盖掉它,回去还能「全部存成文件」) */
-  const goHome = () => {
-    if (!listWorlds().length && !currentUnsaved()) return startDraft();
-    showHome();
-  };
-  /** 回到"我的世界"那一页(看最近删除时一个世界都没有也回去) */
+  /** 回到"我的世界"(一个都没有时是空的那一页) */
   const showHome = () => {
     pausePlayback();
     setReplayOn(false);
-    setDraftTip(false);
     enterStage('home');
     writeHomeUrl();
   };
+  const goHome = showHome;
   const showHomeRef = useRef(showHome);
   showHomeRef.current = showHome;
   const openStoredRef = useRef(openStored);
@@ -1431,8 +1432,7 @@ export function App() {
         },
       };
     }
-    const id = targetRef.current?.id;
-    return listWorlds().some((w) => w.id !== id) ? { label: '我的世界', onClick: goHome } : null;
+    return { label: '我的世界', onClick: goHome };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, stageBase, v]);
   // 只是看看的世界改了第一笔、新建中的动了第一下,就存下了:网址换成 w=编号,刷新还回到它
@@ -1442,13 +1442,6 @@ export function App() {
     if (home || !t || !cur || cur.id !== t.id) return;
     if (isStored(t.id) && new URLSearchParams(location.search).get('w') !== t.id) writeWorldUrl(t);
   }, [v, home]);
-  // 我的世界里一个都不剩了(删光了、别的页面里删掉了):直接新建。
-  // 刚删掉的是最后一个、提示条上还能"撤销"时先停在这儿,提示收起了(没点撤销)再新建;刚才那个世界只在页面里(存不进浏览器)的也停在这儿
-  const undeleting = useToastOpen('save', 'world-undelete');
-  useEffect(() => {
-    if (home && !landing && !trashView && !undeleting && !listWorlds().length && !currentUnsaved()) startDraft();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [home, v, landing, trashView, undeleting]);
   // 把 .json 拖进页面 = 从文件打开
   const [dropping, setDropping] = useState(false);
   const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
@@ -1926,6 +1919,34 @@ export function App() {
   const picking = usePolityPick();
   const viewRef = useRef(view);
   viewRef.current = view;
+  // 新建界面摊平改地形:舞台挪到中间那块(正好 2:1,地图框正好铺满),视图放回 1 倍、转到刚摊平时正中的经线
+  // (等舞台换成那块的大小再转;同一次摊平只转一次)
+  const flatSeq = useRef(0);
+  useEffect(() => {
+    const f = studioFlat;
+    if (!studioOn || !f || f.lon === undefined || f.seq === flatSeq.current || !wrapW || !sb.bw) return;
+    if (Math.abs(sb.sw - f.rect.w) > 1 || Math.abs(sb.sh - f.rect.h) > 1) return;
+    flatSeq.current = f.seq;
+    stopFly();
+    // 整像素:主图和右边接的那一份正好对齐,接缝处不透出一道暗线
+    const v0 = viewCentredAt({ k: 1, x: 0, y: 0 }, sb, wrapW, xOfLon(f.lon, wrapW));
+    const v = { ...v0, x: Math.round(v0.x) };
+    viewRef.current = v;
+    setView(v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studioFlat, studioOn, sb.sw, sb.sh, sb.bw, wrapW]);
+  // 新建界面收起平面地图时从平常的地图现在的样子变回星球:正中的经线、1 弧度多少像素、正中和赤道在视口里的位置
+  useEffect(() => {
+    setFlatGeomSource(() => {
+      const el = stageRef.current;
+      const g = geo.current;
+      const v = viewRef.current;
+      if (!el || !g.bw || !g.wrap || getProjection() !== 'equirect') return null;
+      const r = el.getBoundingClientRect();
+      return { lon: getMapCenter(), kpx: (v.k * g.bw) / (2 * Math.PI), cx: r.left + r.width / 2, cy: r.top + v.y + (v.k * r.height) / 2 };
+    });
+    return () => setFlatGeomSource(null);
+  }, []);
   const hlStamp = hl?.stamp;
   /**
    * 编年史跳转时"看得见的地方"的上、下和目标放在哪个高度(舞台坐标):上面留出世界名、提示条,下面留出时间轴;
@@ -2635,6 +2656,8 @@ export function App() {
     const more = lost.length ? [`${lost.join('、')}暂未生效`] : undefined;
     const n = regenNote.current;
     regenNote.current = null;
+    // 新建界面里助手执行、撤销以后不放提示条(撤销在助手那一行和左边「地形」里)
+    if (n && getStage().stage === 'draft') return;
     if (n) {
       showToast({
         id: 'terrain',
@@ -2722,29 +2745,61 @@ export function App() {
   /** 打开别人分享的世界、还没改过:地图下那条说明代替第一次打开的操作提示 */
   const sharedOn = world && !!data && !!sharedFor && curWorld?.id === sharedFor.id && curWorld.kind === 'visit' && !terrainTool.on;
   const layerProps = { layer: mapLayer, civ, onLayer: applyLayer, thumbs, requestThumbs, disabled: !data };
-  const newWorldProps = {
-    params,
-    title: draftTitle,
-    base: stageBase,
-    back: draftBack,
-    onSeed: draftSeed,
-    onRandomSeed: () => draftSeed(randomSeedValue()),
-    onParams: draftParams,
-    onTitle: draftRename,
-    onCreate: createWorld,
-    // 以它为底稿新建、调过参数:带过来的干预要等重推完(不然创建时截的缩略图、放的历史是没干预的)
-    busy: !!progress || !!resim,
-    ready: !!data && !progress,
-    replay: { on: replayOn, ready: !!replay },
-    onReplay: startReplay,
-    noCiv,
+  /** 新建界面确认创建:建好了就让平常的地图从星球展开时正中的经线接着看(放回 1 倍) */
+  const studioCreate = (title: string, lon: number): boolean => {
+    if (!createWorld(title)) return false;
+    setStudioOut(1);
+    stopFly();
+    publishMapCenter(wrapLon(lon));
+    const el = stageRef.current;
+    const g = geo.current;
+    if (getProjection() === 'equirect' && el && g.bw && g.wrap) {
+      const b = { sw: el.clientWidth, sh: el.clientHeight, bw: g.bw, bh: g.bh, padB: g.padB };
+      const v0 = viewCentredAt({ k: 1, x: 0, y: 0 }, b, g.wrap, xOfLon(lon, g.wrap));
+      const v = { ...v0, x: Math.round(v0.x) };
+      viewRef.current = v;
+      setView(v);
+    }
+    return true;
   };
+  const studio = (draft || studioOut > 0) && (
+    <Studio
+      phone={narrow}
+      params={params}
+      title={draftTitle}
+      base={stageBase}
+      back={draftBack}
+      onSeed={draftSeed}
+      onRandomSeed={() => draftSeed(randomSeedValue())}
+      onParams={draftParams}
+      onTitle={draftRename}
+      onCreate={studioCreate}
+      // 以它为底稿新建、调过参数:带过来的干预要等重推完(不然创建时截的缩略图、放的历史是没干预的)
+      busy={!!progress || !!resim}
+      ready={!!data && !progress}
+      noCiv={noCiv}
+      data={data}
+      civ={realCiv}
+      raw={rawCiv}
+      worldBusy={worldBusy}
+      layer={mapLayer}
+      onLayer={applyLayer}
+      baseCanvas={baseCanvas}
+      thumbs={thumbs}
+      requestThumbs={requestThumbs}
+      onFade={() => setStudioOut(2)}
+      onGone={() => setStudioOut(0)}
+    />
+  );
+  // 摊平改地形时舞台摆在新建界面中间那块
+  const fr = studioOn ? studioFlat?.rect : undefined;
+  const stagePos: CSSProperties | undefined = fr && { left: fr.x, top: fr.y, width: fr.w, height: fr.h, right: 'auto', bottom: 'auto' };
   // 两层放大的地图框共用一个变换、按视窗裁;两层屏幕层按同一个视窗裁(见下面的 JSX)
   const wrapStyle: CSSProperties = { transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`, clipPath: wrapClip(view, sb, wrapW), display: globeOn ? 'none' : undefined };
   const screenStyle: CSSProperties = { clipPath: screenClip(view, sb, wrapW), display: globeOn ? 'none' : undefined };
   return (
     <div
-      className={`app${narrow ? ' phone' : ' has-side'}${chron.open ? ' chron-open' : ''}${panelOpen ? ' panel-open' : ''}${narrow && panelOpen && panelUi.sheet === 'full' ? ' sheet-full' : ''}${narrow && !selState.sel && panelUi.world === 'full' ? ' world-full' : ''}${narrow && panelUi.drag ? ' sheet-drag' : ''}${narrow && selState.sel && !panelOpen ? ' sheet-away' : ''}${!narrow && world && sideUi.collapsed && !sideUi.peek ? ' side-collapsed' : ''}${picking ? ' picking' : ''}${globeOn ? ' globe-on' : ''}${data ? '' : ' booting'}${home ? ' home' : ''}${draft ? ' draft' : ''}${astOpen && !narrow && !home ? ' ast-open' : ''}${preview ? ' ast-preview' : ''}`}
+      className={`app${narrow ? ' phone' : ' has-side'}${chron.open ? ' chron-open' : ''}${panelOpen ? ' panel-open' : ''}${narrow && panelOpen && panelUi.sheet === 'full' ? ' sheet-full' : ''}${narrow && !selState.sel && panelUi.world === 'full' ? ' world-full' : ''}${narrow && panelUi.drag ? ' sheet-drag' : ''}${narrow && selState.sel && !panelOpen ? ' sheet-away' : ''}${!narrow && world && sideUi.collapsed && !sideUi.peek ? ' side-collapsed' : ''}${picking ? ' picking' : ''}${globeOn ? ' globe-on' : ''}${data ? '' : ' booting'}${home ? ' home' : ''}${draft ? ' draft' : ''}${studioOn ? ' studio-on' : ''}${fr ? ' studio-flat' : ''}${astOpen && !narrow && !home && !draft ? ' ast-open' : ''}${preview ? ' ast-preview' : ''}`}
       data-theme={theme}
       data-layer={mapLayer}
       onDragOver={onDragOver}
@@ -2755,6 +2810,7 @@ export function App() {
       <main
         ref={stageRef}
         className={`stage${terrainTool.on ? ' terrain-on' : ''}`}
+        style={stagePos}
         onPointerDown={onPointerDown}
         onPointerDownCapture={onTouchDownCapture}
         onPointerMove={onPointerMove}
@@ -2857,11 +2913,8 @@ export function App() {
         <>
           {/* 手机:底部的世界卡片(没选东西时;选中了东西换成详情卡片)、右上竖排的毛玻璃按钮(图层、地球);数据图层的图例在左上。
               界面都在卡片和毛玻璃按钮上,地图上不再压字、不用渐变遮罩;最近大事在世界卡片拉到顶时的列表里。
-              新建时底部是新建世界的卡片 */}
-          {draft ? (
-            <NewWorld phone {...newWorldProps} />
-          ) : (
-            !selState.sel && (
+              新建时这些都不放(新建界面自己一套) */}
+          {!draft && !selState.sel && (
               <PhoneSheet
                 data={data}
                 civ={civ}
@@ -2873,10 +2926,9 @@ export function App() {
                 onHome={goHome}
                 exp={{ data, civ, plain: plainCiv, style, layer }}
               />
-            )
           )}
-          <PhoneButtons layers={{ ...layerProps, draft }} globeOn={globeOn} onToggleGlobe={toggleGlobe} />
-          {style === 'data' && !terrainTool.on && (
+          {!draft && <PhoneButtons layers={{ ...layerProps, draft }} globeOn={globeOn} onToggleGlobe={toggleGlobe} />}
+          {!draft && style === 'data' && (
             <div className="corner-tl">
               <Legend layer={layer} />
             </div>
@@ -2884,10 +2936,8 @@ export function App() {
         </>
       ) : (
         <>
-          {/* 宽屏:左边侧栏(世界 / 选中的东西的详情、搜索、存档;新建时是新建世界的卡片);右上图层、导出、编年史;数据图层的图例在地图左上 */}
-          {draft ? (
-            <NewWorld phone={false} {...newWorldProps} />
-          ) : (
+          {/* 宽屏:左边侧栏(世界 / 选中的东西的详情、搜索、存档);右上图层、导出、编年史;数据图层的图例在地图左上。新建时都不放(新建界面自己一套) */}
+          {!draft && (
             <Sidebar
               data={data}
               civ={civ}
@@ -2900,24 +2950,25 @@ export function App() {
               inspectorSlot={inspectorSlot}
             />
           )}
-          <MapBar civ={civ} layers={layerProps} exp={{ data, civ, plain: plainCiv, style, layer }} draft={draft} />
-          {style === 'data' && !terrainTool.on && (
+          {!draft && <MapBar civ={civ} layers={layerProps} exp={{ data, civ, plain: plainCiv, style, layer }} draft={draft} />}
+          {!draft && style === 'data' && !terrainTool.on && (
             <div className="corner-tl">
               <Legend layer={layer} />
             </div>
           )}
-          {draft && !stageBase && draftTip && data && !progress && !replayOn && !terrainTool.on && <div className="draft-tip">拖动地图看看这颗星球；不满意就点「换一颗」</div>}
         </>
       )}
+      {/* 新建世界:和平常页面分开的一套深色界面,盖在地图上面(创建以后展开成平常的地图、淡出) */}
+      {studio}
       {/* 助手面板(宽屏右边一张卡片,手机是拉到顶的底部卡片;窗口跨过窄屏断点时不重新挂,没发出去的话留着)、在地图上看试推演时的提示条 */}
-      {astOpen && aiOn && !home && data && realCiv && rawCiv && (
+      {astOpen && aiOn && !home && !studioOn && data && realCiv && rawCiv && (
         <AssistantPanel phone={narrow} world={data.world} raster={data.raster} civ={realCiv} raw={rawCiv} lock={draft ? 'history' : 'terrain'} busy={worldBusy} />
       )}
       {world && <PreviewBanner busy={worldBusy} phone={narrow} />}
       {/* 顶部居中:提示条(同一时间只有一条) */}
       <ToastBar />
       {/* 右下(时间轴上方):地球 / 平面、放大、缩小。触屏不放 + −(用双指捏合);窄屏整个不放(地球在右上竖排的按钮里) */}
-      <MapControls globeOn={globeOn} onToggleGlobe={toggleGlobe} onZoom={zoomButton} shifted={false} hidden={!data || narrow || home} zoom={!coarse} />
+      <MapControls globeOn={globeOn} onToggleGlobe={toggleGlobe} onZoom={zoomButton} shifted={false} hidden={!data || narrow || home || draft} zoom={!coarse} />
       {sharedOn ? <SharedHint phone={narrow} short={sharedFor.short} by={sharedFor.by} onOk={() => setSharedFor(null)} /> : <FirstHint show={hintOn && !!data && world && !terrainTool.on} touch={coarse} />}
       {/* 底部:时间轴(宽屏是卡片右边那一块底下的胶囊;手机是浮在底部卡片上面的胶囊);新建时还没有历史,不放 */}
       <div className="bottom-row">

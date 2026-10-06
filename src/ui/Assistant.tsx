@@ -53,7 +53,7 @@ const TERRAIN_OPS = ['volcano', 'lake', 'range', 'raise', 'sink'];
 const HINT: Record<RewriteLock | 'none', string> = {
   none: '我能查这个世界的历史，改之前先在后台把历史推一遍、看结果对不对，也能写史书、起名。要改世界的地方，都会先列出来给你确认。',
   terrain: '我能查这个世界的历史，改之前先在后台把历史推一遍、看结果对不对，也能写史书、起名。要改世界的地方，都会先列出来给你确认。',
-  history: '还在新建世界：我能回答这颗星球的事，也能改地形（火山、山脉、湖……）；历史和名字等创建以后再改。要改的地方，都会先列出来给你确认。',
+  history: '说说想把这颗星球改成什么样，我先在星球上圈出要改的地方，你点「执行」才改。现在只能改地形，历史等创建以后再改。',
 };
 
 /** 没发出去的话(面板关了再打开还在) */
@@ -85,7 +85,7 @@ export function AssistantPanel({ phone, world, raster, civ, raw, lock, busy }: A
     draft = text;
   }, [text]);
   useEffect(() => {
-    if (!phone) input.current?.focus();
+    if (!phone) input.current?.focus({ preventScroll: true });
   }, [phone]);
 
   // 新的一轮、多了一步、结果回来:滚到底
@@ -217,7 +217,7 @@ export function AssistantPanel({ phone, world, raster, civ, raw, lock, busy }: A
             value={text}
             rows={phone ? 1 : 2}
             maxLength={WISH_MAX}
-            placeholder={placeholder(last, working, phone)}
+            placeholder={placeholder(last, working, phone, lock)}
             spellCheck={false}
             aria-label="对助手说"
             onChange={(e) => setText(e.target.value)}
@@ -244,9 +244,10 @@ export function AssistantPanel({ phone, world, raster, civ, raw, lock, busy }: A
 }
 
 /** 输入框里的灰字:空的时候 / 助手在做 / 接着说(按上一轮是改世界、起名还是问答;手机上不带例子) */
-function placeholder(last: AsTurn | undefined, working: boolean, phone: boolean): string {
+function placeholder(last: AsTurn | undefined, working: boolean, phone: boolean, lock?: RewriteLock): string {
   if (working) return '助手在做，可以随时停下';
-  if (!last) return '说说想怎么改这个世界，或者问点什么';
+  if (!last) return lock === 'history' ? '说说想把这颗星球改成什么样' : '说说想怎么改这个世界，或者问点什么';
+  if (lock === 'history' && last.proposal) return '接着说，比如“湖再小一点”';
   if (phone && (last.proposal || last.names)) return '接着说';
   if (last.proposal) return '接着说，比如“再让它多几个州”';
   if (last.names) return '接着说，比如“再古朴一点”';
@@ -464,6 +465,8 @@ function Proposal({ t, latest, phone, busy, previewing }: { t: AsTurn; latest: b
   const terrain = p.items.some((x, i) => x.change?.kind === 'terrain' && !off.has(i));
   const mixed = terrain && p.items.some((x, i) => x.change?.kind === 'intervention' && !off.has(i));
   const loading = previewing && !st.preview?.raw;
+  /** 新建世界时:编号对上星球上的圈;执行后是一行"已执行 N 条",手机上也有"不要" */
+  const numbered = t.lock === 'history';
   const apply = () => {
     const why = applyProposal(t.id, { busy });
     setMsg(why);
@@ -476,7 +479,8 @@ function Proposal({ t, latest, phone, busy, previewing }: { t: AsTurn; latest: b
   };
   return (
     <>
-      {!!p.items.length && (
+      {/* 新建时执行了就只留"已执行 N 条"那一行,清单收起来 */}
+      {!!p.items.length && !(numbered && t.applied) && (
         <>
           {!phone && (
             <div className="ast-sec">
@@ -499,7 +503,8 @@ function Proposal({ t, latest, phone, busy, previewing }: { t: AsTurn; latest: b
                   >
                     {on && <Icon name="check" size={12} />}
                   </button>
-                  <span className="yr">{itemYear(x)}</span>
+                  {/* 新建时改地形的几条:编号和星球上圈出来的对上 */}
+                  {numbered && x.change?.kind === 'terrain' ? <span className="ast-no">{i + 1}</span> : <span className="yr">{itemYear(x)}</span>}
                   <span className="tx">
                     <b>{wide(x.text)}</b>
                     {(x.problem || x.why) && <small>{x.problem ? `不能执行：${x.problem}` : x.why}</small>}
@@ -518,7 +523,22 @@ function Proposal({ t, latest, phone, busy, previewing }: { t: AsTurn; latest: b
         </div>
       )}
       {p.trial && <TrialResult v={p.trial} phone={phone} partial={off.size > 0 ? [n, okCount] : null} more={more} onMore={() => setMore((m) => !m)} />}
-      {t.applied ? (
+      {t.applied && numbered ? (
+        <div className="ast-grp">
+          <div className="ast-row ast-applied">
+            <StepIcon state={t.applied.undone ? 'error' : 'ok'} />
+            <span className="tx">
+              <b>{t.applied.undone ? '已撤销' : `已执行 ${n} 条`}</b>
+              {!t.applied.undone && t.lock === st.lock && <small>记在左边「地形」里</small>}
+            </span>
+            {!t.applied.undone && t.lock === st.lock && (
+              <button className="ast-link end" data-act="ast-undo" onClick={() => undoProposal(t.id)}>
+                撤销
+              </button>
+            )}
+          </div>
+        </div>
+      ) : t.applied ? (
         <div className="ast-acts">
           <span className="ast-done">{t.applied.undone ? '已撤销' : '已执行'}</span>
           {!t.applied.undone && t.lock === st.lock && (
@@ -542,7 +562,7 @@ function Proposal({ t, latest, phone, busy, previewing }: { t: AsTurn; latest: b
                   {previewing ? (loading ? '正在推演' : '正在地图上看') : phone ? '在地图上看看' : '先在地图上看看'}
                 </button>
               )}
-              {!phone && (
+              {(!phone || numbered) && (
                 <button className="ast-btn text" data-act="ast-dismiss" onClick={() => dismissProposal(t.id)}>
                   不要
                 </button>
@@ -748,8 +768,9 @@ function mentionedEvents(text: string, civ: Civ, links: LinkDict): ChronicleEntr
 /** 空的时候的五句例子(用这个世界里的名字):撑下去、为什么、写国史、起名、某一年的天下 */
 export function exampleAsks(civ: Civ, lock?: RewriteLock): string[] {
   const range = civ.places.find((p) => p.kind === 'mountains');
-  // 还在新建:只举改地形的例子
-  if (lock === 'history') return ['在赤道的海上放一座火山岛', ...(range ? [`把${range.name}再拉长一些`] : []), '在最大的那块陆地中间挖一个大湖'];
+  // 还在新建:改地形的例子 + 一句提问(助手这时不改世界参数)
+  if (lock === 'history')
+    return ['在最大的那块陆地中间挖个大湖，湖北边再加一道山脉', '赤道附近的大洋里放一串火山岛', range ? `把${range.name}再拉长一些` : '最西边那块大陆的海岸加一道山脉', '这颗星球最高的山在哪？'];
   if (!civ.viable || !civ.polities.length) return [];
   const end = Math.floor(civ.endYear);
   const P = civ.polities;

@@ -75,9 +75,11 @@ export const getProjection = projection.get;
 export const useProjection = projection.use;
 /** 切到地球仪之前用的平面投影(从地球仪切回平面时回到它) */
 let lastFlat: ProjectionId = 'equirect';
-export function setProjection(p: MapProjection): void {
+/** flat:连"上一个平面投影"一起指定(换回原来的地球仪时,把它原来的平面投影也还原) */
+export function setProjection(p: MapProjection, flat?: ProjectionId): void {
   const cur = projection.get();
   if (cur !== 'globe') lastFlat = cur;
+  if (flat) lastFlat = flat;
   projection.set(isMapProjection(p) ? p : 'equirect');
 }
 /** 上一个平面投影(现在就是平面的 = 它自己) */
