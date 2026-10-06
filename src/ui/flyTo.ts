@@ -10,6 +10,7 @@ import type { Civ } from '../gen/civ/types';
 import { capitalAt } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
 import { faithKey, placeKeyOf, polityKey, regionKey, regionOfKey, settlementKey, type AuthorMark } from '../gen/edits';
+import { personKey, resolvePersonKey } from '../gen/characters';
 import { projectWorld, projectWorldNear, type MapProj } from '../render/projection';
 import { clampCurved, clampSphere, stageToWorld, type MapView, type StageBox } from './mapWrap';
 import type { MapSelection } from './civView';
@@ -48,24 +49,12 @@ export interface Focus {
   lat: number;
 }
 
-/**
- * 人物的稳定键:国家的稳定键 + 身份 + 名字 + 生年(重推历史后同一国、同名、同年生的还是他;推演变了、指不到就算了)
- */
-export function personKey(civ: Civ, id: number): string {
-  const x = civ.people?.[id];
-  if (!x || !civ.polities[x.polity]) return '';
-  return `person:${polityKey(civ, x.polity)}|${x.role}|${x.name}|${Math.round(x.born)}`;
-}
+/** 人物的稳定键(gen/characters.ts;这里转一下,别处照旧从这里引) */
+export { personKey, resolvePersonKey };
 
-/** 按人物的稳定键在(重推过的)历史里找回这个人;找不到 = −1 */
-export function resolvePersonKey(civ: Civ, key: string): number {
-  for (const x of civ.people ?? []) if (personKey(civ, x.id) === key) return x.id;
-  return -1;
-}
-
-/** 地图上按什么画、往哪飞:人物 = 他的国家;作者标记 = 不按历史里的东西画(它自己画,见 MarkLayer.tsx);其余照旧 */
-export function mapTarget(civ: Civ | null, sel: MapSelection | null): Exclude<MapSelection, { kind: 'person' | 'mark' }> | null {
-  if (!sel || sel.kind === 'mark') return null;
+/** 地图上按什么画、往哪飞:人物 = 他的国家;作者标记、作者的人物 = 不按历史里的东西画(它们自己画,见 MarkLayer.tsx、CharacterLayer.tsx);其余照旧 */
+export function mapTarget(civ: Civ | null, sel: MapSelection | null): Exclude<MapSelection, { kind: 'person' | 'mark' | 'character' }> | null {
+  if (!sel || sel.kind === 'mark' || sel.kind === 'character') return null;
   if (sel.kind !== 'person') return sel;
   const x = civ?.people?.[sel.id];
   return x && civ!.polities[x.polity] ? { kind: 'polity', id: x.polity } : null;
@@ -79,6 +68,7 @@ export function selectionKey(civ: Civ, sel: MapSelection): string {
   if (sel.kind === 'place') return civ.places[sel.id] ? placeKeyOf(civ, sel.id) : '';
   if (sel.kind === 'faith') return civ.religion?.faiths[sel.id] ? faithKey(civ, sel.id) : '';
   if (sel.kind === 'mark') return `mark:${sel.id}`;
+  if (sel.kind === 'character') return `character:${sel.id}`;
   return sel.id >= 0 && sel.id < civ.regions.count ? regionKey(civ, sel.id) : '';
 }
 
@@ -190,6 +180,28 @@ export function markFocus(world: World, civ: Civ, m: Pick<AuthorMark, 'at' | 're
   return b ? focusOf(W, H, b, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2) : null;
 }
 
+/** 几个点(世界坐标)的位置和范围:一个点 = 那一点;几个点 = 外接框(x 按第一个点展开);没有 = null */
+export function pointsFocus(world: World, pts: readonly (readonly [number, number])[]): Focus | null {
+  if (!pts.length) return null;
+  const W = world.width;
+  const H = world.height;
+  if (pts.length === 1) return focusOf(W, H, null, pts[0][0], pts[0][1]);
+  const ref = pts[0][0];
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [px, py] of pts) {
+    const v = px - W * Math.round((px - ref) / W);
+    x0 = Math.min(x0, v);
+    x1 = Math.max(x1, v);
+    y0 = Math.min(y0, py);
+    y1 = Math.max(y1, py);
+  }
+  if (x1 - x0 < 1 && y1 - y0 < 1) return focusOf(W, H, null, x0, y0);
+  return focusOf(W, H, [x0, y0, x1, y1], (x0 + x1) / 2, (y0 + y1) / 2);
+}
+
 /** 飞到哪:选中的东西(按种类定缩放)或整张图 */
 export interface FlyGoal {
   focus: Focus | null;
@@ -234,7 +246,7 @@ export function freeArea(b: StageBox, panel: boolean): [number, number, number, 
 }
 
 /**
- * 按种类定目标缩放:国家看全疆域(疆域占看得见的地方八成以内;1–3 倍,小国也留出周边);
+ * 按种类定目标缩放:国家看全疆域、作者的人物看全一生的足迹(占看得见的地方八成以内;1–3 倍,小的也留出周边);
  * 城至少 2 倍;州、地理实体(海、山、河……)缩放不变;已经放得更大的不缩小
  */
 function goalZoom(goal: FlyGoal, k0: number, fit: number): number {
@@ -242,6 +254,7 @@ function goalZoom(goal: FlyGoal, k0: number, fit: number): number {
     case 'home':
       return 1;
     case 'polity':
+    case 'character':
       return Math.min(3, Math.max(1, fit * 0.8));
     case 'settlement':
       return Math.max(k0, 2);

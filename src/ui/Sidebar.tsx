@@ -134,7 +134,7 @@ export interface SearchState {
   /** 点一条 / 回车:清空搜索框,选中它(地图飞过去) */
   pick: (h: SearchHit) => void;
   searching: boolean;
-  /** 搜索框能不能用:有国家的世界;还没有国家的世界放了标记也能搜(只搜标记) */
+  /** 搜索框能不能用:有国家的世界;没有国家的世界放了标记、人物也能搜(只搜它们) */
   enabled: boolean;
 }
 
@@ -142,13 +142,13 @@ export function useSearch(civ: Civ | null): SearchState {
   const { sel } = useSelection();
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
-  const marks = useEdits().marks;
-  const civOk = !!civ && (civ.viable || !!marks?.length);
+  const { marks, characters } = useEdits();
+  const civOk = !!civ && (civ.viable || !!marks?.length || !!characters?.length);
   // 年份取开始搜索那一刻的(播放时不跟着每一年重算)
   const searchYear = useMemo(() => (civ ? (getCivTime().year ?? civ.endYear) : 0), [civ, q === '']); // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useMemo(
-    () => (!civOk || !q.trim() ? [] : civ!.viable ? searchCiv(civ!, q, searchYear, undefined, marks) : searchMarks(q, marks ?? [])),
-    [civOk, civ, q, searchYear, marks],
+    () => (!civOk || !q.trim() ? [] : civ!.viable ? searchCiv(civ!, q, searchYear, undefined, marks, characters) : searchMarks(q, marks ?? [], undefined, characters ?? [])),
+    [civOk, civ, q, searchYear, marks, characters],
   );
   useEffect(() => setActive(0), [q]);
   // 选中了别的东西(地图上点的):搜索框清空,下面换成它的详情

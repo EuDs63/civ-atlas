@@ -5,7 +5,9 @@
  * - 国家按它实际用过的国号找(改朝换代前的"大景"也算),显示时间轴这一年的国号(已亡的写最后的国号)
  * - 人物按名字、称号找("柳玄""圣宗""圣宗柳玄""阿尔德里克三世"),右边写"大景皇帝，2485–2519";名人在前
  * - 作者标记按名字找,说明里有也算(排在名字对上的后面);右边写"标记，2490–2531 年"
- * - 排序:名字完全相同 > 开头就对上 > 名字里有 > 标记的说明里有;同样对得上时 标记 > 国家 > 城 > 人物 > 民族 > 信仰 > 山河;同类里大的在前
+ * - 作者的人物按名字找,身份、简介、经历、亲友的关系里有也算(排在名字对上的后面);右边写"我的人物，2490–2561 年"
+ * - 排序:名字完全相同 > 开头就对上 > 名字里有 > 标记的说明、人物的身份简介经历里有;
+ *   同样对得上时 作者的人物、标记 > 国家 > 城 > 人物 > 民族 > 信仰 > 山河;同类里大的在前
  * - 什么都没输:列出这一年最大的几个国家
  */
 import type { Civ, Place, Polity } from '../gen/civ/types';
@@ -16,11 +18,12 @@ import { personFame, personSpan } from '../gen/civ/peopleInfo';
 import { generalRole, personName, rulerRole, rulerShort } from '../gen/civ/peopleText';
 import { faithCounts } from '../gen/civ/religion';
 import type { AuthorMark } from '../gen/edits';
+import type { AuthorCharacter } from '../gen/characters';
 import { MARK_HEX } from '../render/marks';
 import type { MapSelection } from './civView';
 
 export interface SearchHit {
-  kind: 'mark' | 'polity' | 'settlement' | 'person' | 'culture' | 'faith' | 'place';
+  kind: 'character' | 'mark' | 'polity' | 'settlement' | 'person' | 'culture' | 'faith' | 'place';
   id: number;
   /** 显示的名字 */
   name: string;
@@ -128,10 +131,17 @@ interface Scored extends SearchHit {
   weight: number;
 }
 
-const KIND_ORDER: Record<SearchHit['kind'], number> = { mark: -1, polity: 0, settlement: 1, person: 2, culture: 3, faith: 4, place: 5 };
+const KIND_ORDER: Record<SearchHit['kind'], number> = { character: -1, mark: -1, polity: 0, settlement: 1, person: 2, culture: 3, faith: 4, place: 5 };
 
-/** 按名字找;q 为空 = 这一年最大的几个国家。marks = 作者标记(套着改名的那份修改里的) */
-export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARCH_LIMIT, marks: readonly AuthorMark[] = []): SearchHit[] {
+/** 按名字找;q 为空 = 这一年最大的几个国家。marks = 作者标记、chars = 作者的人物(套着改名的那份修改里的) */
+export function searchCiv(
+  civ: Civ,
+  query: string,
+  yearIn: number,
+  limit = SEARCH_LIMIT,
+  marks: readonly AuthorMark[] = [],
+  chars: readonly AuthorCharacter[] = [],
+): SearchHit[] {
   const year = Math.floor(Math.min(civ.endYear, Math.max(0, yearIn)));
   const { owners, regions, names } = prepared(civ, year);
   const q = query.trim().toLowerCase();
@@ -158,7 +168,7 @@ export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARC
       .map(strip);
   }
 
-  const out: Scored[] = markHits(marks, q);
+  const out: Scored[] = [...characterHits(chars, q), ...markHits(marks, q)];
   // 国家:这一年的国号,或者用过的国号(右边写"曾称某某");国都对上了也算(右边写"国都 某城")
   for (const p of civ.polities) {
     const now = matchScore(polityNameAt(p, year), q);
@@ -277,10 +287,10 @@ export function searchCiv(civ: Civ, query: string, yearIn: number, limit = SEARC
   return ranked(out, limit);
 }
 
-/** 只找作者标记(还没有国家的世界也能放标记,搜索框只搜它们) */
-export function searchMarks(query: string, marks: readonly AuthorMark[], limit = SEARCH_LIMIT): SearchHit[] {
+/** 只找作者自己放的标记和人物(没有国家的世界也能放,搜索框只搜它们) */
+export function searchMarks(query: string, marks: readonly AuthorMark[], limit = SEARCH_LIMIT, chars: readonly AuthorCharacter[] = []): SearchHit[] {
   const q = query.trim().toLowerCase();
-  return q ? ranked(markHits(marks, q), limit) : [];
+  return q ? ranked([...characterHits(chars, q), ...markHits(marks, q)], limit) : [];
 }
 
 /** 作者标记:名字;说明里有也算 */
@@ -299,6 +309,29 @@ function markHits(marks: readonly AuthorMark[], q: string): Scored[] {
       select: { kind: 'mark', id: m.id },
       score: s,
       weight: -m.from,
+    });
+  }
+  return out;
+}
+
+/** 作者的人物:名字;身份、简介、经历、亲友的关系里有也算 */
+function characterHits(chars: readonly AuthorCharacter[], q: string): Scored[] {
+  const out: Scored[] = [];
+  if (!q) return out;
+  for (const c of chars) {
+    const t = matchScore(c.name, q);
+    const more = [c.role ?? '', c.note ?? '', ...(c.life ?? []).map((e) => e.text), ...(c.kin ?? []).map((k) => k.rel)];
+    const s = t >= 0 ? t : more.some((x) => x.toLowerCase().includes(q)) ? 2.5 : -1;
+    if (s < 0) continue;
+    out.push({
+      kind: 'character',
+      id: c.id,
+      name: c.name,
+      sub: `我的人物，${c.died === undefined ? `${c.born} 年生` : `${c.born}–${c.died} 年`}`,
+      color: MARK_HEX[c.color],
+      select: { kind: 'character', id: c.id },
+      score: s,
+      weight: -c.born,
     });
   }
   return out;

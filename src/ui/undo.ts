@@ -1,11 +1,12 @@
 /**
- * 撤销 / 重做最近一次修改(⌘Z / ⇧⌘Z):改名、改旗、干预、作者标记、AI 改写;记录在 editsStore.ts(只记这次打开网页以后、这个世界上的)。
+ * 撤销 / 重做最近一次修改(⌘Z / ⇧⌘Z):改名、改旗、干预、作者标记、作者的人物、AI 改写;记录在 editsStore.ts(只记这次打开网页以后、这个世界上的)。
  *
  * - 干预:和点提示条上的"撤销"一样 —— 干预列表一变,App 在后台重推历史,推完提示"已撤销,从 N 年起重新推演"
  *   (重做 = 又下了这条令,提示"…,已从 N 年起重新推演"带撤销)
  * - 助手执行过的一轮:交给助手那边撤销 / 再做一遍(对话里的"已执行 / 已撤销"跟着变;提示和点"撤销"一样)
  * - 只改了名字 / 旗:当场换回去,提示"已撤销改名" / "已重做改名"("改旗"同样)
  * - 作者标记(新建、改、删):当场换回去,提示"已撤销标记的修改" / "已重做标记的修改"
+ * - 作者的人物(新建、改、删):当场换回去,提示"已撤销人物的修改" / "已重做人物的修改"
  */
 import { getEdits, replaceEdits, revertEdits, stepEdits, type EditStep } from './editsStore';
 import { redoProposal, undoProposal } from './assistantStore';
@@ -32,9 +33,9 @@ function run(s: EditStep, dir: 'undo' | 'redo') {
   if (next === now) return;
   replaceEdits(next);
   if (next.interventions === now.interventions && next.terrain === now.terrain) {
-    // 名字没动:动了标记 = 标记的修改,动了旗 = 改旗;否则算改名
+    // 名字没动:动了标记 = 标记的修改,动了人物 = 人物的修改,动了旗 = 改旗;否则算改名
     const nameSame = next.names === now.names && next.aiNames === now.aiNames;
-    const what = !nameSame ? '改名' : next.marks !== now.marks ? '标记的修改' : next.flags !== now.flags ? '改旗' : '改名';
+    const what = !nameSame ? '改名' : next.marks !== now.marks ? '标记的修改' : next.characters !== now.characters ? '人物的修改' : next.flags !== now.flags ? '改旗' : '改名';
     showToast({ id: 'resim-done', kind: 'ok', text: `${dir === 'undo' ? '已撤销' : '已重做'}${what}`, ttl: 4000 });
   }
 }

@@ -148,7 +148,7 @@ function OverviewPage(p: WorldOverviewProps & { tab: OverviewTab }) {
     case 'chronicle':
       return <Chronicle civ={p.civ} />;
     case 'people':
-      return <PeoplePage civ={p.civ} />;
+      return <PeoplePage civ={p.civ} data={p.data} />;
     case 'marks':
       return <MarksPage civ={p.civ} data={p.data} />;
     case 'interventions':

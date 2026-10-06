@@ -28,6 +28,9 @@
  *   旧存档没有这个字段 = 没改地形。check 是**改过地形以后**的地形哈希(读档时带着地形修改生成,再核对)
  * - edits.marks(可选):作者标记(edits.ts 文件头"作者标记"),`[{ "id": 1, "title": "主角的故乡", "color": "red", "from": 2490, "at": [1852.4, 512] }]`;
  *   没有标记时不写这个字段。读档时过 cleanMarks,格式不对的跳过
+ * - edits.characters(可选):作者的人物(characters.ts),`[{ "id": 1, "name": "林小满", "color": "red", "born": 2490, "died": 2561,
+ *   "birthplace": "settlement:c4567#0", "life": [{ "year": 2506, "text": "随军西征", "where": "region:c8123" }] }]`;
+ *   没有人物时不写这个字段。读档时逐个过 cleanCharacter,格式不对的跳过
  * - view:看这个世界用的投影和中央经线(`{ "projection": "robinson", "center": 120 }`,可选)。
  *   投影名原样存(render/projection.ts 的 ProjectionId,或 "globe"),认不出的由界面当成等距圆柱;
  *   旧存档没有这个字段 = 等距圆柱、中央经线 0°
@@ -41,6 +44,7 @@ import { DEFAULT_PARAMS, type World, type WorldParams } from './world';
 import { GENERATOR_CHANGES, GENERATOR_VERSION, MARKS_MAX, MARK_REGIONS_TOTAL, NAME_MAX, aiNameKeys, cleanMark, freeMarkId, type AiNameMark, type AuthorMark, type GeneratorChange, type Intervention, type TerrainOp, type WorldEdits } from './edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from './terrainEdits';
 import { decodeFlag } from './civ/flags';
+import { CHARACTERS_MAX, cleanCharacters, type AuthorCharacter } from './characters';
 
 export const SAVE_APP = '文明与地图';
 /** 存档格式版本 */
@@ -250,9 +254,16 @@ export function worldKey(params: WorldParams): string {
   return PARAM_KEYS.map((k) => `${k}=${params[k] ?? DEFAULT_PARAMS[k]}`).join('&');
 }
 
-/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 作者标记个数 + 改过的旗面数 */
+/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 作者标记个数 + 改过的旗面数 + 作者的人物个数 */
 export function editCount(edits: WorldEdits): number {
-  return Object.keys(edits.names).length + edits.interventions.length + (edits.terrain?.length ?? 0) + (edits.marks?.length ?? 0) + Object.keys(edits.flags ?? {}).length;
+  return (
+    Object.keys(edits.names).length +
+    edits.interventions.length +
+    (edits.terrain?.length ?? 0) +
+    (edits.marks?.length ?? 0) +
+    Object.keys(edits.flags ?? {}).length +
+    (edits.characters?.length ?? 0)
+  );
 }
 
 /** 世界名:去掉控制字符、首尾空白,超长截断;空 = 没起名 */
@@ -296,6 +307,7 @@ export function makeSave(
   // 作者标记:有才写
   if (edits.marks?.length) save.edits.marks = edits.marks.map(copyMark);
   if (edits.flags && Object.keys(edits.flags).length) save.edits.flags = { ...edits.flags };
+  if (edits.characters?.length) save.edits.characters = edits.characters.map((c) => JSON.parse(JSON.stringify(c)) as AuthorCharacter);
   const t = cleanTitle(title);
   if (t) save.title = t;
   const v = view ? cleanView(view) : null;
@@ -465,6 +477,12 @@ export function parseSave(text: string): ParseResult {
   if (droppedM) warnings.push(`有 ${droppedM} 个作者标记格式不对,已跳过`);
   if (overM) warnings.push(`作者标记最多 ${MARKS_MAX} 个,多出来的 ${overM} 个没有读进来`);
   if (overR) warnings.push(`作者标记一共最多圈 ${MARK_REGIONS_TOTAL} 个州,多出来的 ${overR} 个标记没有读进来`);
+  // 作者的人物:逐个清理,认不出的跳过;编号重复的换一个新编号;最多留 CHARACTERS_MAX 个;旧存档没有 = 没有人物
+  const count = { dropped: 0, over: 0 };
+  const characters = Array.isArray(E.characters) ? cleanCharacters(E.characters, count) : [];
+  if (E.characters !== undefined && !Array.isArray(E.characters)) count.dropped++;
+  if (count.dropped) warnings.push(`有 ${count.dropped} 个作者的人物格式不对,已跳过`);
+  if (count.over) warnings.push(`作者的人物最多 ${CHARACTERS_MAX} 个,多出来的 ${count.over} 个没有读进来`);
   const note = versionNote(generator, terrain.length > 0);
   if (note) warnings.splice(noteAt, 0, note);
 
@@ -474,7 +492,15 @@ export function parseSave(text: string): ParseResult {
     generator,
     seed: params.seed,
     params,
-    edits: { names, ...(Object.keys(aiNames).length ? { aiNames } : {}), interventions, terrain, ...(marks.length ? { marks } : {}), ...(Object.keys(flags).length ? { flags } : {}) },
+    edits: {
+      names,
+      ...(Object.keys(aiNames).length ? { aiNames } : {}),
+      interventions,
+      terrain,
+      ...(marks.length ? { marks } : {}),
+      ...(Object.keys(flags).length ? { flags } : {}),
+      ...(characters.length ? { characters } : {}),
+    },
     check: typeof raw.check === 'string' ? raw.check.slice(0, 64) : '',
     savedAt: typeof raw.savedAt === 'string' && !Number.isNaN(Date.parse(raw.savedAt)) ? raw.savedAt : '',
   };

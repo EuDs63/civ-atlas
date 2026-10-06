@@ -281,7 +281,8 @@ export function useChroniclePick(): { entry: ChronicleEntry | null; stamp: numbe
  * 选中的东西(这个世界里的编号;改名不改编号,换世界时清掉):
  * 国家、城(含故城遗址)、地理实体(civ.places 的下标)、州(没点到别的东西时)、信仰(civ.religion.faiths 的下标)、
  * 人物(civ.people 的下标;点编年史、卡片、人物页里的人名选中,地图上亮出、飞到他的国家,见 flyTo.ts 的 mapTarget)、
- * 作者标记(AuthorMark.id,存在修改里、不在历史里,重推历史编号也不变;0 = 正在新建、还没存的那个,见 markStore.ts)
+ * 作者标记(AuthorMark.id,存在修改里、不在历史里,重推历史编号也不变;0 = 正在新建、还没存的那个,见 markStore.ts)、
+ * 作者的人物(AuthorCharacter.id,同样存在修改里;0 = 正在新建的,见 characterStore.ts)
  */
 export type MapSelection =
   | { kind: 'polity'; id: number }
@@ -290,7 +291,8 @@ export type MapSelection =
   | { kind: 'region'; id: number }
   | { kind: 'faith'; id: number }
   | { kind: 'person'; id: number }
-  | { kind: 'mark'; id: number };
+  | { kind: 'mark'; id: number }
+  | { kind: 'character'; id: number };
 
 export interface SelectionState {
   sel: MapSelection | null;

@@ -15,6 +15,7 @@
  * 世界里有从 AI 起名里挑的名字时,清晰度下面多一行"AI 起的名字:带上 / 换回原名":换回原名 = 地图、图例、编年史用 App 给的 plain
  * (AI 起的名字换回挑之前的,见 gen/edits.ts 的 namesWithoutAi)。
  * 有作者标记时再多一行"作者标记:带上 / 不带"(默认带上):地图图片、地球仪这一面画上那一年有的标记(都写名字,见 render/marks.ts)。
+ * 正选着一个作者的人物时,地图图片、地球仪这一面带上他的足迹(和地图上看到的一样,见 render/trail.ts)。
  * 文件名带世界名(没起名 = 种子)、年份、画风:文明与地图-九州大陆-第3000年-手绘.png、文明与地图-种子7-第3000年-手绘.png(JPEG 是 .jpg)
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -26,12 +27,14 @@ import { fullChronicle } from '../gen/civ/religionText';
 import { AZGAAR_SEA_GRAY, heightmapNote, type HeightmapBits } from '../gen/heightmap';
 import { LAYERS, type LayerId } from '../render/layers';
 import type { CivShow, CivStyle } from '../render/civ/overlay';
-import { IMAGE_FORMATS, drawExportMarks, drawLegend, drawMapBase, drawMapLabels, type ExportScale, type ImageFormat } from '../render/export';
+import { IMAGE_FORMATS, drawExportMarks, drawExportTrail, drawLegend, drawMapBase, drawMapLabels, type ExportScale, type ImageFormat } from '../render/export';
 import { canvasMeasure, drawMarks, layoutMarks, type MarkItem } from '../render/marks';
-import { useEdits } from './editsStore';
+import { drawTrail, layoutTrail, type TrailInput } from '../render/trail';
+import { getEdits, useEdits } from './editsStore';
 import { markItemsAt } from './markInfo';
+import { characterTrail } from './characterInfo';
 import type { ExportRequest, ExportResponse } from '../exportWorker';
-import { getCivShow, getCivTime, useCivTime } from './civView';
+import { getCivShow, getCivTime, getSelection, useCivTime } from './civView';
 import { getMapCenter, xOfLon } from './mapWrap';
 import { flatProjection, getGraticule, getProjection } from './projection';
 import type { ProjectionId } from '../render/projection';
@@ -183,6 +186,8 @@ interface MapInput {
   graticule?: boolean;
   /** 作者标记(那一年有的;不带 = 空) */
   marks?: readonly MarkItem[];
+  /** 正选着的作者人物的足迹(没选 = 不给) */
+  trail?: TrailInput | null;
 }
 
 /** 地图图片:后台线程画地形和文明底图,主线程叠文字、编码 PNG / JPEG */
@@ -226,6 +231,7 @@ async function exportMap(m: MapInput, scale: ExportScale, format: ImageFormat): 
   const t2 = performance.now();
   const n = await drawMapLabels(ctx, { ...m }, scale);
   detail.markCount = m.marks?.length ? drawExportMarks(ctx, m, scale, m.marks, n.placed) : 0;
+  if (m.trail) detail.trailDots = drawExportTrail(ctx, m, scale, m.trail, n.placed);
   const t3 = performance.now();
   detail.labels = t3 - t2;
   detail.labelCount = n.labels;
@@ -297,6 +303,10 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
     const show = { ...getCivShow() };
     const params = paramsText(world.params);
     const markItems = withMarks && civ && ok ? markItemsAt(civ, world, marks, yi) : [];
+    // 正选着的作者人物(填写中的不算)
+    const sel = getSelection().sel;
+    const who = sel?.kind === 'character' ? getEdits().characters?.find((c) => c.id === sel.id) : undefined;
+    const trail = who && civ && ok ? characterTrail(civ, world, raster, who, yi, { kind: 'view' }) : null;
     const what: Record<Job, string> = {
       map: `地图图片(${scale}×)`,
       mapjpg: `地图图片 JPEG(${scale}×)`,
@@ -315,10 +325,11 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
       if (job === 'globe') {
         // 地球仪这一面:标记照屏幕上的规矩(缩得小时不写名字、挨得近的合起来)
         const r = await exportGlobeView(
-          markItems.length
+          markItems.length || trail
             ? (ctx, v) => {
-                const layout = layoutMarks(markItems, { pt: v.pt, period: 0, win: [0, v.w], w: v.w, h: v.h, k: v.k, cut: 0 }, { measure: canvasMeasure(ctx) });
-                drawMarks(ctx, layout, v.dpr);
+                const frame = { pt: v.pt, period: 0, win: [0, v.w] as [number, number], w: v.w, h: v.h, k: v.k, cut: 0 };
+                if (markItems.length) drawMarks(ctx, layoutMarks(markItems, frame, { measure: canvasMeasure(ctx) }), v.dpr);
+                if (trail) drawTrail(ctx, layoutTrail(trail, frame, { measure: canvasMeasure(ctx) }));
               }
             : undefined,
         );
@@ -334,7 +345,7 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
         const center = wrapOf(world) ? xOfLon(getMapCenter(), world.width) : undefined;
         const projection = flatProjection(getProjection());
         const graticule = getGraticule();
-        const r = await exportMap({ world, raster, civ: ok ? civ : null, style, layer, year: y, show, center, projection, graticule, marks: markItems }, scale, format);
+        const r = await exportMap({ world, raster, civ: ok ? civ : null, style, layer, year: y, show, center, projection, graticule, marks: markItems, trail }, scale, format);
         download(r.blob, name);
         dbg = { job, name, bytes: r.blob.size, w: r.w, h: r.h, ms: performance.now() - t0, detail: r.detail };
         const mb = r.blob.size >= 1e6 ? `${(r.blob.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(r.blob.size / 1e3))} KB`;

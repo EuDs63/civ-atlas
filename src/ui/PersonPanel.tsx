@@ -3,10 +3,12 @@
  * 地图上亮出他的国家(civView.ts 的 MapSelection、flyTo.ts 的 mapTarget);点人名不挪时间轴,按"即位那年 / 出征那年"才跳。
  *
  *   顶部  国家颜色块、称呼("圣宗柳玄""阿尔德里克三世""楚尧")、"大景皇帝，2485–2519 年在位" / "大景将领，2478–2509 年领兵"
- *   按钮  即位那年 / 出征那年(主操作:时间轴跳过去)、编年史(这国的编年史,滚到他在台上那段)、复制生平(纯文字,写设定用)
+ *   按钮  即位那年 / 出征那年(主操作:时间轴跳过去)、编年史(这国的编年史,滚到他在台上那段)、复制生平(纯文字,写设定用)、
+ *         更多(加一个和他有关的作者人物:亲友里先填上他)
  *   概况  君主:事迹(名人才有)、国家、生卒、在位、前任、继任(后面的小字是亲属,和编年史的"其子 / 其弟"同一个算法)、
  *         结局、亲征、将领(在位时本国领兵的);共和国写"在任""执政"
  *         将领:事迹、国家、生卒、领兵(伐谁 / 抗谁)、效力(那几年在位的君主)、对手(同一场仗对面的统帅)、结局
+ *   作者的人物  亲友里有他、经历里勾了他的作者人物(characterInfo.ts 的 charactersOfPerson),没有就不显示
  *   在位时 / 领兵时  他在台上那几年本国的事(将领 = 他经手的那几仗),新的在上;点一条跳到那一年
  */
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
@@ -15,8 +17,15 @@ import { polityName } from '../gen/civ/growth';
 import { buildChronicle, filterChronicle, reignEntries, type ChronicleEntry } from '../gen/civ/chronicle';
 import { commandFoes, peopleIndex, personFame, personSpan, rulerNeighbors, type Foe } from '../gen/civ/peopleInfo';
 import { KIN_BACK, ageAt, generalRole, isConsul, kinOf, personName, rulerFateWord, rulerRole } from '../gen/civ/peopleText';
+import { personKey } from '../gen/characters';
 import { openOverview } from './overviewStore';
-import { Act, Acts, EventList, Link, PanelHead, Row, Stats, SubLine, copyText, jumpTo, rgb, type DetailProps } from './panelParts';
+import { useEdits } from './editsStore';
+import { newCharacterDraft } from './characterStore';
+import { charactersOfPerson } from './characterInfo';
+import { CharacterRefs } from './CharacterPanel';
+import { MenuItem } from './PopMenu';
+import { Icon } from './icons';
+import { Act, Acts, EventList, Link, MoreAct, PanelHead, Row, Stats, SubLine, copyText, jumpTo, rgb, type DetailProps } from './panelParts';
 
 const F = Math.floor;
 
@@ -75,12 +84,14 @@ function polityEntries(civ: Civ, polity: number): ChronicleEntry[] {
   return out.sort((a, b) => a.year - b.year || a.id - b.id);
 }
 
-export function PersonPanel({ civ, id }: DetailProps) {
+export function PersonPanel({ civ, id, year }: DetailProps) {
   const x = civ.people?.[id];
   const p = x ? civ.polities[x.polity] : undefined;
   const [copied, setCopied] = useState(false);
+  const chars = useEdits().characters;
   const lines = useMemo(() => (x && p ? personLines(civ, x) : []), [civ, x, p]);
   const events = useMemo(() => (x && p ? personEvents(civ, x) : []), [civ, x, p]);
+  const refs = useMemo(() => charactersOfPerson(civ, chars, id), [civ, chars, id]);
   if (!x || !p) return null;
   const ruler = x.role === 'ruler';
   const consul = isConsul(civ, x);
@@ -122,6 +133,11 @@ export function PersonPanel({ civ, id }: DetailProps) {
         <Act icon="copy" act="person-copy" onClick={() => void copy()}>
           {copied ? '已复制' : '复制生平'}
         </Act>
+        <MoreAct>
+          <MenuItem icon={<Icon name="person" size={16} />} act="person-add-character" onClick={() => newCharacterDraft({ kin: [{ rel: '', person: personKey(civ, id) }], year })}>
+            加一个和他有关的人物
+          </MenuItem>
+        </MoreAct>
       </Acts>
       <div className="cp-body">
         <Stats items={[]}>
@@ -131,6 +147,7 @@ export function PersonPanel({ civ, id }: DetailProps) {
             </Row>
           ))}
         </Stats>
+        <CharacterRefs refs={refs} />
         <EventList
           civ={civ}
           self={id}

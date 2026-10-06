@@ -114,6 +114,12 @@
  * at 和 regions 有且只有一个(都给了按 regions)。读进来的列表先过 cleanMarks(格式不对的丢掉,编号重复的换一个新编号,
  * 最多留 MARKS_MAX 个,所有标记一共最多圈 MARK_REGIONS_TOTAL 个州)。
  *
+ * ## 作者的人物
+ *
+ * WorldEdits.characters(可选,没有 = 一个也没有):作者放进这个世界的自己的人物 —— 名字、生卒、出生地、国家、身份、简介、
+ * 一生的几段经历(每段可以勾上推演里的事和人)、亲友。和作者标记一样只是记下来:不改变世界、不参与推演、和生成器版本无关。
+ * 字段、上限、怎么清理见 characters.ts。
+ *
  * GENERATOR_VERSION:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对,不一致就提示"来自旧版本"和变了什么;
  * 每一版改了什么记在下面的 GENERATOR_CHANGES,提示照它说)。
  *   2:名字按位置取(gen/civ/naming.ts、places.ts;地形、历史不变,默认的名字换了一遍),稳定键改按地块定位(c 格式)。
@@ -132,6 +138,7 @@
  *      没改地形的世界和 7 逐字节相同;改过地形的世界历史换了一遍。
  */
 import type { Civ, Culture, Faith, Place, Polity, Settlement } from './civ/types';
+import type { AuthorCharacter } from './characters';
 import { polityRootAt } from './civ/growth';
 import { TERRAIN_H, TERRAIN_W } from './terrainEdits';
 
@@ -201,6 +208,8 @@ export interface WorldEdits {
   marks?: AuthorMark[];
   /** 改过的国旗:稳定键 → 旗的写法(见文件头"改旗");没有 = 一面也没改 */
   flags?: Record<string, string>;
+  /** 作者的人物(按新建的先后;见文件头"作者的人物"、characters.ts);没有 = 一个也没有 */
+  characters?: AuthorCharacter[];
 }
 
 /** 作者标记的颜色(界面上的六种:红、橙、绿、蓝、紫、青) */
@@ -720,10 +729,11 @@ export const INTERVENTION_YEAR_MAX = 65535;
 const INTERVENTION_KINDS: readonly InterventionKind[] = ['protect', 'ally', 'declare', 'unity', 'cede', 'found', 'move', 'halt'];
 
 /** 键的格式(新旧两种都认:`polity:c4567#0` / 旧的 `polity:r123#0`,见文件头"稳定键") */
-const isPolityKey = (k: unknown): k is string => typeof k === 'string' && /^polity:(r-?\d{1,7}|c\d{1,7})#\d{1,5}$/.test(k);
-const isRegionKey = (k: unknown): k is string => typeof k === 'string' && REGION_KEY.test(k);
-const isCityKey = (k: unknown): k is string => typeof k === 'string' && /^settlement:[rc]\d{1,7}#\d{1,5}$/.test(k);
-const yearOf = (y: unknown): number | null =>
+export const isPolityKey = (k: unknown): k is string => typeof k === 'string' && /^polity:(r-?\d{1,7}|c\d{1,7})#\d{1,5}$/.test(k);
+export const isRegionKey = (k: unknown): k is string => typeof k === 'string' && REGION_KEY.test(k);
+export const isCityKey = (k: unknown): k is string => typeof k === 'string' && /^settlement:[rc]\d{1,7}#\d{1,5}$/.test(k);
+/** 年份:取整、夹到 [0, INTERVENTION_YEAR_MAX];不是有限数 = null */
+export const yearOf = (y: unknown): number | null =>
   typeof y === 'number' && Number.isFinite(y) ? Math.min(INTERVENTION_YEAR_MAX, Math.max(0, Math.floor(y))) : null;
 
 /**

@@ -140,6 +140,15 @@ export function generalRole(civ: Civ, x: Person): string {
   return `${polityShortTitle(p, clampTier(polityTierAt(p, y)), y)}将领`;
 }
 
+/** 一个人简短的身份:"大景将领""大景君主"(共和国:"某某执政";国名按他上台那年的简称)。作者的人物勾选推演里的人时用 */
+export function personRoleShort(civ: Civ, x: Person): string {
+  if (x.role !== 'ruler') return generalRole(civ, x);
+  const p = polityOfPerson(civ, x);
+  if (!p) return '君主';
+  const y = x.from ?? x.born;
+  return `${polityShortTitle(p, tierFor(p, x, y), y)}${p.lineage === 'republic' ? '执政' : '君主'}`;
+}
+
 /** 共和国的执政官(写"执政""在任""任满",不写"君主""在位") */
 export function isConsul(civ: Civ, x: Person): boolean {
   return x.role === 'ruler' && polityOfPerson(civ, x)?.lineage === 'republic';

@@ -1,7 +1,7 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
- * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、人物(人物卡片、历代君主、编年史里的人名、人物页、搜人名)、作者标记、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
+ * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、人物(人物卡片、历代君主、编年史里的人名、人物页、搜人名)、作者标记、作者的人物、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
  * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;创建时定下的种子、参数、地形在世界概览的"世界设定"页(只能看)
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
@@ -696,6 +696,166 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (gone !== 0 || !delTip.includes('已删除标记「主角的故乡」') || back !== 1) errs.push(`作者标记:删除 / 放回不对(${gone};${delTip};${back})`);
   if (chips !== 1 || !pill) errs.push(`作者标记:州卡片加的标记不对(${chips};${!!pill})`);
   if (!exportRow.includes('作者标记')) errs.push(`作者标记:导出菜单没有"作者标记"一行(${exportRow})`);
+  await page.evaluate(() => localStorage.clear());
+}
+
+// 作者的人物:世界概览「人物」→「我的 0」→ 新建人物:提示条"点地图选出生地",点城 → 出生地填上;填名字、生卒、身份 → 加一段经历(点另一座城、
+// 勾推演里的人)→ 完成:卡片是看的样子(年龄、一生),地图上有足迹和头像;悬停头像 = 小卡片;拖到出生前不画头像;撤销 / 重做;搜得到;
+// 「我的」一行,点了打开;勾过的推演人物、出生的城的卡片里有「作者的人物」;城卡片「更多」→ 在这里加人物;「更多」→ 删除,提示条上「撤销」放回
+{
+  await page.goto(`${dev.url}/?seed=7&civYear=2512`);
+  await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const vp = page.viewportSize()!;
+  const text = (sel: string) => page.locator(sel).first().innerText().then((t) => t.replace(/\s+/g, ' ')).catch(() => '');
+  const trail = () => page.evaluate(() => (window as any).__wfTrail ?? null) as Promise<{ id: number; segs: unknown[]; dots: unknown[]; labels: { text: string }[]; pins: { x: number; y: number }[] } | null>;
+  // 和作者标记同一处:大景王朝东岸放大,挑两座在看得见的地方的城
+  await page.evaluate(
+    ([sx, sy]) => {
+      const w = window as any;
+      w.__wfSetView({ k: 1, x: 0, y: 0 });
+      const st = document.querySelector('.stage')!.getBoundingClientRect();
+      const [bx, by] = w.__wfWorldToClient(1852, 512);
+      w.__wfSetView({ k: 2.8, x: sx - (bx - st.left) * 2.8, y: sy - (by - st.top) * 2.8 });
+    },
+    [SIDE_ROOM + (vp.width - SIDE_ROOM) / 2, vp.height / 2 - 40],
+  );
+  await page.waitForTimeout(1200);
+  const picks = (await page.evaluate(() => (window as any).__wfPickables())) as { kind: string; id: number; x: number; y: number }[];
+  const inView = picks.filter((c) => c.kind === 'mark' && c.x > SIDE_ROOM + 120 && c.x < vp.width - 160 && c.y > 140 && c.y < vp.height - 200);
+  const cityA = inView[0];
+  const cityB = inView.find((c) => Math.hypot(c.x - cityA.x, c.y - cityA.y) > 120);
+  // 「我的 0」→ 新建人物
+  await openOverview(page, 'people');
+  const tabs = await page.locator('.chronicle.people .seg button').allInnerTexts();
+  await page.locator('.chronicle.people .seg button').first().click();
+  await page.waitForTimeout(200);
+  const empty = await text('.oc-empty-mine');
+  await page.click('[data-act=character-new-empty]');
+  await page.waitForTimeout(400);
+  const pickTip = await text('.toast');
+  if (cityA) await page.mouse.click(cityA.x, cityA.y);
+  await page.waitForTimeout(400);
+  const birth = await text('.inspector [data-oc=character-birth]');
+  await page.fill('[data-oc=name]', '林小满');
+  await page.fill('[data-oc=born]', '2490');
+  await page.fill('[data-oc=died]', '2561');
+  await page.fill('[data-oc=role]', '书记官');
+  // 加一段经历:点另一座城,勾一个推演里的人
+  await page.click('[data-act=character-add-life]');
+  await page.waitForTimeout(300);
+  const lifeTip = await text('.toast');
+  if (cityB) await page.mouse.click(cityB.x, cityB.y);
+  await page.waitForTimeout(400);
+  await page.fill('[data-oc=life-year]', '2506');
+  await page.fill('[data-oc=life-text]', '随军西征');
+  const chip = page.locator('.inspector [data-oc=life-people] .oc-chip').first();
+  const chipText = (await chip.innerText().catch(() => '')).replace(/\s+/g, ' ');
+  await chip.click().catch(() => {});
+  await page.click('[data-act=character-life-done]');
+  await page.waitForTimeout(300);
+  await page.click('[data-act=character-done]');
+  await page.waitForTimeout(600);
+  const card = await text('.inspector .oc-card');
+  const t1 = await trail();
+  // 悬停头像
+  let hover = '';
+  const pin = t1?.pins[0];
+  if (pin) {
+    await page.mouse.move(pin.x, pin.y - 29);
+    await page.waitForTimeout(150);
+    await page.mouse.move(pin.x + 0.5, pin.y - 29);
+    await page.waitForTimeout(250);
+    hover = await text('.hover-card');
+  }
+  await page.mouse.move(vp.width - 30, vp.height / 2);
+  // 往回 100 年(2412):还没出生,不画头像,足迹照画
+  await page.keyboard.press('Shift+ArrowLeft');
+  await page.waitForTimeout(400);
+  const t2 = await trail();
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.waitForTimeout(400);
+  // 撤销 / 重做
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(300);
+  const undone = (await trail())?.dots.length ?? -1;
+  const undoTip = await text('.toast');
+  await page.keyboard.press('Control+Shift+z');
+  await page.waitForTimeout(300);
+  // 搜索
+  await page.fill('.sidebar .search-input', '随军西征');
+  await page.waitForTimeout(300);
+  const hitKind = await page.locator('.search-row').first().getAttribute('data-kind').catch(() => null);
+  const hit = await text('.search-row');
+  await page.fill('.sidebar .search-input', '');
+  await page.keyboard.press('Escape');
+  // 世界概览「人物」默认「我的」,一行,点了打开
+  await openOverview(page, 'people');
+  const rows = await page.locator('.chronicle.people .oc-row-mine').count();
+  const row = await text('.chronicle.people .oc-row-mine');
+  await page.locator('.chronicle.people .oc-row-mine').first().click();
+  await page.waitForTimeout(500);
+  const closed = !(await page.locator('.ov-root:not([hidden])').count());
+  const card2 = await text('.inspector .oc-card .oc-name');
+  // 勾过的推演人物的卡片
+  const chipName = chipText.split(' ')[0];
+  let personRefs = '';
+  if (chipName) {
+    await page.fill('.sidebar .search-input', chipName);
+    await page.waitForTimeout(300);
+    await page.locator('.search-row[data-kind=person]').first().click();
+    await page.waitForTimeout(500);
+    personRefs = await text('.inspector [data-oc=refs]');
+  }
+  // 出生的城的卡片;「更多」→ 在这里加人物
+  let cityRefs = '';
+  let addHere = '';
+  let addPicking = '';
+  if (cityA) {
+    await page.evaluate((id) => (window as any).__wfSelect('settlement', id), cityA.id);
+    await page.waitForTimeout(500);
+    cityRefs = await text('.inspector [data-oc=refs]');
+    await page.click('.inspector [data-act=more]');
+    await page.click('[data-act=add-character]');
+    await page.waitForTimeout(400);
+    addHere = await text('.inspector [data-oc=character-birth]');
+    addPicking = (await page.locator('.toast').count()) ? await text('.toast') : '';
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
+  const addClosed = !(await page.locator('.inspector .oc-editing').count());
+  // 删除 → 撤销
+  await openOverview(page, 'people');
+  await page.locator('.chronicle.people .oc-row-mine').first().click();
+  await page.waitForTimeout(500);
+  await page.click('.inspector .oc-card [data-act=more]');
+  await page.click('[data-act=character-delete]');
+  await page.waitForTimeout(300);
+  const gone = (await trail())?.dots.length ?? -1;
+  const delTip = await text('.toast');
+  await page.click('.toast [data-act=character-restore]').catch(() => {});
+  await page.waitForTimeout(400);
+  const back = (await trail())?.dots.length ?? 0;
+  console.log(
+    `作者的人物:分档 ${tabs.join('/')};空的「${empty.slice(0, 20)}…」;新建 → 提示「${pickTip}」→ 出生地「${birth}」;加经历提示「${lifeTip}」、勾「${chipText}」;` +
+      `卡片「${card.slice(0, 50)}…」;足迹 ${t1?.dots.length ?? 0} 点 ${t1?.segs.length ?? 0} 段、头像 ${t1?.pins.length ?? 0};悬停「${hover}」;2412 年头像 ${t2?.pins.length ?? -1}、点 ${t2?.dots.length ?? -1};` +
+      `撤销 ${undone}「${undoTip}」;搜「${hit}」(${hitKind});「我的」${rows} 行「${row.slice(0, 30)}」→ 收起 ${closed}、卡片「${card2}」;` +
+      `推演人物卡片「${personRefs}」;城卡片「${cityRefs}」;在这里加人物「${addHere}」${addPicking ? `、提示「${addPicking}」` : ''}→ Esc 关掉 ${addClosed};删除 ${gone}「${delTip}」→ 撤销 ${back}`,
+  );
+  if (!tabs[0]?.startsWith('我的 0') || !empty.includes('还没有自己的人物')) errs.push(`作者的人物:「我的」页不对(${tabs.join('/')};${empty})`);
+  if (!pickTip.includes('点地图选出生地') || !cityA || !birth || birth.includes('在地图上点')) errs.push(`作者的人物:新建后点地图没有选上出生地(${pickTip};${!!cityA};${birth})`);
+  if (!lifeTip.includes('点地图选这段经历在哪') || !cityB || !chipText) errs.push(`作者的人物:加经历时挑地方 / 勾人不对(${lifeTip};${!!cityB};${chipText})`);
+  if (!card.includes('林小满') || !card.includes('作者的人物，2490–2561 年') || !card.includes('22 岁') || !card.includes('随军西征')) errs.push(`作者的人物:完成后卡片不对(${card.slice(0, 120)})`);
+  if (t1?.dots.length !== 2 || t1.segs.length !== 1 || t1.pins.length !== 1 || !t1.labels.some((l) => l.text.startsWith('2490'))) errs.push(`作者的人物:地图上的足迹不对(${JSON.stringify(t1)?.slice(0, 200)})`);
+  if (!hover.includes('林小满') || !hover.includes('22 岁') || !hover.includes('点开看生平')) errs.push(`作者的人物:悬停头像的小卡片不对(${hover})`);
+  if (t2?.pins.length !== 0 || t2.dots.length !== 2) errs.push(`作者的人物:出生前还画着头像(${t2?.pins.length};${t2?.dots.length})`);
+  if (undone !== 0 || !undoTip.includes('已撤销人物的修改')) errs.push(`作者的人物:撤销不对(${undone};${undoTip})`);
+  if (hitKind !== 'character' || !hit.includes('林小满')) errs.push(`作者的人物:按经历搜不到(${hit};${hitKind})`);
+  if (rows !== 1 || !row.includes('林小满') || !row.includes('书记官') || !closed || card2 !== '林小满') errs.push(`作者的人物:「我的」页不对(${rows};${row};${closed};${card2})`);
+  if (!personRefs.includes('林小满') || !personRefs.includes('2506 年随军西征')) errs.push(`作者的人物:勾过的推演人物卡片里没有他(${personRefs})`);
+  if (!cityRefs.includes('林小满') || !cityRefs.includes('2490 年生在这里')) errs.push(`作者的人物:出生的城的卡片里没有他(${cityRefs})`);
+  if (!addHere || addHere.includes('在地图上点') || addPicking.includes('点地图选出生地') || !addClosed) errs.push(`作者的人物:城卡片「在这里加人物」不对(${addHere};${addPicking};${addClosed})`);
+  if (gone !== 0 || !delTip.includes('已删除人物「林小满」') || back !== 2) errs.push(`作者的人物:删除 / 放回不对(${gone};${delTip};${back})`);
   await page.evaluate(() => localStorage.clear());
 }
 

@@ -1,0 +1,402 @@
+/* 作者的人物:卡片(CharacterPanel.tsx)、地图上的足迹层(CharacterLayer.tsx)、世界概览「人物」页的「我的」、别的卡片里「作者的人物」 */
+
+/* 铺满舞台的一张画布,不接鼠标(点得到下面的地图);大小在画的时候按舞台设 */
+.character-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+/* 圆形头像:名字的第一个字(字号 = 直径 × 0.46) */
+.oc-av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--s);
+  height: var(--s);
+  border-radius: 50%;
+  color: #fff;
+  font: 600 calc(var(--s) * 0.46) / 1 var(--font-sans);
+  letter-spacing: 0;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.1);
+  user-select: none;
+}
+.cp-head > .oc-av {
+  margin-top: 1px;
+}
+.cpanel .oc-name {
+  overflow-wrap: anywhere;
+}
+
+/* ---- 看的时候 ---- */
+.oc-note {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--btn);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cp-ev .oc-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.cp-ev .oc-sub + .oc-sub {
+  margin-top: 0;
+}
+.cp-ev .oc-sub .ins-link {
+  font-size: 12.5px;
+}
+.cpanel .cp-ev[data-st='future'] {
+  opacity: 0.45;
+}
+/* "现在"线:时间轴那一年,在第一件还没发生的事上面 */
+.oc-now {
+  position: relative;
+  height: 0;
+  margin: 9px 0;
+  border-top: 1.5px solid var(--accent);
+}
+.oc-now span {
+  position: absolute;
+  right: 8px;
+  top: -10px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-size: 11.5px;
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 别的卡片里「作者的人物」 */
+.oc-people {
+  display: flex;
+  flex-direction: column;
+}
+.cpanel .oc-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-top: 0.5px solid var(--line);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.cpanel .oc-person:first-child {
+  border-top: 0;
+}
+.cpanel .oc-person:hover {
+  background: var(--hover-bg);
+}
+.oc-person b {
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 14px;
+}
+.oc-person .oc-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.oc-person .oc-txt span {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+/* ---- 填的时候 ---- */
+.cpanel .oc-field {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--btn);
+  font: 14px/38px var(--font-sans);
+  color: var(--ink);
+  outline: none;
+}
+.cpanel .oc-field::placeholder {
+  color: var(--ink-3);
+}
+.cpanel .oc-field:focus {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.oc-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: 10px;
+  background: var(--btn);
+  font-size: 14px;
+  color: var(--ink);
+}
+.oc-pick.picking {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.oc-pick-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.oc-pick em {
+  font-style: normal;
+  color: var(--ink-2);
+  font-size: 13px;
+  margin-left: 6px;
+}
+.oc-pick-empty {
+  color: var(--ink-3);
+}
+.oc-pick .cp-step {
+  flex: none;
+  margin: 0;
+}
+/* 国家:下拉框铺满那一格,右边一个小箭头 */
+.oc-select-wrap {
+  position: relative;
+  padding-right: 12px;
+  cursor: pointer;
+}
+.oc-select-wrap .icon {
+  flex: none;
+  color: var(--ink-2);
+  pointer-events: none;
+}
+.cpanel .oc-select {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: 14px var(--font-sans);
+  color: var(--ink);
+  outline: none;
+  cursor: pointer;
+}
+.oc-rows {
+  border-radius: 10px;
+  background: var(--btn);
+  overflow: hidden;
+}
+.cpanel .oc-row {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-top: 0.5px solid var(--line);
+  background: none;
+  font-size: 14px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.cpanel .oc-row:first-child {
+  border-top: 0;
+}
+.cpanel .oc-row:hover {
+  background: var(--hover-bg);
+}
+.oc-row .y {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-row .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-row .w {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cpanel .oc-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 500 14px var(--font-sans);
+  cursor: pointer;
+}
+.cpanel .oc-del {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--err);
+  font-size: 14px;
+  cursor: pointer;
+}
+.oc-age {
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+/* 勾推演里的事、选亲友:一行一个,左边勾选框 */
+.oc-checks {
+  border-radius: 10px;
+  background: var(--btn);
+  overflow: hidden;
+}
+.cpanel .oc-check {
+  display: grid;
+  grid-template-columns: 22px 44px 1fr;
+  gap: 6px;
+  align-items: start;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-top: 0.5px solid var(--line);
+  background: none;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.cpanel .oc-check:first-child {
+  border-top: 0;
+}
+.cpanel .oc-check:hover {
+  background: var(--hover-bg);
+}
+.cpanel .oc-check.who {
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+}
+.oc-check .y {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.oc-check .t {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.oc-check .w {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.oc-check .oc-gone {
+  color: var(--ink-2);
+}
+.oc-sw {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.oc-box {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1.5px #c7c7cc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.oc-box.round {
+  border-radius: 50%;
+  margin-top: 0;
+}
+.oc-box.on {
+  background: var(--accent);
+  box-shadow: none;
+}
+.oc-none {
+  display: block;
+  padding: 10px 12px;
+  font-size: 13.5px;
+}
+.oc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cpanel .oc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--btn);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  cursor: pointer;
+}
+.cpanel .oc-chip:hover {
+  background: var(--hover-bg);
+}
+.cpanel .oc-chip.on {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.oc-chip em {
+  font-style: normal;
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+/* ---- 世界概览「人物」页的「我的」 ---- */
+.pp-who .oc-av {
+  margin-right: 8px;
+  vertical-align: -6px;
+}
+/* 「新建人物」和「复制全文」隔开一点(主操作不挨着别的按钮) */
+.chron-acts .oc-new {
+  margin-right: 8px;
+}
+.oc-empty-mine {
+  padding: 28px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}

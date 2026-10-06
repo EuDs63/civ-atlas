@@ -91,17 +91,18 @@ export function setOverviewTab(tab: OverviewTab) {
   set({ ...state, tab });
 }
 
-// ---- 人物页的筛选:名人 / 君主 / 将领,只看哪一国 ----
+// ---- 人物页的筛选:我的(作者的人物)/ 名人 / 君主 / 将领,只看哪一国 ----
 
-export type PeopleList = 'famous' | 'rulers' | 'generals';
+export type PeopleList = 'mine' | 'famous' | 'rulers' | 'generals';
 
 export interface PeopleView {
-  list: PeopleList;
+  /** 看哪一档;null = 还没挑过:有作者自己的人物先看「我的」,没有先看「名人」 */
+  list: PeopleList | null;
   /** 只看这一国(null = 全部国家) */
   polity: number | null;
 }
 
-let people: PeopleView = { list: 'famous', polity: null };
+let people: PeopleView = { list: null, polity: null };
 const peopleSubs = new Set<() => void>();
 
 export function getPeople(): PeopleView {

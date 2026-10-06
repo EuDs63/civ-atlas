@@ -1,16 +1,17 @@
 /**
- * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改、作者标记、改旗。
+ * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改、作者标记、改旗、作者的人物。
  * 和 civView.ts 一样的小 store(get / set / use)。换世界(种子 / 参数变了)时 App 调 clearEdits 清空。
  *
  * 这里只管内存里的这一份;存进浏览器 / 存成文件在 saveStore.ts(经 subscribeEdits 订阅,修改一变就自动存),
  * 读档时 App 先按存档的参数生成,再 setEdits(存档里的修改)。
  *
- * 撤销 / 重做(⌘Z / ⇧⌘Z,见 undo.ts):改名、改旗、干预、作者标记、AI 改写每次都记一步(改之前、改之后两份),只记这次打开网页以后、这个世界上的;
+ * 撤销 / 重做(⌘Z / ⇧⌘Z,见 undo.ts):改名、改旗、干预、作者标记、作者的人物、AI 改写每次都记一步(改之前、改之后两份),只记这次打开网页以后、这个世界上的;
  * 读档、换世界(setEdits / clearEdits)、创建世界(clearEditHistory)清空。地形修改不记:只在新建世界时能改,改地形工具有自己的"撤销一笔"。
  */
 import { useSyncExternalStore } from 'react';
 import { EMPTY_EDITS, MARKS_MAX, MARK_REGIONS_TOTAL, cleanIntervention, cleanMark, markRegionTotal, sameMark, markAiName, nextMarkId, type AuthorMark, type Intervention, type TerrainOp, type WorldEdits } from '../gen/edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from '../gen/terrainEdits';
+import { CHARACTERS_MAX, cleanCharacter, nextCharacterId, sameCharacter, type AuthorCharacter } from '../gen/characters';
 import { showToast } from './toastStore';
 
 let state: WorldEdits = EMPTY_EDITS;
@@ -104,26 +105,29 @@ export function revertEdits(now: WorldEdits, from: WorldEdits, to: WorldEdits): 
   const aiNames = moveMap(now.aiNames, from.aiNames, to.aiNames);
   const interventions = moveList(now.interventions, from.interventions, to.interventions);
   const terrain = moveList(now.terrain, from.terrain, to.terrain);
-  const marks = moveMarks(now.marks, from.marks, to.marks);
+  const marks = moveById(now.marks, from.marks, to.marks);
   const flags = moveMap(now.flags, from.flags, to.flags);
-  if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain && marks === now.marks && flags === now.flags) return now;
+  const characters = moveById(now.characters, from.characters, to.characters);
+  if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain && marks === now.marks && flags === now.flags && characters === now.characters)
+    return now;
   const out: WorldEdits = { names, interventions, terrain };
   if (aiNames && Object.keys(aiNames).length) out.aiNames = aiNames;
   if (marks?.length) out.marks = marks;
   if (flags && Object.keys(flags).length) out.flags = flags;
+  if (characters?.length) out.characters = characters;
   return out;
 }
 
 /**
- * 标记那一半:按编号认同一个标记 —— 从 from 到 to 这一步新建的(to 有、from 没有)去掉,删掉的放回原来的位置,
+ * 标记、作者的人物那一半:按编号认同一个 —— 从 from 到 to 这一步新建的(to 有、from 没有)去掉,删掉的放回原来的位置,
  * 改过的换回 to 那样(现在还是 from 那样的才换;之后又改过的不动)。都没动 = 原数组
  */
-function moveMarks(now: readonly AuthorMark[] | undefined, from: readonly AuthorMark[] | undefined, to: readonly AuthorMark[] | undefined): AuthorMark[] | undefined {
+function moveById<M extends { id: number }>(now: readonly M[] | undefined, from: readonly M[] | undefined, to: readonly M[] | undefined): M[] | undefined {
   const N = now ?? [];
   const F = new Map((from ?? []).map((m) => [m.id, m]));
   const T = new Map((to ?? []).map((m) => [m.id, m]));
-  const same = (a: AuthorMark | undefined, b: AuthorMark | undefined) => a === b || (!!a && !!b && JSON.stringify(a) === JSON.stringify(b));
-  let out: AuthorMark[] | null = null;
+  const same = (a: M | undefined, b: M | undefined) => a === b || (!!a && !!b && JSON.stringify(a) === JSON.stringify(b));
+  let out: M[] | null = null;
   const list = () => (out ??= N.slice());
   for (const id of new Set([...F.keys(), ...T.keys()])) {
     const f = F.get(id);
@@ -136,7 +140,7 @@ function moveMarks(now: readonly AuthorMark[] | undefined, from: readonly Author
     else if (t) list().splice(Math.min(list().length, (to ?? []).indexOf(t)), 0, t);
     else list().splice(i, 1);
   }
-  return out ?? (now as AuthorMark[] | undefined);
+  return out ?? (now as M[] | undefined);
 }
 
 /** 键值表那一半(改名、AI 起名的记号、改过的旗):from 到 to 变了的键,现在还是 from 那样的才换成 to 那样;都没动 = 原对象 */
@@ -372,7 +376,64 @@ export function restoreMark(m: AuthorMark, at: number): number {
   return id;
 }
 
+// ---- 作者的人物 ----
+
+/** 这次打开以后删掉过的人物编号:新人物不用(放回去时还能用原编号,撤销、亲友都对得上) */
+const retiredCharacterIds = new Set<number>();
+
+/** 把人物换成 list(空 = 去掉这个字段),记一步 */
+function commitCharacters(list: AuthorCharacter[]) {
+  const { characters: _, ...rest } = state;
+  commitEdits(list.length ? { ...rest, characters: list } : rest);
+}
+
+/** 加一个人物(清理过的;编号按用过的最大的 + 1 重新给,见 nextCharacterId)。返回新人物的编号;不合格、已经有 CHARACTERS_MAX 个 = −1 */
+export function addCharacter(c: Omit<AuthorCharacter, 'id'>): number {
+  if ((state.characters?.length ?? 0) >= CHARACTERS_MAX) return -1;
+  const id = nextCharacterId(state.characters, retiredCharacterIds);
+  const x = cleanCharacter({ ...c, id });
+  if (!x) return -1;
+  commitCharacters([...(state.characters ?? []), x]);
+  return id;
+}
+
+/** 改一个人物(整个换成 c,编号不变;找不到、不合格、没变 = 不动)。返回改没改 */
+export function updateCharacter(c: AuthorCharacter): boolean {
+  const list = state.characters ?? [];
+  const i = list.findIndex((x) => x.id === c.id);
+  const x = cleanCharacter(c);
+  if (i < 0 || !x || sameCharacter(x, list[i])) return false;
+  commitCharacters(list.map((y, j) => (j === i ? x : y)));
+  return true;
+}
+
+/** 删一个人物(找不到 = 不动;别的人物亲友里的他留着,界面上不列)。返回删掉的那个 */
+export function removeCharacter(id: number): AuthorCharacter | null {
+  const list = state.characters ?? [];
+  const c = list.find((x) => x.id === id);
+  if (!c) return null;
+  retiredCharacterIds.add(c.id);
+  commitCharacters(list.filter((x) => x !== c));
+  return c;
+}
+
+/** 把删掉的人物放回去(删除提示条上的"撤销"):编号已经被占了 = 换一个新编号;at = 放回列表里的位置。返回编号,放不回去 = −1 */
+export function restoreCharacter(c: AuthorCharacter, at: number): number {
+  const list = state.characters ?? [];
+  const same = list.find((x) => x.id === c.id);
+  if (same && sameCharacter(same, c)) return c.id;
+  if (list.length >= CHARACTERS_MAX) return -1;
+  const id = same ? nextCharacterId(list, retiredCharacterIds) : c.id;
+  const x = cleanCharacter({ ...c, id });
+  if (!x) return -1;
+  const next = list.slice();
+  next.splice(Math.min(Math.max(0, at), next.length), 0, x);
+  commitCharacters(next);
+  return id;
+}
+
 /** 换了新世界:修改一律作废 */
 export function clearEdits() {
+  retiredCharacterIds.clear();
   setEdits(EMPTY_EDITS);
 }

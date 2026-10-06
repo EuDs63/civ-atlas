@@ -3,9 +3,10 @@
  *
  *   顶部  颜色块(当年所属国)、城名(可改)、"城，1045 年建城，属 大昌"(毁了 = "故城"、写毁于哪年)、关闭
  *   按钮  迁都到这里(主操作:替所属国下"迁都"令,生效年份 = 当前年份,和国家干预页同一套流程)/ 设为中心 / 改名 /
- *         更多(看所属国家、让 AI 讲名字由来)
+ *         更多(在这里加标记 / 在这里加人物、看所属国家、让 AI 讲名字由来)
  *   概况  级别(都城 / 大城 / 城 / 镇 / 村;故城)、人口、做过国都(次数或"未曾")、所在州(可点)、建城时的民族、
  *         做国都的年份段、故址(重建)
+ *   作者的人物  生在这里、经历写在这里的作者人物(characterInfo.ts 的 charactersAt),没有就不显示
  *   兴衰  历年人口的小柱图(柱子按当时的主人上色,无主时灰),洗劫 / 毁城 / 重建 / 旧都衰落的年份在上面标一个字;点一处跳到那年
  *   历任归属 按时长分段的色条(每段一个国家的颜色),点一段跳到它开始的那年
  *   大事  最近 5 条(可点)
@@ -18,7 +19,10 @@ import { ownersAt } from '../gen/civ/timeline';
 import { polityKey, settlementKey, type Intervention } from '../gen/edits';
 import { setSelection } from './civView';
 import { newMarkDraft } from './markStore';
-import { addIntervention, editBlock, interventionKeys } from './editsStore';
+import { newCharacterDraft } from './characterStore';
+import { charactersAt, whereOfCity } from './characterInfo';
+import { CharacterRefs } from './CharacterPanel';
+import { addIntervention, editBlock, interventionKeys, useEdits } from './editsStore';
 import { NameEdit } from './NameEdit';
 import { nameAt } from './Interventions';
 import { endRun, startRun } from './panelStore';
@@ -58,6 +62,8 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
   const [renaming, setRenaming] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const { ai, aiRef } = useRevealAi({ civ, raw, raster, target: { kind: 'settlement', id }, lazy: true });
+  const chars = useEdits().characters;
+  const refs = useMemo(() => charactersAt(civ, world, raster, chars, { city: id }), [civ, world, raster, chars, id]);
   const built = year >= s.founded;
   const ruined = s.ended !== undefined && year >= s.ended;
   const stands = built && !ruined;
@@ -149,6 +155,9 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
           <MenuItem icon={<Icon name="pin" size={16} />} act="add-mark" onClick={() => newMarkDraft({ at: [world.mesh.x[s.cell], world.mesh.y[s.cell]], year })}>
             在这里加标记
           </MenuItem>
+          <MenuItem icon={<Icon name="person" size={16} />} act="add-character" onClick={() => newCharacterDraft({ birthplace: whereOfCity(civ, id), year })}>
+            在这里加人物
+          </MenuItem>
           <MenuItem icon={<Icon name="flag" size={16} />} act="owner" disabled={!owner} onClick={() => owner && setSelection({ kind: 'polity', id: owner.id })}>
             看所属国家
           </MenuItem>
@@ -210,6 +219,7 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
             </Row>
           )}
         </Stats>
+        <CharacterRefs refs={refs} />
         <Trend civ={civ} s={s} year={year} from={s.founded} to={last} spans={spans} />
         <OwnerBar civ={civ} spans={spans} year={year} />
         <EventList upTo={upTo} civ={civ} />

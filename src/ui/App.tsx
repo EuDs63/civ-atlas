@@ -169,10 +169,14 @@ import { CIV_SHOW_OFF, drawCivOverlay } from '../render/civ/overlay';
 import { getPolityPick, interventionActorThen, interventionDoneText, setPickHover, setPolityPick, usePolityPick } from './Interventions';
 import { Inspector } from './Inspector';
 import { TargetLayer } from './TargetPlates';
-import { FLY_MS, animProgress, curvedFly, easeOutCubic, flatFly, markFocus, personKey, resolvePersonKey, selectionFocus, selectionKey, sideRoom, phoneFree, type FlyGoal } from './flyTo';
+import { FLY_MS, animProgress, curvedFly, easeOutCubic, flatFly, markFocus, personKey, pointsFocus, resolvePersonKey, selectionFocus, selectionKey, sideRoom, phoneFree, type FlyGoal } from './flyTo';
 import { MarkLayer, markHitAt, markPinAt, markPinTip, type MarkApi } from './MarkLayer';
 import { cancelDraft, getMarkUi, newMarkDraft, patchDraft, resetMarkUi, setMarkDragging, stopPlacing, toggleDraftRegion, useMarkUi } from './markStore';
 import { markHover, markSpot, ownerName } from './markInfo';
+import { CharacterLayer, characterPinAt, characterPinTip } from './CharacterLayer';
+import { draftAsCharacter, escapeCharacter, getCharUi, parseYear as parseCharYear, pickPlace, resetCharacterUi, stopPicking, useCharUi } from './characterStore';
+import { characterHover, placeOf, whereOfCity, whereOfRegion } from './characterInfo';
+import { lifeStops, type Where } from '../gen/characters';
 import { regionLabel } from '../gen/civ/display';
 import { NAME_ZOOM } from '../render/marks';
 import { collapseSide, expandSide, getSide, setSideHold, useSide } from './sideStore';
@@ -1102,6 +1106,7 @@ export function App() {
     restoredIv.current = edits.interventions;
     // 同一张图换一份修改(打开同种子的另一份存档、分享链接)也算换了世界:正在填的标记、选中的标记作废
     resetMarkUi();
+    resetCharacterUi();
     setEdits(edits);
     attachWorld({ id: t.id, params: world.params, check, kind: t.kind, title: t.title, saved: t.saved ?? edits, view: t.view ?? undefined, pristine: t.pristine, base: t.base, origin: t.origin });
     if (t.kind !== 'draft') setWorldStats(aliveAtEnd(rc));
@@ -2091,7 +2096,14 @@ export function App() {
     if (!data || !el || !box.w || replayOn || getTerrainTool().on) return;
     const sel = getSelection().sel;
     const year = civ ? Math.min(civ.endYear, Math.max(0, getCivTime().year ?? civ.endYear)) : 0;
-    const focus = to === 'sel' && sel && civ ? (sel.kind === 'mark' ? selectedMarkFocus(civ, sel.id) : selectionFocus(data.world, civ, sel, year)) : null;
+    const focus =
+      to === 'sel' && sel && civ
+        ? sel.kind === 'mark'
+          ? selectedMarkFocus(civ, sel.id)
+          : sel.kind === 'character'
+            ? selectedCharacterFocus(civ, sel.id)
+            : selectionFocus(data.world, civ, sel, year)
+        : null;
     if (to === 'sel' && (!focus || !sel)) return;
     // 人物按他的国家飞(看全疆域)
     const goal: FlyGoal = { focus, kind: to === 'sel' && sel ? (sel.kind === 'person' ? 'polity' : sel.kind) : 'home' };
@@ -2133,6 +2145,18 @@ export function App() {
     if (d && d.id === id) return markFocus(data.world, civ, d.scope === 'point' ? { at: d.at ?? undefined } : { regions: d.regions });
     const m = getEdits().marks?.find((x) => x.id === id);
     return m ? markFocus(data.world, civ, m) : null;
+  };
+  /** 选中的作者人物(正在填的那一份优先)一生去过的地方的范围 */
+  const selectedCharacterFocus = (civ: Civ, id: number) => {
+    if (!data) return null;
+    const d = getCharUi().draft;
+    const year = Math.min(civ.endYear, Math.max(0, getCivTime().year ?? civ.endYear));
+    const c = d && d.id === id ? draftAsCharacter(d, year) : getEdits().characters?.find((x) => x.id === id);
+    if (!c) return null;
+    const pts = lifeStops(c)
+      .map((s) => placeOf(civ, data.world, data.raster, s.where, s.year).at)
+      .filter((p): p is [number, number] => !!p);
+    return pointsFocus(data.world, pts);
   };
   const flyRef = useRef(flyNow);
   flyRef.current = flyNow;
@@ -2426,6 +2450,37 @@ export function App() {
     const m = getEdits().marks?.find((x) => x.id === hit.ids[0]);
     return m ? { info: markHover(m), cursor: 'pointer', tip: hit.kind === 'pill' ? null : markPinTip(m.id) } : null;
   };
+  /** 挑地方时点地图得到的地方:城镇符号、城名 = 那座城;陆地 = 那一州;海上 = 那一点 */
+  const whereAtClient = (cx: number, cy: number): Where | null => {
+    if (!civ) return null;
+    const hit = labelAt(cx, cy);
+    if (hit?.kind === 'settlement' && civ.settlements[hit.id]) return whereOfCity(civ, hit.id);
+    const r = regionAtClient(cx, cy);
+    if (r >= 0) return whereOfRegion(civ, r);
+    return markWorldAt(cx, cy);
+  };
+  /**
+   * 悬停时作者的人物要说的:挑地方时写鼠标下是哪(那一年归谁);停在地图上的头像上 = 名字、那年多大、在哪。
+   * 不归人物管 = null(再看标记的)
+   */
+  const charHoverAt = (cx: number, cy: number): { info?: HoverInfo | null; cursor: string; tip?: [number, number] | null; left?: boolean } | null => {
+    if (!civ || !data) return null;
+    const cu = getCharUi();
+    if (cu.picking && cu.draft) {
+      const w = whereAtClient(cx, cy);
+      if (!w) return { info: null, cursor: '' };
+      const t = cu.picking === 'birth' ? cu.draft.bornText : cu.draft.sub?.kind === 'life' ? cu.draft.sub.d.yearText : '';
+      const ty = parseCharYear(t);
+      const year = ty === null || Number.isNaN(ty) ? markYear() : ty;
+      const pl = placeOf(civ, data.world, data.raster, w, year);
+      const sub = pl.region !== undefined ? ownerName(civ, ownersAt(civ, Math.min(civ.endYear, year)).polity[pl.region], year) : undefined;
+      return { info: { name: pl.name, sub, extra: '点一下，选这里' }, cursor: 'none' };
+    }
+    const id = characterPinAt(cx, cy);
+    if (id === null) return null;
+    const c = getEdits().characters?.find((x) => x.id === id);
+    return c ? { info: characterHover(civ, data.world, data.raster, c, markYear()), cursor: 'pointer', tip: characterPinTip() } : { info: null, cursor: 'pointer' };
+  };
   /** 标记说的悬停小卡片(有图钉尖就放在图钉左上方,圈州时放在鼠标左边) */
   const markHoverCard = (mh: { info?: HoverInfo | null; tip?: [number, number] | null; left?: boolean }, x: number, y: number) =>
     setHover(mh.info ? (mh.tip ? { info: mh.info, x: mh.tip[0], y: mh.tip[1], place: 'above' } : { info: mh.info, x, y, place: mh.left ? 'left' : undefined }) : null);
@@ -2495,7 +2550,7 @@ export function App() {
     } else {
       // 鼠标停在能点的字 / 城镇符号上:手指光标(改地形时不管字);作者标记上 / 放标记 / 圈州时按标记的
       label = getTerrainTool().on || draft ? null : pickLabelAt(e.clientX, e.clientY);
-      mh = getTerrainTool().on || draft || replayOn ? null : markHoverAt(e.clientX, e.clientY);
+      mh = getTerrainTool().on || draft || replayOn ? null : (charHoverAt(e.clientX, e.clientY) ?? markHoverAt(e.clientX, e.clientY));
       el.style.cursor = mh ? mh.cursor : label ? 'pointer' : '';
     }
     // 悬停小卡片:拖动、改地形、回放、新建时不显示;手指没有"悬停"(点了直接出面板)
@@ -2565,6 +2620,17 @@ export function App() {
     }
     // 新建时还没有历史,点了不看详情
     if (draft) return;
+    // 作者的人物:正在填的时候点地图不选别的;挑地方时 = 选好那一处(城 / 州 / 海上那一点)
+    const cu = getCharUi();
+    if (civ && cu.draft) {
+      if (e.detail >= 2 || !cu.picking) return;
+      const w = whereAtClient(e.clientX, e.clientY);
+      if (w) {
+        pickPlace(w);
+        setHover(null);
+      }
+      return;
+    }
     // 作者标记:放标记 = 在点到的地方新建一个;正在填的标记:一个点 = 图钉挪到点到的地方,几个州 = 点到的州加进来 / 去掉(都不选别的)
     const mk = getMarkUi();
     if (civ && (mk.placing || mk.draft)) {
@@ -2600,6 +2666,9 @@ export function App() {
     const el = stageRef.current;
     const rect = el?.getBoundingClientRect();
     const side = rect && e.clientX - rect.left > rect.width * 0.55 ? 'left' : 'right';
+    // 作者的人物的头像(画在最上面,先看它)
+    const ch = characterPinAt(e.clientX, e.clientY);
+    if (ch !== null) return setSelection({ kind: 'character', id: ch }, side);
     // 作者标记(画在地名上面,先看它):图钉、名字、名字牌 = 选中它;合并的圆 = 在那里放大
     const mh = markHitAt(e.clientX, e.clientY);
     if (mh) {
@@ -2655,10 +2724,27 @@ export function App() {
     if (markPlacing) showToast({ id: 'mk', kind: 'info', text: '点地图放标记', more: ['陆地、海上都可以'], action: { label: coarse ? '取消' : '取消 · Esc', act: 'mark-cancel', onClick: stopPlacing } });
     else clearToast('mk');
   }, [markPlacing, coarse]);
+  // 作者的人物:挑地方时顶部一条提示(取消 = Esc);开始挑时"在地图上点一个国家"收起
+  const charPicking = useCharUi().picking;
+  useEffect(() => {
+    if (charPicking) {
+      setPolityPick(null);
+      showToast({
+        id: 'oc-pick',
+        kind: 'info',
+        text: charPicking === 'birth' ? '点地图选出生地' : '点地图选这段经历在哪',
+        more: ['城、州、海上都可以'],
+        action: { label: coarse ? '取消' : '取消 · Esc', act: 'character-pick-cancel', onClick: stopPicking },
+      });
+    } else clearToast('oc-pick');
+  }, [charPicking, coarse]);
   /** 能放标记:建好的世界、有历史(新建、回放世界形成时不行) */
   const markable = !!data && stage === 'world' && !!civ && !replayOn;
   const markWorld = data?.world;
-  useEffect(() => resetMarkUi(), [markWorld, home, replayOn, draft]);
+  useEffect(() => {
+    resetMarkUi();
+    resetCharacterUi();
+  }, [markWorld, home, replayOn, draft]);
 
   /** 单击处的城(点到城镇符号 / 城名;否则点到的州里时间轴当前那一年还在的城;没有 = −1) */
   const settlementAtClick = (x: number, y: number): number => {
@@ -2729,6 +2815,7 @@ export function App() {
       if (e.key !== 'Escape') return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (escapeCharacter()) return;
       const mk = getMarkUi();
       if (mk.placing) return stopPlacing();
       if (mk.draft) return cancelDraft();
@@ -2827,7 +2914,7 @@ export function App() {
   const onGlobeHover = (p: [number, number] | null) => {
     if (!p || !data || replayOn) return setHover(null);
     const [x, y] = mouseAt.current;
-    const mh = draft ? null : markHoverAt(x, y);
+    const mh = draft ? null : (charHoverAt(x, y) ?? markHoverAt(x, y));
     if (stageRef.current) stageRef.current.style.cursor = mh ? mh.cursor : '';
     if (mh && mh.info !== undefined) return markHoverCard(mh, x, y);
     showHover(p, globeApi.current?.labelAt(x, y) ?? null, x, y);
@@ -3096,6 +3183,8 @@ export function App() {
         )}
         {/* 作者标记(图钉、圈的州;地球仪上也画):在地名、地球仪上面 */}
         {data && world && <MarkLayer civ={civ} world={data.world} api={markApi} hidden={replayOn || draft || home} />}
+        {/* 作者的人物一生的足迹(选中一个人物时;地球仪上也画):在标记上面 */}
+        {data && world && <CharacterLayer civ={civ} world={data.world} raster={data.raster} api={markApi} hidden={replayOn || draft || home} />}
       </main>
       {/* 选干预目标 / 推演中:压暗地图、浮出名牌;选中国家:国都的圆环(TargetPlates.tsx) */}
       {data && world && <TargetLayer civ={civ} world={data.world} toClient={globeOn ? globeToClient : worldToClient} resim={resim} generating={!!progress} labelAt={labelAt} />}

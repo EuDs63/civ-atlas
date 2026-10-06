@@ -34,6 +34,7 @@ import { faithRows } from '../gen/civ/religionText';
 import { drawGraticule, labelProjection, mapProj, outlineOnCanvas, pageColor, projectWorld, projector, reprojectImage, type MapProj, type ProjectionId } from './projection';
 import { NAME_ZOOM, canvasMeasure, drawMarks, layoutMarks, placedTextBoxes, type MarkFrame, type MarkItem } from './marks';
 import { drawTerrainProjected } from './detail';
+import { drawTrail, layoutTrail, type TrailInput } from './trail';
 import { compassSpot, drawProjFrame } from './fantasy';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -330,15 +331,12 @@ export async function drawMapLabels(ctx: CanvasRenderingContext2D, p: ExportMapP
 }
 
 /**
- * 作者标记(导出菜单里选了"带上"):和屏幕上同样的图钉、铺色、名字,都写名字、不合并;items = 这一年有的(几个州的形状算好)。
- * 图钉和字跟着地名一样按图片宽放大(地图按 REF_MAP_CSS 宽显示时就是屏幕上的大小)。
- * placed = drawMapLabels 排好的地图文字:名字尽量不压城名、地名。返回画了几个
+ * 作者标记、人物足迹在导出图上摆放用的坐标:世界坐标 ÷ f(f = √(图宽 / REF_MAP_CSS)),画的时候整体放大 S × f,
+ * 图钉、头像和字跟着地名一样按图片宽放大(地图按 REF_MAP_CSS 宽显示时就是屏幕上的大小)
  */
-export function drawExportMarks(ctx: CanvasRenderingContext2D, p: Pick<ExportMapParams, 'world' | 'center' | 'projection'>, S: ExportScale, items: readonly MarkItem[], placed?: Placement): number {
-  if (!items.length) return 0;
+function exportMarkFrame(p: Pick<ExportMapParams, 'world' | 'center' | 'projection'>): { frame: MarkFrame; f: number } {
   const W = p.world.width;
   const H = p.world.height;
-  // 换算:世界坐标 → 摆放用的坐标(÷ f),画的时候整体放大 S × f
   const f = Math.sqrt(W / REF_MAP_CSS);
   const mp = exportProj(p);
   const left = mp ? 0 : exportLeft(p);
@@ -356,6 +354,16 @@ export function drawExportMarks(ctx: CanvasRenderingContext2D, p: Pick<ExportMap
         cut: (0.4 * W) / f,
       }
     : { pt: (wx, wy) => [(wx - left) / f, wy / f], period: wrapOf(p.world) ? W / f : 0, win: [0, W / f], w: W / f, h: H / f, k: NAME_ZOOM, cut: 0 };
+  return { frame, f };
+}
+
+/**
+ * 作者标记(导出菜单里选了"带上"):和屏幕上同样的图钉、铺色、名字,都写名字、不合并;items = 这一年有的(几个州的形状算好)。
+ * placed = drawMapLabels 排好的地图文字:名字尽量不压城名、地名。返回画了几个
+ */
+export function drawExportMarks(ctx: CanvasRenderingContext2D, p: Pick<ExportMapParams, 'world' | 'center' | 'projection'>, S: ExportScale, items: readonly MarkItem[], placed?: Placement): number {
+  if (!items.length) return 0;
+  const { frame, f } = exportMarkFrame(p);
   ctx.save();
   ctx.scale(S * f, S * f);
   // 文字层的画布像素 = 摆放坐标 × S × f
@@ -364,6 +372,18 @@ export function drawExportMarks(ctx: CanvasRenderingContext2D, p: Pick<ExportMap
   drawMarks(ctx, layout, S * f);
   ctx.restore();
   return layout.pins.length + layout.areas.length;
+}
+
+/** 正选着的作者人物的足迹(和屏幕上一样的线、圆点、年份、头像);年份尽量不压地图上的字。返回画了几个点 */
+export function drawExportTrail(ctx: CanvasRenderingContext2D, p: Pick<ExportMapParams, 'world' | 'center' | 'projection'>, S: ExportScale, trail: TrailInput, placed?: Placement): number {
+  const { frame, f } = exportMarkFrame(p);
+  ctx.save();
+  ctx.scale(S * f, S * f);
+  const avoid = placed ? placedTextBoxes(placed).map((b) => b.map((v) => v / (S * f))) : [];
+  const layout = layoutTrail(trail, frame, { measure: canvasMeasure(ctx), avoid });
+  drawTrail(ctx, layout);
+  ctx.restore();
+  return layout.dots.length;
 }
 
 // ---------------------------------------------------------------------------

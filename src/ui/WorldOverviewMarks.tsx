@@ -24,8 +24,8 @@ import { useNarrow } from './device';
 import './timeline.css';
 import './marks.css';
 
-/** 时间轴当前那一年(取整;一年只重新渲染一次) */
-function useYear(civ: Civ | null): number {
+/** 时间轴当前那一年(取整;一年只重新渲染一次;人物页的「我的」也用) */
+export function useYear(civ: Civ | null): number {
   const end = civ?.endYear ?? 0;
   return useSyncExternalStore(
     (f) => subscribeCivTime(() => f()),
