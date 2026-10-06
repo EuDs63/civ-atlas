@@ -11,6 +11,7 @@ import { cultureLabel } from '../gen/civ/display';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
 import { setCivTime, setSelection } from './civView';
 import { closeOverview } from './overviewStore';
+import { PolityFlag } from './Flag';
 
 /** 疆域小图取几个年份 */
 export const SPARK_N = 13;
@@ -172,7 +173,7 @@ export function CountriesPage({ civ, year }: { civ: Civ | null; year: number }) 
         const b = p.id * SPARK_N;
         return (
           <button key={p.id} className={`ov-tr ov-row${r.alive ? '' : ' dead'}`} data-polity={p.id} onClick={() => locate(p, year)}>
-            <i className="ov-sw" style={{ background: color }} />
+            <PolityFlag id={p.id} year={year} w={21} className="ov-flag" fallback={<i className="ov-sw" style={{ background: color }} />} />
             <span className="ov-name">{r.name}</span>
             <span className="ov-years">
               {Math.floor(p.founded)}–{r.alive ? '' : Math.ceil(p.ended!)}

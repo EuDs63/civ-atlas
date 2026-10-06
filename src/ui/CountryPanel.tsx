@@ -18,7 +18,7 @@
  * 顶部、按钮、概况、小柱图、大事这些零件在 panelParts.tsx,城 / 地理实体 / 州的面板(CityPanel、PlacePanel、RegionPanel)
  * 用的是同一套。
  */
-import { useMemo, useState, type RefObject } from 'react';
+import { useMemo, useRef, useState, type RefObject } from 'react';
 import type { Civ, Polity } from '../gen/civ/types';
 import type { Raster } from '../gen/raster';
 import type { World } from '../gen/world';
@@ -45,6 +45,9 @@ import { Act, Acts, AiBox, AiSuggestLink, CenterAct, EventList, Link, MoreAct, P
 import { AiMenuItem, MenuItem, MenuSep } from './PopMenu';
 import { Icon } from './icons';
 import { useAiOn } from '../ai/client';
+import { FlagIcon } from './Flag';
+import { FlagPanel } from './FlagPanel';
+import { flagOf, useFlags } from './flagStore';
 import './countryPanel.css';
 
 // ---------------------------------------------------------------------------
@@ -114,8 +117,32 @@ function CountryHead({ civ, raw, id, year, names, shared }: CountryPanelProps & 
   const { renaming, setRenaming, ai } = shared;
   const withDynasty = (i: number, v: string): Polity => (i === 0 ? withRoot(p, v) : { ...p, dynasties: d!.map((y, j) => (j === i ? { ...y, name: v } : y)) });
   const extra = <AiSuggestLink ai={ai} />;
+  // 国旗(卡片显示的那一年那一面,和标题的国名一致):点了打开旗帜详情
+  const flags = useFlags();
+  const flag = flagOf(flags, id, shownYear);
+  const flagRef = useRef<HTMLButtonElement>(null);
+  const [flagFor, setFlagFor] = useState<number | null>(null);
+  const flagOpen = flagFor === id && !!flag;
   return (
-    <PanelHead color={rgb(p.color)}>
+    <PanelHead
+      color={rgb(p.color)}
+      flag={
+        flag && (
+          <button
+            ref={flagRef}
+            className="cp-flag"
+            data-act="flag"
+            title={`${polityName(p, shownYear)}的旗`}
+            aria-label={`${polityName(p, shownYear)}的旗`}
+            aria-expanded={flagOpen}
+            onClick={() => setFlagFor(flagOpen ? null : id)}
+          >
+            <FlagIcon spec={flag.spec} w={39} />
+          </button>
+        )
+      }
+    >
+      {flagOpen && <FlagPanel id={id} year={shownYear} anchor={flagRef} onClose={() => setFlagFor(null)} />}
       {di > 0 ? (
         <NameEdit
           k={dynastyKey(civ, id, di)}
@@ -188,6 +215,8 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
   const hist = polityHistory(civ);
   const spark = hist.years.map((y, i) => ({ year: y, n: hist.spark[id * SPARK_N + i] }));
   const segs = useMemo(() => dynastySegments(civ, p), [civ, p]);
+  // 朝代表每行前面那一朝的旗(一朝一面,下标和 segs 一样)
+  const dynFlags = useFlags()?.book.eras[id];
   const related = useMemo(() => filterChronicle(fullChronicle(civ), { polity: id }), [civ, id]);
   // "全部 N 件":和编年史页只看这一国时的"全部"同一份(连同历代君主继位),点开就是这么多条
   const allCount = useMemo(() => polityChronicle(civ, fullChronicle(civ), id).length, [civ, id]);
@@ -342,6 +371,7 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
                     onClick={() => setCivTime({ year: Math.ceil(s.from), playing: false, story: false })}
                   >
                     <span className="cp-dyn-name">
+                      {dynFlags?.[i] && <FlagIcon spec={dynFlags[i].spec} w={24} className="cp-dyn-flag" />}
                       {s.name}
                       {i === cur && <em className="cp-badge">当前</em>}
                     </span>

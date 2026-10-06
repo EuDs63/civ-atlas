@@ -26,6 +26,7 @@ import { useAiOn } from '../ai/client';
 import { closeOverview } from './overviewStore';
 import { EntryText } from './panelParts';
 import { polityHistory } from './WorldOverviewCountries';
+import { PolityFlag } from './Flag';
 import './timeline.css';
 
 /** 同一条纪事(改名后编年史重写了一遍,条目是新对象:按史事下标、种类、是不是折叠的认) */
@@ -196,7 +197,7 @@ export function Chronicle({ civ }: { civ: Civ | null }) {
         </div>
         {choices.length > 0 && (
           <label className={`chron-pick${focus ? ' on' : ''}`}>
-            {focus && <i style={{ background: `rgb(${focus.color.join(',')})` }} aria-hidden="true" />}
+            {focus && <PolityFlag id={focus.id} year={civ.endYear} w={21} className="chron-flag" fallback={<i style={{ background: `rgb(${focus.color.join(',')})` }} aria-hidden="true" />} />}
             <select
               aria-label="只看某一国"
               data-act="chron-polity"

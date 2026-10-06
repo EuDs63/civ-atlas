@@ -68,11 +68,11 @@ export const jumpTo = (y: number) => setCivTime({ year: y, playing: false, scrub
 export const rgb = (c: readonly number[]) => `rgb(${c.join(',')})`;
 export const rgba = (c: readonly number[], a: number) => `rgba(${c.join(',')},${a})`;
 
-/** 面板顶部:颜色块、名字(children 里的 NameEdit)和一行小字(SubLine),右上角圆形的关闭 */
-export function PanelHead({ color, children }: { color?: string; children?: ReactNode }) {
+/** 面板顶部:颜色块(国家卡片放的是国旗:flag)、名字(children 里的 NameEdit)和一行小字(SubLine),右上角圆形的关闭 */
+export function PanelHead({ color, flag, children }: { color?: string; flag?: ReactNode; children?: ReactNode }) {
   return (
     <div className="cp-head">
-      {color && <i className="cp-sw" style={{ background: color }} />}
+      {flag ?? (color && <i className="cp-sw" style={{ background: color }} />)}
       <div className="cp-title">{children}</div>
       <button className="cp-x ins-close" onClick={clearSelection} title="关闭(Esc)" aria-label="关闭">
         <Icon name="close" size={13} />

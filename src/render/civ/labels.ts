@@ -333,6 +333,7 @@ export function civMapLayer(p: CivDrawParams, opt: { fast?: boolean; proj?: MapP
         softBelow: k <= 1 ? NAME_MIN_ZOOM[k] : undefined,
         kind: k,
         color: e.color,
+        polity: e.polity,
       };
       marks.push(mark);
       if (!e.s.name || (opt.fast && k < 3)) continue;

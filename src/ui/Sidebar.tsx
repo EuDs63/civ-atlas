@@ -40,6 +40,7 @@ import { keyLabel } from './shortcuts';
 import { openShortcuts } from './ShortcutsDialog';
 import { EntryText, jumpTo, rgb } from './panelParts';
 import { collapseSide, expandSide, useSide } from './sideStore';
+import { PolityFlag } from './Flag';
 import './sidebar.css';
 
 export interface SidebarProps {
@@ -304,7 +305,11 @@ export function SearchResults({ q, hits, active, onActive, onPick }: { q: string
             onPointerEnter={() => onActive(i)}
             onClick={() => onPick(h)}
           >
-            <i className="sb-sw" style={{ background: h.color }} />
+            {h.kind === 'polity' ? (
+              <PolityFlag id={h.id} w={21} className="sb-flag" fallback={<i className="sb-sw" style={{ background: h.color }} />} />
+            ) : (
+              <i className="sb-sw" style={{ background: h.color }} />
+            )}
             <span className="sb-row-main">
               <b className="search-name">{h.name}</b>
             </span>
@@ -430,7 +435,7 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
               const cap = civ!.settlements[capitalAt(x, year)];
               return (
                 <button key={x.id} className="sb-row two" data-polity={x.id} onClick={() => setSelection({ kind: 'polity', id: x.id })}>
-                  <i className="sb-sw" style={{ background: rgb(x.color) }} />
+                  <PolityFlag id={x.id} year={year} w={21} className="sb-flag" fallback={<i className="sb-sw" style={{ background: rgb(x.color) }} />} />
                   <span className="sb-row-main">
                     <b>{polityName(x, year)}</b>
                     <small>

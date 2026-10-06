@@ -2,7 +2,7 @@
  * 文明叠加层 · 城镇符号(画在视口文字层上):按建城年份出现,随人口升级(人口、分级见 gen/civ/growth.ts)。
  *
  *   写实:大小分级的圆点 —— 村是小暗点,镇 / 城是白心黑圈(越大越粗),大城是双圈;国都画带框的星
- *   手绘:国都是城堡(塔楼 + 城墙 + 本国颜色的小旗),大城 / 城是屋群,镇是单屋,村是墨点
+ *   手绘:国都是城堡(塔楼 + 城墙 + 小旗:放大到看得清时插本国的国旗,远看是本国颜色的小三角),大城 / 城是屋群,镇是单屋,村是墨点
  *   故城遗址(阶段 3 城市兴衰:毁了、还没重建的城):手绘是淡墨的塌城门(断柱 + 断门楣 + 碎石),写实是一圈淡淡的虚线小圈 —— 低调,不抢眼
  *
  * 符号画在和视口一样大的文字层画布上(CivLayer),按屏幕像素 × devicePixelRatio 画,放大地图后依然清晰;
@@ -11,11 +11,13 @@
  * 远景只画国都和城,放大才逐步出现镇、村;和别的符号、国名挤在一起的不画 —— 不会挤成一团。
  * "国家"或"道路"打开时画(路网连着城,不画城看不出路通到哪)。
  */
-import type { Civ, Settlement } from '../../gen/civ/types';
+import type { Civ, Polity, Settlement } from '../../gen/civ/types';
 import { capitalAt, populationAt, settlementRank } from '../../gen/civ/growth';
 import { ruinRank, ruinSites } from '../../gen/civ/growth';
 import type { PlacedMark } from '../labels/draw';
 import type { CivStyle } from './overlay';
+import type { Shape } from '../../gen/civ/flags';
+import { shapePath } from '../flag/flagSvg';
 
 /** 符号类别:0 村 / 1 镇 / 2 城 / 3 大城 / 4 国都 / 5 故城遗址(RUIN) */
 export type SettlementKind = 0 | 1 | 2 | 3 | 4 | 5;
@@ -54,21 +56,23 @@ export interface SettlementAt {
   pop: number;
   /** 国都所属国家的颜色(手绘风小旗用) */
   color?: [number, number, number];
+  /** 国都所属的国家(手绘风插国旗用) */
+  polity?: number;
 }
 
 /** 这一年有的城镇和它们的级别,按重要性排好(国都 → 大城 → 城 → 镇 → 村,同级人口多的在前) */
 export function settlementsAt(civ: Civ, year: number): SettlementAt[] {
-  const capitalOf = new Map<number, [number, number, number]>();
+  const capitalOf = new Map<number, Polity>();
   for (const p of civ.polities) {
     if (year < p.founded || (p.ended !== undefined && year >= p.ended)) continue;
-    capitalOf.set(capitalAt(p, year), p.color);
+    capitalOf.set(capitalAt(p, year), p);
   }
   const list: SettlementAt[] = [];
   for (const s of civ.settlements) {
     const pop = populationAt(s, year);
     if (!(pop > 0)) continue;
-    const color = capitalOf.get(s.id);
-    list.push({ s, kind: color ? 4 : (settlementRank(pop) as SettlementKind), pop, color });
+    const p = capitalOf.get(s.id);
+    list.push({ s, kind: p ? 4 : (settlementRank(pop) as SettlementKind), pop, color: p?.color, polity: p?.id });
   }
   list.sort((a, b) => b.kind - a.kind || b.pop - a.pop || a.s.id - b.s.id);
   return list;
@@ -88,6 +92,13 @@ export function ruinsAt(civ: Civ, year: number): { s: Settlement; rank: number }
 export interface SettlementMarkInfo {
   kind: SettlementKind;
   color?: [number, number, number];
+  polity?: number;
+}
+
+/** 手绘国都插的国旗:某国的旗(还没有 = null,画本国颜色的小三角);旗宽不到 minPx(画布像素)时也画小三角 */
+export interface CapitalFlags {
+  flag: (polity: number) => { image: CanvasImageSource; shape: Shape } | null;
+  minPx: number;
 }
 
 // ---- 手绘符号(单位:符号单位 u;中心在 (0, 0),底边约在 y = +2) ----
@@ -211,10 +222,10 @@ function ruinStones(pa: CanvasPath, x: number, y: number, u: number) {
 }
 
 /**
- * 画放好的城镇符号(视口文字层,画布像素)。placed[i].mark 是 settlementMarks 给的符号(带 kind / color);
- * placed[i].s = 符号单位 → 画布像素。
+ * 画放好的城镇符号(视口文字层,画布像素)。placed[i].mark 是 settlementMarks 给的符号(带 kind / color / polity);
+ * placed[i].s = 符号单位 → 画布像素。flags = 手绘国都插的国旗(不给 = 都画小三角)
  */
-export function drawSettlementMarks(ctx: CanvasRenderingContext2D, placed: PlacedMark[], style: CivStyle): void {
+export function drawSettlementMarks(ctx: CanvasRenderingContext2D, placed: PlacedMark[], style: CivStyle, flags?: CapitalFlags): void {
   if (!placed.length) return;
   const info = (m: PlacedMark) => m.mark as unknown as SettlementMarkInfo;
   ctx.save();
@@ -259,7 +270,7 @@ export function drawSettlementMarks(ctx: CanvasRenderingContext2D, placed: Place
     for (const e of order) {
       const { x, y } = e;
       const S = e.s;
-      const { kind, color } = info(e);
+      const { kind, color, polity } = info(e);
       ctx.lineWidth = 0.62 * S;
       switch (kind) {
         case RUIN: {
@@ -316,7 +327,34 @@ export function drawSettlementMarks(ctx: CanvasRenderingContext2D, placed: Place
           ctx.closePath();
           ctx.fillStyle = INK;
           ctx.fill();
-          // 旗杆 + 本国颜色的小旗
+          // 放大到看得清:旗杆 + 本国的国旗(宽约城堡的六七成,下沿略高过城楼,墨线描边)
+          const fw = 5.6 * u;
+          const fl = flags && polity !== undefined && fw >= flags.minPx ? flags.flag(polity) : null;
+          if (fl) {
+            const fh = (fw * 2) / 3;
+            const fx = x + 0.33 * u;
+            const fy = y - 5.6 * u - fh;
+            ctx.beginPath();
+            ctx.moveTo(fx, y - 5.3 * u);
+            ctx.lineTo(fx, fy);
+            ctx.lineWidth = 0.5 * S;
+            ctx.stroke();
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.25)';
+            ctx.shadowBlur = 0.4 * S;
+            ctx.shadowOffsetY = 0.25 * S;
+            ctx.drawImage(fl.image, fx, fy, fw, fh);
+            ctx.restore();
+            ctx.save();
+            ctx.translate(fx, fy);
+            ctx.scale(fw / 300, fh / 200);
+            ctx.lineWidth = (0.2 * S * 300) / fw;
+            ctx.strokeStyle = 'rgba(40,30,20,0.7)';
+            ctx.stroke(new Path2D(shapePath(fl.shape)));
+            ctx.restore();
+            break;
+          }
+          // 远看:旗杆 + 本国颜色的小三角
           ctx.beginPath();
           ctx.moveTo(x + 0.33 * u, y - 5.3 * u);
           ctx.lineTo(x + 0.33 * u, y - 8.2 * u);

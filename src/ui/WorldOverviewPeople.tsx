@@ -29,6 +29,7 @@ import { setPeople, usePeople, type PeopleList } from './overviewStore';
 import { useNowLine } from './Chronicle';
 import { polityHistory } from './WorldOverviewCountries';
 import { copyText, selectPerson } from './panelParts';
+import { PolityFlag } from './Flag';
 import './timeline.css';
 
 const F = Math.floor;
@@ -196,7 +197,7 @@ export function PeoplePage({ civ }: { civ: Civ | null }) {
           ))}
         </div>
         <label className={`chron-pick${focus ? ' on' : ''}`}>
-          {focus && <i style={{ background: `rgb(${focus.color.join(',')})` }} aria-hidden="true" />}
+          {focus && <PolityFlag id={focus.id} year={civ.endYear} w={21} className="chron-flag" fallback={<i style={{ background: `rgb(${focus.color.join(',')})` }} aria-hidden="true" />} />}
           <select aria-label="只看某一国" data-act="people-polity" value={polity ?? ''} onChange={(ev) => setPeople({ polity: ev.target.value === '' ? null : Number(ev.target.value) })}>
             <option value="">全部国家</option>
             {choices.map((c) => (

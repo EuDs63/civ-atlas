@@ -1,11 +1,11 @@
 /**
- * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改。
+ * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改、改旗。
  * 和 civView.ts 一样的小 store(get / set / use)。换世界(种子 / 参数变了)时 App 调 clearEdits 清空。
  *
  * 这里只管内存里的这一份;存进浏览器 / 存成文件在 saveStore.ts(经 subscribeEdits 订阅,修改一变就自动存),
  * 读档时 App 先按存档的参数生成,再 setEdits(存档里的修改)。
  *
- * 撤销 / 重做(⌘Z / ⇧⌘Z,见 undo.ts):改名、干预、AI 改写每次都记一步(改之前、改之后两份),只记这次打开网页以后、这个世界上的;
+ * 撤销 / 重做(⌘Z / ⇧⌘Z,见 undo.ts):改名、改旗、干预、AI 改写每次都记一步(改之前、改之后两份),只记这次打开网页以后、这个世界上的;
  * 读档、换世界(setEdits / clearEdits)、创建世界(clearEditHistory)清空。地形修改不记:只在新建世界时能改,改地形工具有自己的"撤销一笔"。
  */
 import { useSyncExternalStore } from 'react';
@@ -104,11 +104,18 @@ export function revertEdits(now: WorldEdits, from: WorldEdits, to: WorldEdits): 
   const aiNames = moveMap(now.aiNames, from.aiNames, to.aiNames);
   const interventions = moveList(now.interventions, from.interventions, to.interventions);
   const terrain = moveList(now.terrain, from.terrain, to.terrain);
-  if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain) return now;
-  return aiNames && Object.keys(aiNames).length ? { names, aiNames, interventions, terrain } : { names, interventions, terrain };
+  const flags = moveMap(now.flags, from.flags, to.flags);
+  if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain && flags === now.flags) return now;
+  return {
+    names,
+    ...(aiNames && Object.keys(aiNames).length ? { aiNames } : {}),
+    interventions,
+    terrain,
+    ...(flags && Object.keys(flags).length ? { flags } : {}),
+  };
 }
 
-/** 键值表那一半(改名、AI 起名的记号):from 到 to 变了的键,现在还是 from 那样的才换成 to 那样;都没动 = 原对象 */
+/** 键值表那一半(改名、AI 起名的记号、改过的旗):from 到 to 变了的键,现在还是 from 那样的才换成 to 那样;都没动 = 原对象 */
 function moveMap<T>(now: Record<string, T> | undefined, from: Record<string, T> | undefined, to: Record<string, T> | undefined): Record<string, T> | undefined {
   const N = now ?? {};
   const F = from ?? {};
@@ -216,6 +223,29 @@ export function setName(key: string, name: string | null, from?: 'ai', fallback?
   if (aiNames === state.aiNames && names[key] === state.names[key] && Object.keys(names).length === Object.keys(state.names).length) return;
   const { aiNames: _, ...rest } = state;
   commitEdits(aiNames ? { ...rest, names, aiNames } : { ...rest, names });
+}
+
+/**
+ * 改旗:keys 里的几面换成 code(旗的写法,见 gen/civ/flags.ts 的 encodeFlag);code 为 null = 去掉这几面(恢复自动配的)。
+ * 每次记一步(⌘Z 撤销)。现在不能改(editBlock)= 提示条说原因,不改
+ */
+export function setFlags(keys: readonly string[], code: string | null) {
+  const why = editBlock([...keys]);
+  if (why) {
+    showToast({ id: 'edit-block', kind: 'warn', text: why });
+    return;
+  }
+  const flags = { ...(state.flags ?? {}) };
+  let changed = false;
+  for (const k of keys) {
+    if (code ? flags[k] === code : !(k in flags)) continue;
+    if (code) flags[k] = code;
+    else delete flags[k];
+    changed = true;
+  }
+  if (!changed) return;
+  const { flags: _, ...rest } = state;
+  commitEdits(Object.keys(flags).length ? { ...rest, flags } : rest);
 }
 
 /**

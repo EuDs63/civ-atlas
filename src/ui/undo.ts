@@ -4,7 +4,7 @@
  * - 干预:和点提示条上的"撤销"一样 —— 干预列表一变,App 在后台重推历史,推完提示"已撤销,从 N 年起重新推演"
  *   (重做 = 又下了这条令,提示"…,已从 N 年起重新推演"带撤销)
  * - 助手执行过的一轮:交给助手那边撤销 / 再做一遍(对话里的"已执行 / 已撤销"跟着变;提示和点"撤销"一样)
- * - 只改了名字:当场换回去,提示"已撤销改名" / "已重做改名"
+ * - 只改了名字 / 旗:当场换回去,提示"已撤销改名" / "已重做改名"("改旗"同样)
  */
 import { getEdits, replaceEdits, revertEdits, stepEdits, type EditStep } from './editsStore';
 import { redoProposal, undoProposal } from './assistantStore';
@@ -31,6 +31,8 @@ function run(s: EditStep, dir: 'undo' | 'redo') {
   if (next === now) return;
   replaceEdits(next);
   if (next.interventions === now.interventions && next.terrain === now.terrain) {
-    showToast({ id: 'resim-done', kind: 'ok', text: dir === 'undo' ? '已撤销改名' : '已重做改名', ttl: 4000 });
+    // 只动了旗 = 改旗,否则算改名
+    const what = next.names === now.names && next.aiNames === now.aiNames ? '改旗' : '改名';
+    showToast({ id: 'resim-done', kind: 'ok', text: `${dir === 'undo' ? '已撤销' : '已重做'}${what}`, ttl: 4000 });
   }
 }

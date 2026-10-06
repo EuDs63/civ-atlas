@@ -225,7 +225,7 @@
 /* ---- 国家页:表格 ---- */
 .ov-tr {
   display: grid;
-  grid-template-columns: 18px minmax(120px, 1.4fr) 100px 50px 150px 1fr 1fr;
+  grid-template-columns: 22px minmax(120px, 1.4fr) 100px 50px 150px 1fr 1fr;
   gap: 12px;
   align-items: center;
   border-bottom: 1px solid var(--line);
@@ -702,7 +702,7 @@ button.ov-iv-text:hover {
   }
   /* 国家表 → 列表:每行 色块 + 国名 + 存续 + 州数(点一行看这国) */
   .ov-tr {
-    grid-template-columns: 12px minmax(0, 1fr) auto 44px;
+    grid-template-columns: 21px minmax(0, 1fr) auto 44px;
     gap: 10px;
   }
   .ov-c-spark,

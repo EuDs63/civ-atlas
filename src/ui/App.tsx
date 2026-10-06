@@ -211,6 +211,7 @@ import {
   type TerrainStatus,
 } from './TerrainTools';
 import { dismissing, tookDismissClick } from './dismissClick';
+import { makeFlagView, setFlagView, useFlagPreview } from './flagStore';
 
 type Replay = { w: number; h: number; frames: Uint8ClampedArray[]; mya: number[]; idx: number };
 
@@ -481,6 +482,13 @@ export function App() {
   const previewRaw = preview?.raw ?? null;
   const shownRaw = previewRaw ?? rawCiv;
   const civ = useMemo(() => (previewRaw ? applyNames(previewRaw, preview!.names) : realCiv), [previewRaw, preview?.names, realCiv]);
+  // 国旗(flagStore.ts):所有国家历代的旗,套上作者改过的和「换一面」「自己改」正在预览的那一面;历史和世界对不上(正在重新生成)时先不算
+  const flagPreview = useFlagPreview();
+  const flagView = useMemo(
+    () => (data && civ && civ.viable && civ.habitat.suitability.length === data.world.mesh.n ? makeFlagView(data.world, civ, edits.flags, flagPreview) : null),
+    [data, civ, edits.flags, flagPreview],
+  );
+  useLayoutEffect(() => setFlagView(flagView), [flagView]);
   // 导出时"换回原名"用的:AI 起的名字换回原来的(没有 AI 起的名字、助手"先看看"时 = null,导出菜单不问)
   const plainCiv = useMemo(() => (rawCiv && !previewRaw && aiNameKeys(edits).length ? applyNames(rawCiv, namesWithoutAi(edits)) : null), [rawCiv, previewRaw, edits]);
   /** 右侧详情面板开着(右下角的地球仪 / 缩放按钮让开它) */
@@ -2848,7 +2856,7 @@ export function App() {
         <div className="canvas-wrap-upper" style={wrapStyle}>
           <div className="map-box-upper" style={{ width: box.w, height: box.h }}>
             {data && (
-              <CivLayer world={data.world} raster={data.raster} civ={civ} geo={shownRaw} style={style} view={view} mp={mp} labelsHost={labelsHost} detailHost={civDetailHost} />
+              <CivLayer world={data.world} raster={data.raster} civ={civ} geo={shownRaw} style={style} view={view} mp={mp} labelsHost={labelsHost} detailHost={civDetailHost} flags={flagView} />
             )}
             <canvas ref={overlayRef} className={`overlay ${replayOn && replay ? 'show' : ''}`} />
             <canvas ref={overlayCopyRef} className={`overlay wrap-copy ${replayOn && replay ? 'show' : ''}`} />

@@ -43,6 +43,12 @@
  * 只是记一笔来源:names 里这个键还是这个名字 = "AI 写"(之后自己再改、恢复默认、撤销都不算了);
  * 导出时选"换回原名"就用 was(没有 = 生成时的名字)。不影响生成和推演。
  *
+ * ## 改旗
+ *
+ * WorldEdits.flags(可选):作者改过的国旗。稳定键 → 一面旗的写法(civ/flags.ts 的 encodeFlag,如 `"b/plain/W/e=R/k=long"`)。
+ * 键是国家(`polity:c4567#0`,改的是第一朝)或朝代(`dynasty:c4567#0/2`,改的是第 2 朝);改的是"这一国从这一朝起"的旗,
+ * 之后换朝代照它往下配(见 civ/flags.ts)。旗是推演结束后贴上去的,不影响生成和推演。没有这一项 = 全部自动配。
+ *
  * ## 干预
  *
  * WorldEdits.interventions:作者在某一年给历史下的"命令"。改名只是换字,干预会改写历史 —— 带着干预从第 0 年整段重推
@@ -171,6 +177,8 @@ export interface WorldEdits {
   interventions: Intervention[];
   /** 地形修改(按先后;见文件头"地形修改") */
   terrain: TerrainOp[];
+  /** 改过的国旗:稳定键 → 旗的写法(见文件头"改旗");没有 = 一面也没改 */
+  flags?: Record<string, string>;
 }
 
 /** 一个从 AI 起名里挑的名字:挑的那个名字、挑之前的名字(没改过 = 不写) */

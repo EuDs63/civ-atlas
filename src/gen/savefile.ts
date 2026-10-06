@@ -21,6 +21,8 @@
  *   提示"改过的名字会尽量套上"(稳定键按州、地块定位,地形变化不大时大多还能对上)
  * - edits.aiNames(可选):哪些名字是从 AI 起名里挑的(edits.ts 文件头"改名"),`{ "polity:c4567#0": { "name": "青渊", "was": "渊" } }`;
  *   只存现在还用着的那几个,旧存档没有 = 一个也没有
+ * - edits.flags(可选):改过的国旗(edits.ts 文件头"改旗"),`{ "polity:c4567#0": "b/plain/W/e=R/k=long" }`;
+ *   读档时逐面核对写法(civ/flags.ts 的 decodeFlag),格式不对的跳过。旧存档没有 = 一面也没改
  * - edits.interventions:干预(具体种类见 edits.ts 文件头"干预");这里当成不透明的数组原样存、原样读回
  * - edits.terrain:地形修改(edits.ts 文件头"地形修改");读档时逐处过 cleanTerrainOp,格式不对的跳过。
  *   旧存档没有这个字段 = 没改地形。check 是**改过地形以后**的地形哈希(读档时带着地形修改生成,再核对)
@@ -36,6 +38,7 @@
 import { DEFAULT_PARAMS, type World, type WorldParams } from './world';
 import { GENERATOR_CHANGES, GENERATOR_VERSION, NAME_MAX, aiNameKeys, type AiNameMark, type GeneratorChange, type Intervention, type TerrainOp, type WorldEdits } from './edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from './terrainEdits';
+import { decodeFlag } from './civ/flags';
 
 export const SAVE_APP = '文明与地图';
 /** 存档格式版本 */
@@ -214,6 +217,8 @@ const MAX_BYTES = 8 * 1024 * 1024;
 /** 改名最多多少条、键最长多少字 */
 const MAX_NAMES = 20000;
 const KEY_MAX = 64;
+/** 最多读多少面改过的旗 */
+const MAX_FLAGS = 5000;
 
 /** 参数的合理范围:存档里超出的调回范围内(比界面滑条宽;再大生成会慢到卡死) */
 const PARAM_RANGE: Record<keyof WorldParams, [number, number]> = {
@@ -243,9 +248,9 @@ export function worldKey(params: WorldParams): string {
   return PARAM_KEYS.map((k) => `${k}=${params[k] ?? DEFAULT_PARAMS[k]}`).join('&');
 }
 
-/** 改了几处:改名条数 + 干预条数 + 地形修改处数 */
+/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 改过的旗面数 */
 export function editCount(edits: WorldEdits): number {
-  return Object.keys(edits.names).length + edits.interventions.length + (edits.terrain?.length ?? 0);
+  return Object.keys(edits.names).length + edits.interventions.length + (edits.terrain?.length ?? 0) + Object.keys(edits.flags ?? {}).length;
 }
 
 /** 世界名:去掉控制字符、首尾空白,超长截断;空 = 没起名 */
@@ -286,6 +291,7 @@ export function makeSave(
   // AI 起的名字:只存现在还用着的
   const ai = aiNameKeys(edits);
   if (ai.length) save.edits.aiNames = Object.fromEntries(ai.map((k) => [k, { ...edits.aiNames![k] }]));
+  if (edits.flags && Object.keys(edits.flags).length) save.edits.flags = { ...edits.flags };
   const t = cleanTitle(title);
   if (t) save.title = t;
   const v = view ? cleanView(view) : null;
@@ -383,6 +389,16 @@ export function parseSave(text: string): ParseResult {
       aiNames[k] = typeof v.was === 'string' && v.was.trim() && [...v.was].length <= NAME_MAX ? { name: v.name, was: v.was } : { name: v.name };
     }
   }
+  // 改过的旗:键像改名的键,值要能读成一面旗
+  const flags: Record<string, string> = {};
+  let droppedF = 0;
+  if (isObj(E.flags)) {
+    for (const [k, v] of Object.entries(E.flags)) {
+      if (Object.keys(flags).length >= MAX_FLAGS || k.length > KEY_MAX || !/^(polity|dynasty):/.test(k) || !decodeFlag(v)) droppedF++;
+      else flags[k] = v as string;
+    }
+  } else if (E.flags !== undefined) droppedF++;
+  if (droppedF) warnings.push(`有 ${droppedF} 面改过的旗格式不对,已跳过`);
   const interventions: Intervention[] = [];
   let droppedI = 0;
   if (Array.isArray(E.interventions)) {
@@ -412,7 +428,7 @@ export function parseSave(text: string): ParseResult {
     generator,
     seed: params.seed,
     params,
-    edits: Object.keys(aiNames).length ? { names, aiNames, interventions, terrain } : { names, interventions, terrain },
+    edits: { names, ...(Object.keys(aiNames).length ? { aiNames } : {}), interventions, terrain, ...(Object.keys(flags).length ? { flags } : {}) },
     check: typeof raw.check === 'string' ? raw.check.slice(0, 64) : '',
     savedAt: typeof raw.savedAt === 'string' && !Number.isNaN(Date.parse(raw.savedAt)) ? raw.savedAt : '',
   };
