@@ -1,0 +1,153 @@
+/* 作者标记:地图上的标记层(MarkLayer.tsx)、标记卡片(MarkPanel.tsx)、世界概览的「标记」页、右下角的「标记」按钮 */
+
+/* 铺满舞台的一张画布,不接鼠标(点得到下面的地图);大小在画的时候按舞台设 */
+.mark-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+/* 右下角的「标记」:放标记时是按下去的样子(主色底) */
+.app .map-controls .mc-mark.on,
+.app.has-side .map-controls .mc-mark.on {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.app.has-side .map-controls .mc-mark.on:hover {
+  background: var(--accent-hover);
+}
+
+/* ---- 卡片 ---- */
+.cp .mk-head-pin {
+  flex: none;
+  margin-top: 6px;
+}
+.cpanel .mk-title {
+  overflow-wrap: anywhere;
+}
+.mk-note {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--btn);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cp-from.mk-yrs {
+  margin: 0;
+}
+.mk-yrs .mk-k {
+  width: 22px;
+  flex: none;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.mk-yrs .cp-year {
+  justify-content: flex-start;
+  font-size: 17px;
+}
+.mk-yrs .cp-year input {
+  width: 4.2ch;
+  border-bottom: 1px solid var(--line-strong);
+  text-align: center;
+}
+.mk-yrs .cp-year input::placeholder {
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.mk-yrs .cp-year input.empty {
+  width: 5.4ch;
+}
+.mk-yrs .cp-note.mk-warn {
+  color: var(--err);
+}
+.mk-seg {
+  align-self: flex-start;
+}
+.mk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mk-chips span {
+  padding: 3px 9px;
+  border-radius: 12px;
+  background: var(--btn);
+  font-size: 13px;
+  color: var(--ink);
+}
+.mk-colors {
+  display: flex;
+  gap: 12px;
+  padding: 4px 4px 0;
+}
+.mk-colors button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+.mk-colors button.on {
+  box-shadow:
+    0 0 0 2px var(--panel-solid),
+    0 0 0 4px var(--ink-2);
+}
+.mk-colors button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.mk-text {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 84px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--btn);
+  font: 14px/1.6 var(--font-sans);
+  color: var(--ink);
+  resize: none;
+  outline: none;
+}
+.mk-text:focus {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.cp-foot.mk-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ---- 世界概览「标记」页 ---- */
+.mk-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+/* 比人物页的行(.chron-row.pp-row)多一档,不管样式表谁先加载 */
+.chron-row.pp-row.mk-row {
+  grid-template-columns: 96px 150px 1fr;
+}
+.chron-row .mk-who {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 760px) {
+  .chron-row.pp-row.mk-row {
+    grid-template-columns: 44px 96px 1fr;
+  }
+}

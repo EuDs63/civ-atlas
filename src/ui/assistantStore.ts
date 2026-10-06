@@ -248,7 +248,8 @@ export function setTrialRunner(f: TrialRunner | null) {
 const rawOf = new WeakMap<Civ, Civ>();
 const trialRaw = new Map<number, { sig: string; raw: Civ }>();
 
-const sameEdits = (a: WorldEdits, b: WorldEdits) => a === b || JSON.stringify(a) === JSON.stringify(b);
+/** 两份修改是不是一样(作者标记不算:它不改变世界,之后加了、改了标记,列好的修改照样能执行) */
+const sameEdits = (a: WorldEdits, b: WorldEdits) => a === b || JSON.stringify({ ...a, marks: undefined }) === JSON.stringify({ ...b, marks: undefined });
 const ivSig = (l: readonly Intervention[]) => JSON.stringify(l);
 
 // ---------------------------------------------------------------------------

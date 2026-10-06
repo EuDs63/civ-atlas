@@ -126,7 +126,7 @@ function CountryHead({ civ, raw, id, year, names, shared }: CountryPanelProps & 
   return (
     <PanelHead
       color={rgb(p.color)}
-      flag={
+      icon={
         flag && (
           <button
             ref={flagRef}

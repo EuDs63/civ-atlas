@@ -61,7 +61,7 @@ export function PhoneSheet(p: PhoneSheetProps) {
           <i aria-hidden="true" />
         </button>
         <div className="ps-head">
-          <SearchField s={s} civ={p.civ} onFocus={() => setWorldSheet('full')} />
+          <SearchField s={s} onFocus={() => setWorldSheet('full')} />
           {!full && (
             <div className="ps-row">
               <button className="ps-title" data-act="overview" onClick={() => openOverview()} title="世界概览:国家、编年史、干预、世界参数">

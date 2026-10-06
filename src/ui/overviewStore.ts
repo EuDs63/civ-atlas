@@ -15,9 +15,9 @@
 import { useSyncExternalStore } from 'react';
 import { getChronicle, setChronicle, subscribeChronicle, type ChronicleView } from './civView';
 
-export type OverviewTab = 'countries' | 'chronicle' | 'people' | 'interventions' | 'genesis';
+export type OverviewTab = 'countries' | 'chronicle' | 'people' | 'marks' | 'interventions' | 'genesis';
 
-export const OVERVIEW_TABS: readonly OverviewTab[] = ['countries', 'chronicle', 'people', 'interventions', 'genesis'];
+export const OVERVIEW_TABS: readonly OverviewTab[] = ['countries', 'chronicle', 'people', 'marks', 'interventions', 'genesis'];
 
 export interface OverviewState {
   open: boolean;

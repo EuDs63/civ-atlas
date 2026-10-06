@@ -95,6 +95,25 @@
  * 折线的第一个点 x 在 [0, 2048) 里,之后每个点按离上一个点近的那边写(跨 180° 经线的一笔 x 可以超出 [0, 2048),是连着的一笔)。
  * 读进来的列表先过 terrainEdits.ts 的 cleanTerrainOps(种类不认识、坐标不是数的丢掉;x 按上面的规则规整,y、大小、强度夹回范围内)。
  *
+ * ## 作者标记
+ *
+ * WorldEdits.marks(可选,没有 = 一个也没有):作者钉在地图上的标记("主角的故乡""第三卷打仗的那几州")——
+ * 一个点或几个州,带名字、说明、颜色和年份。和改名一样只是记下来:不改变世界、不参与推演、和生成器版本无关。
+ * 时间轴走到 [from, to] 这些年里(两头都算)地图上才画它;to 不给 = 一直都在。
+ *
+ * | 字段     | 意思                                                                                      |
+ * |----------|-------------------------------------------------------------------------------------------|
+ * | id       | 编号:这个世界里不重复的正整数(新建的 = 现有最大的 + 1;选中、撤销按它认)                   |
+ * | title    | 名字(MARK_TITLE_MAX 个字以内)                                                            |
+ * | note     | 说明(可以分行,MARK_NOTE_MAX 个字以内;没有 = 不写)                                       |
+ * | color    | 颜色:MARK_COLORS 里的一种                                                                |
+ * | from, to | 年份(整数,夹到 [0, INTERVENTION_YEAR_MAX];to 早于 from 的当作没给)                      |
+ * | at       | 一个点:世界坐标 [x, y](和"地形修改"同一套坐标,x 规整到 [0, 2048));网格只由种子决定,改地形以后还是同一块地方,变成海了照样画 |
+ * | regions  | 几个州:州键 `region:c4567`(按地块定位,见"稳定键";那块地方变成水了,那一州就不画)           |
+ *
+ * at 和 regions 有且只有一个(都给了按 regions)。读进来的列表先过 cleanMarks(格式不对的丢掉,编号重复的换一个新编号,
+ * 最多留 MARKS_MAX 个,所有标记一共最多圈 MARK_REGIONS_TOTAL 个州)。
+ *
  * GENERATOR_VERSION:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对,不一致就提示"来自旧版本"和变了什么;
  * 每一版改了什么记在下面的 GENERATOR_CHANGES,提示照它说)。
  *   2:名字按位置取(gen/civ/naming.ts、places.ts;地形、历史不变,默认的名字换了一遍),稳定键改按地块定位(c 格式)。
@@ -114,6 +133,7 @@
  */
 import type { Civ, Culture, Faith, Place, Polity, Settlement } from './civ/types';
 import { polityRootAt } from './civ/growth';
+import { TERRAIN_H, TERRAIN_W } from './terrainEdits';
 
 /** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对);加一时在 GENERATOR_CHANGES 里补一条 */
 export const GENERATOR_VERSION = 8;
@@ -177,8 +197,30 @@ export interface WorldEdits {
   interventions: Intervention[];
   /** 地形修改(按先后;见文件头"地形修改") */
   terrain: TerrainOp[];
+  /** 作者标记(按添加的先后;见文件头"作者标记");没有 = 一个也没有 */
+  marks?: AuthorMark[];
   /** 改过的国旗:稳定键 → 旗的写法(见文件头"改旗");没有 = 一面也没改 */
   flags?: Record<string, string>;
+}
+
+/** 作者标记的颜色(界面上的六种:红、橙、绿、蓝、紫、青) */
+export const MARK_COLORS = ['red', 'orange', 'green', 'blue', 'purple', 'teal'] as const;
+export type MarkColor = (typeof MARK_COLORS)[number];
+
+/** 一个作者标记(字段见文件头"作者标记") */
+export interface AuthorMark {
+  id: number;
+  title: string;
+  note?: string;
+  color: MarkColor;
+  /** 从哪年起(含) */
+  from: number;
+  /** 到哪年止(含);没有 = 一直都在 */
+  to?: number;
+  /** 一个点:世界坐标 [x, y] */
+  at?: [number, number];
+  /** 几个州:州键 */
+  regions?: string[];
 }
 
 /** 一个从 AI 起名里挑的名字:挑的那个名字、挑之前的名字(没改过 = 不写) */
@@ -756,4 +798,153 @@ export function sameInterventions(a: readonly Intervention[], b: readonly Interv
 export function interventionKeys(v: Intervention): string[] {
   if (v.kind === 'found') return [];
   return v.kind === 'ally' || v.kind === 'declare' ? [v.a, v.b] : [v.a];
+}
+
+// ---------------------------------------------------------------------------
+// 作者标记
+
+/** 标记的名字最长几个字 */
+export const MARK_TITLE_MAX = 40;
+/** 标记的说明最长几个字 */
+export const MARK_NOTE_MAX = 2000;
+/** 一个标记最多圈几个州 */
+export const MARK_REGIONS_MAX = 500;
+/** 一个世界最多几个标记(读进来的多出来的丢掉;再多地图就卡了) */
+export const MARKS_MAX = 2000;
+/** 标记编号最大到几 */
+export const MARK_ID_MAX = 1e9;
+/** 一个世界里所有标记一共最多圈几个州(同一州圈几次算几次;再多画几个州的形状就太费了) */
+export const MARK_REGIONS_TOTAL = 10000;
+
+/** 这些标记一共圈了几个州(except = 不算这个编号的) */
+export function markRegionTotal(marks: readonly AuthorMark[] | undefined, except = 0): number {
+  let n = 0;
+  for (const m of marks ?? []) if (m.id !== except) n += m.regions?.length ?? 0;
+  return n;
+}
+/** 名字是空的(新建时没起名)就叫这个 */
+export const MARK_TITLE_DEFAULT = '新标记';
+
+/** 时间轴停在 year 这一年时地图上有没有这个标记(year 取整;[from, to] 两头都算) */
+export function markShownAt(m: Pick<AuthorMark, 'from' | 'to'>, year: number): boolean {
+  const y = Math.floor(year);
+  return y >= m.from && (m.to === undefined || y <= m.to);
+}
+
+/** 新标记的编号:现有最大的 + 1 */
+export function nextMarkId(marks: readonly AuthorMark[] | undefined): number {
+  let n = 0;
+  for (const m of marks ?? []) if (m.id > n) n = m.id;
+  return freeMarkId(new Set((marks ?? []).map((m) => m.id)), n);
+}
+
+/** 新编号:现有最大的(max)+ 1;到了 MARK_ID_MAX 就用最小的没用过的。used = 已经用了的编号,新编号也加进去 */
+export function freeMarkId(used: Set<number>, max: number): number {
+  let id = max + 1;
+  if (id > MARK_ID_MAX) for (id = 1; used.has(id); id++);
+  used.add(id);
+  return id;
+}
+
+/** 名字:去掉控制字符、首尾空白、连着的空白并成一个,超长截断 */
+export function cleanMarkTitle(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  const s = raw.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
+  const cs = [...s];
+  return cs.length > MARK_TITLE_MAX ? cs.slice(0, MARK_TITLE_MAX).join('') : s;
+}
+
+/** 说明:去掉换行以外的控制字符、首尾空白,超长截断 */
+export function cleanMarkNote(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  const s = raw.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim();
+  const cs = [...s];
+  return cs.length > MARK_NOTE_MAX ? cs.slice(0, MARK_NOTE_MAX).join('').trimEnd() : s;
+}
+
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
+/**
+ * 清理一个标记(规则见文件头"作者标记");不合格 = null(没有位置、年份不是数、编号不是正整数……);
+ * 名字是空的叫 MARK_TITLE_DEFAULT。本来就合格的原样返回(同一个对象)
+ */
+export function cleanMark(x: unknown): AuthorMark | null {
+  if (!x || typeof x !== 'object') return null;
+  const o = x as Record<string, unknown>;
+  const id = o.id;
+  const from = yearOf(o.from);
+  if (typeof id !== 'number' || !Number.isInteger(id) || id < 1 || id > MARK_ID_MAX || from === null) return null;
+  const color = MARK_COLORS.includes(o.color as MarkColor) ? (o.color as MarkColor) : MARK_COLORS[0];
+  const title = cleanMarkTitle(o.title) || MARK_TITLE_DEFAULT;
+  const note = cleanMarkNote(o.note);
+  const to0 = o.to === undefined ? null : yearOf(o.to);
+  const to = to0 !== null && to0 >= from ? to0 : null;
+  let regions: string[] | null = null;
+  let at: [number, number] | null = null;
+  if (Array.isArray(o.regions)) {
+    const seen = new Set<string>();
+    for (const k of o.regions) if (isRegionKey(k) && !seen.has(k) && seen.size < MARK_REGIONS_MAX) seen.add(k);
+    if (seen.size) regions = [...seen];
+  }
+  if (!regions && Array.isArray(o.at) && o.at.length === 2 && o.at.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+    const [ax, ay] = o.at as number[];
+    at = [round1(ax - TERRAIN_W * Math.floor(ax / TERRAIN_W)) % TERRAIN_W, round1(Math.min(TERRAIN_H, Math.max(0, ay)))];
+  }
+  if (!regions && !at) return null;
+  const m: AuthorMark = { id, title, color, from };
+  if (note) m.note = note;
+  if (to !== null) m.to = to;
+  if (regions) m.regions = regions;
+  else m.at = at!;
+  // 本来就合格(字段一个不多一个不少、值都一样)的原样返回
+  const keys = Object.keys(o);
+  const w = m as unknown as Record<string, unknown>;
+  const same = (a: unknown, b: unknown) => a === b || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]));
+  const clean = keys.length === Object.keys(m).length && keys.every((k) => same(o[k], w[k]));
+  return clean ? (x as AuthorMark) : m;
+}
+
+/** 两个标记是不是一模一样(各字段比,不管字段的先后) */
+export function sameMark(a: AuthorMark, b: AuthorMark): boolean {
+  const list = (x?: readonly unknown[], y?: readonly unknown[]) => x === y || (!!x && !!y && x.length === y.length && x.every((v, i) => v === y[i]));
+  return a.id === b.id && a.title === b.title && a.note === b.note && a.color === b.color && a.from === b.from && a.to === b.to && list(a.at, b.at) && list(a.regions, b.regions);
+}
+
+/**
+ * 清理一份标记列表(读档、撤销时用):不合格的丢掉;编号和前面重复的换成新编号(现有最大的 + 1)。
+ * 全都合格时返回原数组(同一个对象)
+ */
+export function cleanMarks(list: readonly unknown[] | null | undefined): AuthorMark[] {
+  if (!Array.isArray(list)) return [];
+  const out: AuthorMark[] = [];
+  let same = true;
+  const ids = new Set<number>();
+  const used = new Set<number>();
+  let max = 0;
+  for (const x of list as unknown[]) {
+    const m = cleanMark(x);
+    if (!m) continue;
+    used.add(m.id);
+    if (m.id > max) max = m.id;
+  }
+  let regions = 0;
+  for (const x of list as unknown[]) {
+    let m = out.length < MARKS_MAX ? cleanMark(x) : null;
+    if (m?.regions && regions + m.regions.length > MARK_REGIONS_TOTAL) m = null;
+    if (!m) {
+      same = false;
+      continue;
+    }
+    regions += m.regions?.length ?? 0;
+    if (ids.has(m.id)) {
+      m = { ...m, id: freeMarkId(used, max) };
+      max = Math.max(max, m.id);
+    }
+    ids.add(m.id);
+    if (m !== x) same = false;
+    out.push(m);
+  }
+  return same ? (list as AuthorMark[]) : out;
 }

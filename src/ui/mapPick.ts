@@ -5,6 +5,7 @@
  */
 import { placedMarkBox, type LabelView, type Placement } from '../render/labels/draw';
 import { glyphBox } from '../render/labels/layout';
+import { placedTextBoxes } from '../render/marks';
 
 export interface LabelPick {
   kind: 'polity' | 'settlement' | 'place';
@@ -18,10 +19,29 @@ interface Snapshot {
 }
 
 let last: Snapshot | null = null;
+/** 每排一次文字加一 */
+let ver = 0;
+/** placedTextBoxes 按排版结果记一份(同一次排版不重算) */
+let boxes: { placed: Placement; list: number[][] } | null = null;
 
 /** CivLayer 排完文字调(没画字时传 null) */
 export function setMapPlacement(s: Snapshot | null) {
   last = s;
+  ver++;
+}
+
+/**
+ * 地图上城名、地名、城镇符号占的地方(屏幕坐标的框,见 render/marks.ts 的 placedTextBoxes):作者标记的名字尽量躲开。
+ * ver 变了 = 文字重新排过;没有文字层(地球仪、还没画字)= 空
+ */
+export function mapTextBoxes(): { ver: number; list: number[][] } {
+  if (!last || !last.canvas.isConnected) return { ver, list: [] };
+  const { canvas, placed } = last;
+  const r = canvas.getBoundingClientRect();
+  if (!r.width || !canvas.width) return { ver, list: [] };
+  if (boxes?.placed !== placed) boxes = { placed, list: placedTextBoxes(placed) };
+  const f = r.width / canvas.width;
+  return { ver, list: boxes.list.map((b) => [r.left + b[0] * f, r.top + b[1] * f, r.left + b[2] * f, r.top + b[3] * f]) };
 }
 
 /** 点到符号 / 字的容差(屏幕像素):小符号、细字也好点 */

@@ -29,7 +29,7 @@ import { SaveMenu } from './SaveMenu';
 import { openAiSettings } from './AiSettings';
 import { openHistoryBook } from './bookStore';
 import { openOverview } from './overviewStore';
-import { searchCiv, type SearchHit } from './searchIndex';
+import { searchCiv, searchMarks, type SearchHit } from './searchIndex';
 import { countUpTo } from './timelineLayout';
 import { Icon } from './icons';
 import { AiMenuItem, AiSettingsItem, MenuItem, MenuSep, PopMenu } from './PopMenu';
@@ -94,7 +94,7 @@ export function Sidebar(p: SidebarProps) {
             <Icon name="sidebar" size={19} />
           </button>
           <WorldHead {...p} />
-          <SearchField s={s} civ={p.civ} />
+          <SearchField s={s} />
         </header>
         <div className="sb-body">
           {s.searching ? (
@@ -134,16 +134,22 @@ export interface SearchState {
   /** 点一条 / 回车:清空搜索框,选中它(地图飞过去) */
   pick: (h: SearchHit) => void;
   searching: boolean;
+  /** 搜索框能不能用:有国家的世界;还没有国家的世界放了标记也能搜(只搜标记) */
+  enabled: boolean;
 }
 
 export function useSearch(civ: Civ | null): SearchState {
   const { sel } = useSelection();
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
-  const civOk = !!civ && civ.viable;
+  const marks = useEdits().marks;
+  const civOk = !!civ && (civ.viable || !!marks?.length);
   // 年份取开始搜索那一刻的(播放时不跟着每一年重算)
   const searchYear = useMemo(() => (civ ? (getCivTime().year ?? civ.endYear) : 0), [civ, q === '']); // eslint-disable-line react-hooks/exhaustive-deps
-  const hits = useMemo(() => (civOk && q.trim() ? searchCiv(civ!, q, searchYear) : []), [civOk, civ, q, searchYear]);
+  const hits = useMemo(
+    () => (!civOk || !q.trim() ? [] : civ!.viable ? searchCiv(civ!, q, searchYear, undefined, marks) : searchMarks(q, marks ?? [])),
+    [civOk, civ, q, searchYear, marks],
+  );
   useEffect(() => setActive(0), [q]);
   // 选中了别的东西(地图上点的):搜索框清空,下面换成它的详情
   useEffect(() => {
@@ -153,10 +159,10 @@ export function useSearch(civ: Civ | null): SearchState {
     setQ('');
     setSelection(h.select);
   }, []);
-  return { q, setQ, hits, active, setActive, pick, searching: q.trim() !== '' };
+  return { q, setQ, hits, active, setActive, pick, searching: q.trim() !== '', enabled: civOk };
 }
 
-export function SearchField({ s, civ, onFocus }: { s: SearchState; civ: Civ | null; onFocus?: () => void }) {
+export function SearchField({ s, onFocus }: { s: SearchState; onFocus?: () => void }) {
   const { q, setQ, hits, active, setActive, pick } = s;
   return (
     <div className="sb-search">
@@ -168,7 +174,7 @@ export function SearchField({ s, civ, onFocus }: { s: SearchState; civ: Civ | nu
         placeholder="搜索国家、城市、人物、山河"
         spellCheck={false}
         autoComplete="off"
-        disabled={!civ || !civ.viable}
+        disabled={!s.enabled}
         aria-label="搜索"
         onFocus={onFocus}
         onChange={(e) => setQ(e.target.value)}

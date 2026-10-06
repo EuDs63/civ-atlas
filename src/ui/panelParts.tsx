@@ -2,7 +2,7 @@
  * 详情面板的公共零件:国家(CountryPanel)、城(CityPanel)、地理实体(PlacePanel)、州(RegionPanel)、信仰(FaithPanel)几种面板共用,
  * 保证它们看起来是同一套东西(样式都在 countryPanel.css)。
  *
- *   PanelHead    顶部:颜色块、名字、一行关键信息("国家，1446 年立国")、右上角圆形的关闭
+ *   PanelHead    顶部:颜色块(或别的小图标)、名字、一行关键信息("国家，1446 年立国")、右上角圆形的关闭
  *   Acts / Act   名字下面一排图标按钮(第一个是主操作,蓝底);MoreAct = 最后一个"更多",点开一列菜单
  *   CenterAct    "设为中心"按钮:把地图的中央经线转到选中的东西
  *   Link         面板里可以点的名字(选中那个国家 / 城 / 州)
@@ -68,11 +68,11 @@ export const jumpTo = (y: number) => setCivTime({ year: y, playing: false, scrub
 export const rgb = (c: readonly number[]) => `rgb(${c.join(',')})`;
 export const rgba = (c: readonly number[], a: number) => `rgba(${c.join(',')},${a})`;
 
-/** 面板顶部:颜色块(国家卡片放的是国旗:flag)、名字(children 里的 NameEdit)和一行小字(SubLine),右上角圆形的关闭 */
-export function PanelHead({ color, flag, children }: { color?: string; flag?: ReactNode; children?: ReactNode }) {
+/** 面板顶部:颜色块(或换成别的小图标 icon:国家卡片放国旗、作者标记放图钉)、名字(children 里的 NameEdit)和一行小字(SubLine),右上角圆形的关闭 */
+export function PanelHead({ color, icon, children }: { color?: string; icon?: ReactNode; children?: ReactNode }) {
   return (
     <div className="cp-head">
-      {flag ?? (color && <i className="cp-sw" style={{ background: color }} />)}
+      {icon ?? (color && <i className="cp-sw" style={{ background: color }} />)}
       <div className="cp-title">{children}</div>
       <button className="cp-x ins-close" onClick={clearSelection} title="关闭(Esc)" aria-label="关闭">
         <Icon name="close" size={13} />

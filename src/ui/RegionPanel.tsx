@@ -28,6 +28,7 @@ import { AiMenuItem, MenuItem } from './PopMenu';
 import { Icon } from './icons';
 import { useAiOn } from '../ai/client';
 import { setSheet } from './panelStore';
+import { newMarkDraft } from './markStore';
 import { entriesUpTo, firstOwned, ownerSpans, ownersOf, regionEntries } from './panelData';
 import {
   Act,
@@ -64,7 +65,6 @@ export function RegionPanel(props: DetailProps) {
   const po = civ.polities[own.polity[id]];
   const named = regionNamed(civ, id);
   const canAct = civ.viable && civ.polities.length > 0;
-  const aiOn = useAiOn();
   return (
     <div className="cp" data-region={id} data-page={page ?? 'info'}>
       <PanelHead color={po ? rgb(po.color) : undefined}>
@@ -116,14 +116,15 @@ export function RegionPanel(props: DetailProps) {
             <Act icon="rename" act="rename" onClick={() => setRenaming(true)}>
               改名
             </Act>
-            {(canAct || aiOn) && (
-              <MoreAct>
-                {canAct && <CenterItem world={world} civ={civ} sel={{ kind: 'region', id }} year={year} />}
-                <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
-                  让 AI 讲名字由来
-                </AiMenuItem>
-              </MoreAct>
-            )}
+            <MoreAct>
+              <MenuItem icon={<Icon name="pin" size={16} />} act="add-mark" onClick={() => newMarkDraft({ regions: [regionKey(civ, id)], year })}>
+                在这里加标记
+              </MenuItem>
+              {canAct && <CenterItem world={world} civ={civ} sel={{ kind: 'region', id }} year={year} />}
+              <AiMenuItem icon={<Icon name="sparkle" size={16} />} ain="explain" disabled={ai.busy} onClick={ai.ask}>
+                让 AI 讲名字由来
+              </AiMenuItem>
+            </MoreAct>
           </Acts>
           <RegionInfo {...props} ai={ai} aiRef={aiRef} />
         </>

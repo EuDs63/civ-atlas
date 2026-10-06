@@ -26,6 +26,8 @@
  * - edits.interventions:干预(具体种类见 edits.ts 文件头"干预");这里当成不透明的数组原样存、原样读回
  * - edits.terrain:地形修改(edits.ts 文件头"地形修改");读档时逐处过 cleanTerrainOp,格式不对的跳过。
  *   旧存档没有这个字段 = 没改地形。check 是**改过地形以后**的地形哈希(读档时带着地形修改生成,再核对)
+ * - edits.marks(可选):作者标记(edits.ts 文件头"作者标记"),`[{ "id": 1, "title": "主角的故乡", "color": "red", "from": 2490, "at": [1852.4, 512] }]`;
+ *   没有标记时不写这个字段。读档时过 cleanMarks,格式不对的跳过
  * - view:看这个世界用的投影和中央经线(`{ "projection": "robinson", "center": 120 }`,可选)。
  *   投影名原样存(render/projection.ts 的 ProjectionId,或 "globe"),认不出的由界面当成等距圆柱;
  *   旧存档没有这个字段 = 等距圆柱、中央经线 0°
@@ -36,7 +38,7 @@
  * 纯计算,不碰 DOM(Node 里可测)。
  */
 import { DEFAULT_PARAMS, type World, type WorldParams } from './world';
-import { GENERATOR_CHANGES, GENERATOR_VERSION, NAME_MAX, aiNameKeys, type AiNameMark, type GeneratorChange, type Intervention, type TerrainOp, type WorldEdits } from './edits';
+import { GENERATOR_CHANGES, GENERATOR_VERSION, MARKS_MAX, MARK_REGIONS_TOTAL, NAME_MAX, aiNameKeys, cleanMark, freeMarkId, type AiNameMark, type AuthorMark, type GeneratorChange, type Intervention, type TerrainOp, type WorldEdits } from './edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from './terrainEdits';
 import { decodeFlag } from './civ/flags';
 
@@ -248,9 +250,9 @@ export function worldKey(params: WorldParams): string {
   return PARAM_KEYS.map((k) => `${k}=${params[k] ?? DEFAULT_PARAMS[k]}`).join('&');
 }
 
-/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 改过的旗面数 */
+/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 作者标记个数 + 改过的旗面数 */
 export function editCount(edits: WorldEdits): number {
-  return Object.keys(edits.names).length + edits.interventions.length + (edits.terrain?.length ?? 0) + Object.keys(edits.flags ?? {}).length;
+  return Object.keys(edits.names).length + edits.interventions.length + (edits.terrain?.length ?? 0) + (edits.marks?.length ?? 0) + Object.keys(edits.flags ?? {}).length;
 }
 
 /** 世界名:去掉控制字符、首尾空白,超长截断;空 = 没起名 */
@@ -291,6 +293,8 @@ export function makeSave(
   // AI 起的名字:只存现在还用着的
   const ai = aiNameKeys(edits);
   if (ai.length) save.edits.aiNames = Object.fromEntries(ai.map((k) => [k, { ...edits.aiNames![k] }]));
+  // 作者标记:有才写
+  if (edits.marks?.length) save.edits.marks = edits.marks.map(copyMark);
   if (edits.flags && Object.keys(edits.flags).length) save.edits.flags = { ...edits.flags };
   const t = cleanTitle(title);
   if (t) save.title = t;
@@ -299,6 +303,14 @@ export function makeSave(
   const o = origin ? cleanOrigin(origin) : null;
   if (o) save.origin = o;
   return save;
+}
+
+/** 复制一个标记(之后改原来的不影响存档) */
+function copyMark(m: AuthorMark): AuthorMark {
+  const c: AuthorMark = { ...m };
+  if (m.at) c.at = [m.at[0], m.at[1]];
+  if (m.regions) c.regions = m.regions.slice();
+  return c;
 }
 
 /** 存档 → 文件内容(缩进两格,人也能读) */
@@ -419,6 +431,40 @@ export function parseSave(text: string): ParseResult {
     }
   } else if (E.terrain !== undefined) droppedT++;
   if (droppedT) warnings.push(`有 ${droppedT} 处地形修改格式不对,已跳过`);
+  // 作者标记:逐个清理,认不出的跳过;编号重复的换一个新编号;最多留 MARKS_MAX 个、一共圈 MARK_REGIONS_TOTAL 个州;旧存档没有 = 没有标记
+  const marks: AuthorMark[] = [];
+  let droppedM = 0;
+  let overM = 0;
+  let overR = 0;
+  if (Array.isArray(E.marks)) {
+    const ids = new Set<number>();
+    let regions = 0;
+    for (const x of E.marks) {
+      const m = cleanMark(x);
+      if (!m) {
+        droppedM++;
+        continue;
+      }
+      if (marks.length >= MARKS_MAX) overM++;
+      else if (m.regions && regions + m.regions.length > MARK_REGIONS_TOTAL) overR++;
+      else {
+        regions += m.regions?.length ?? 0;
+        marks.push(m);
+      }
+    }
+    let max = marks.reduce((a, m) => Math.max(a, m.id), 0);
+    const used = new Set(marks.map((m) => m.id));
+    for (let i = 0; i < marks.length; i++) {
+      if (ids.has(marks[i].id)) {
+        marks[i] = { ...marks[i], id: freeMarkId(used, max) };
+        max = Math.max(max, marks[i].id);
+      }
+      ids.add(marks[i].id);
+    }
+  } else if (E.marks !== undefined) droppedM++;
+  if (droppedM) warnings.push(`有 ${droppedM} 个作者标记格式不对,已跳过`);
+  if (overM) warnings.push(`作者标记最多 ${MARKS_MAX} 个,多出来的 ${overM} 个没有读进来`);
+  if (overR) warnings.push(`作者标记一共最多圈 ${MARK_REGIONS_TOTAL} 个州,多出来的 ${overR} 个标记没有读进来`);
   const note = versionNote(generator, terrain.length > 0);
   if (note) warnings.splice(noteAt, 0, note);
 
@@ -428,7 +474,7 @@ export function parseSave(text: string): ParseResult {
     generator,
     seed: params.seed,
     params,
-    edits: { names, ...(Object.keys(aiNames).length ? { aiNames } : {}), interventions, terrain, ...(Object.keys(flags).length ? { flags } : {}) },
+    edits: { names, ...(Object.keys(aiNames).length ? { aiNames } : {}), interventions, terrain, ...(marks.length ? { marks } : {}), ...(Object.keys(flags).length ? { flags } : {}) },
     check: typeof raw.check === 'string' ? raw.check.slice(0, 64) : '',
     savedAt: typeof raw.savedAt === 'string' && !Number.isNaN(Date.parse(raw.savedAt)) ? raw.savedAt : '',
   };

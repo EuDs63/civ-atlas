@@ -8,6 +8,7 @@
  * - 州(没点到别的东西时):RegionPanel.tsx(主体民族 / 宜居度 / 人口、历任归属、州里的城、相关事件;在这里立国、划给…)
  * - 人物(点人名):PersonPanel.tsx(生卒、在位 / 领兵、前任继任、结局、他在台上那几年的事)
  * - 信仰(信仰图层上点陆地、侧栏的信仰组、国家卡片的「国教」):FaithPanel.tsx(类型、创立、圣城、信众、国教、教派、大事)
+ * - 作者标记(地图上点标记、世界概览的「标记」页、搜索;新建、编辑也在这里填):MarkPanel.tsx
  *
  * 四种面板用同一套零件(panelParts.tsx):顶部、三格数字、色条、小柱图、事件列表、底部按钮。
  * 面板里的名字可以点,点了就选中那个国家 / 城 / 州。在地图上选干预目标、下了令正在推演时,面板先藏起来(状态留着)。
@@ -31,6 +32,8 @@ import { PlacePanel } from './PlacePanel';
 import { RegionPanel } from './RegionPanel';
 import { PersonPanel } from './PersonPanel';
 import { FaithPanel } from './FaithPanel';
+import { MarkPanel } from './MarkPanel';
+import { useMarkUi } from './markStore';
 import { setPanelTab, setSheet, setSheetDrag, usePanel } from './panelStore';
 import { ownersOf } from './panelData';
 import { phoneSheet, selectionKey } from './flyTo';
@@ -65,6 +68,7 @@ export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: C
   const t = useCivTime();
   const edits = useEdits();
   const pick = usePolityPick();
+  const markDraft = useMarkUi().draft;
   const { run, sheet } = usePanel();
   const narrow = useNarrow();
   const sheetDrag = useSheetDrag(narrow, sheet);
@@ -81,6 +85,7 @@ export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: C
   else if (sel.kind === 'region' && sel.id >= 0 && sel.id < civ.regions.count) body = <RegionPanel key={stable} {...common} id={sel.id} />;
   else if (sel.kind === 'person' && civ.people?.[sel.id]) body = <PersonPanel key={stable} {...common} id={sel.id} />;
   else if (sel.kind === 'faith' && civ.religion?.faiths[sel.id]) body = <FaithPanel key={stable} {...common} id={sel.id} />;
+  else if (sel.kind === 'mark' && (markDraft?.id === sel.id || edits.marks?.some((m) => m.id === sel.id))) body = <MarkPanel key={stable} civ={civ} raster={raster} world={world} year={year} id={sel.id} />;
   if (!body) return null;
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   // 在地图上选目标、下了令正在推演:先藏起来(面板里的状态留着,取消后回到干预页)

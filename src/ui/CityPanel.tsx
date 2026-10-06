@@ -17,6 +17,7 @@ import { SETTLEMENT_RANKS, capitalAt, polityAlive, populationAt, populationLabel
 import { ownersAt } from '../gen/civ/timeline';
 import { polityKey, settlementKey, type Intervention } from '../gen/edits';
 import { setSelection } from './civView';
+import { newMarkDraft } from './markStore';
 import { addIntervention, editBlock, interventionKeys } from './editsStore';
 import { NameEdit } from './NameEdit';
 import { nameAt } from './Interventions';
@@ -145,6 +146,9 @@ export function CityPanel({ civ, raw, raster, world, id, year, names }: DetailPr
           改名
         </Act>
         <MoreAct>
+          <MenuItem icon={<Icon name="pin" size={16} />} act="add-mark" onClick={() => newMarkDraft({ at: [world.mesh.x[s.cell], world.mesh.y[s.cell]], year })}>
+            在这里加标记
+          </MenuItem>
           <MenuItem icon={<Icon name="flag" size={16} />} act="owner" disabled={!owner} onClick={() => owner && setSelection({ kind: 'polity', id: owner.id })}>
             看所属国家
           </MenuItem>

@@ -1,7 +1,7 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
- * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、人物(人物卡片、历代君主、编年史里的人名、人物页、搜人名)、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
+ * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、人物(人物卡片、历代君主、编年史里的人名、人物页、搜人名)、作者标记、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
  * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;创建时定下的种子、参数、地形在世界概览的"世界设定"页(只能看)
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
@@ -566,6 +566,136 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (!/^圣宗柳玄 大景皇帝，2485–2519$/.test(hit) || hitKind !== 'person' || card5 !== '圣宗柳玄') errs.push(`人物:搜"圣宗"不对(${hit};${hitKind};${card5})`);
   await page.fill('.sidebar .search-input', '');
   await page.keyboard.press('Escape');
+  await page.evaluate(() => localStorage.clear());
+}
+
+// 作者标记:右下角「标记」→ 顶部提示条"点地图放标记",点城的位置放下 → 填写卡片(名字、年份、说明)→ 完成:地图上有图钉和名字、
+// 卡片是看的样子;悬停图钉 = 小卡片在图钉左上方;撤销 / 重做;往回拖 100 年标记不见了;搜得到;世界概览「标记」页一行,点了打开;
+// 「更多」→ 删除,提示条上「撤销」放回;州卡片「更多」→ 在这里加标记(几个州,地图上有名字牌);导出菜单多一行"作者标记"
+{
+  await page.goto(`${dev.url}/?seed=7&civYear=2512`);
+  await page.waitForFunction(() => (window as any).__wfLabels?.polities > 0, null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const vp = page.viewportSize()!;
+  const text = (sel: string) => page.locator(sel).first().innerText().then((t) => t.replace(/\s+/g, ' ')).catch(() => '');
+  const marks = () => page.evaluate(() => (window as any).__wfMarks ?? null) as Promise<{ pins: { id: number; x: number; y: number; w: number; label: string | null }[]; areas: { id: number; pill: { text: string } | null }[] } | null>;
+  // 放大到写名字的程度(大景王朝东岸,世界坐标 1852, 512 放到地图中间),挑一座在看得见的地方的城
+  await page.evaluate(
+    ([sx, sy]) => {
+      const w = window as any;
+      w.__wfSetView({ k: 1, x: 0, y: 0 });
+      const st = document.querySelector('.stage')!.getBoundingClientRect();
+      const [bx, by] = w.__wfWorldToClient(1852, 512);
+      w.__wfSetView({ k: 2.8, x: sx - (bx - st.left) * 2.8, y: sy - (by - st.top) * 2.8 });
+    },
+    [SIDE_ROOM + (vp.width - SIDE_ROOM) / 2, vp.height / 2 - 40],
+  );
+  await page.waitForTimeout(1200);
+  const cities = (await page.evaluate(() => (window as any).__wfPickables())) as { kind: string; x: number; y: number }[];
+  const city = cities.find((c) => c.kind === 'mark' && c.x > SIDE_ROOM + 120 && c.x < vp.width - 160 && c.y > 140 && c.y < vp.height - 200);
+  await page.click('.map-controls [data-act=mark]');
+  await page.waitForTimeout(200);
+  const pressed = await page.locator('.map-controls [data-act=mark]').getAttribute('aria-pressed');
+  const tip = await text('.toast');
+  if (city) await page.mouse.click(city.x, city.y);
+  await page.waitForTimeout(500);
+  const editing = await page.locator('.inspector .mk-editing').count();
+  const sub = await text('.inspector .mk-editing .cp-sub');
+  await page.fill('[data-mk=title]', '主角的故乡');
+  await page.fill('[data-mk=from]', '2490');
+  await page.fill('[data-mk=to]', '2531');
+  await page.fill('[data-mk=note]', '主角出生的渡口小镇。');
+  await page.click('[data-act=mark-done]');
+  await page.waitForTimeout(500);
+  const card = await text('.inspector .mk-card');
+  const m1 = await marks();
+  const pin = m1?.pins.find((x) => x.label === '主角的故乡');
+  // 悬停图钉(先关卡片:选中时别的都变淡,不影响悬停)
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  let hover = '';
+  let above = false;
+  if (pin) {
+    await page.mouse.move(pin.x, pin.y - pin.w * 0.7);
+    await page.waitForTimeout(150);
+    await page.mouse.move(pin.x + 0.5, pin.y - pin.w * 0.7);
+    await page.waitForTimeout(250);
+    hover = await text('.hover-card');
+    const hb = await page.locator('.hover-card').boundingBox();
+    above = !!hb && hb.y + hb.height < pin.y && hb.x + hb.width < pin.x;
+  }
+  await page.mouse.move(vp.width - 30, vp.height / 2);
+  // 撤销 / 重做
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(300);
+  const undone = (await marks())?.pins.length ?? 0;
+  const undoTip = await text('.toast');
+  await page.keyboard.press('Control+Shift+z');
+  await page.waitForTimeout(300);
+  const redone = (await marks())?.pins.length ?? 0;
+  // 往回 100 年(2412):标记还没开始,不画
+  await page.keyboard.press('Shift+ArrowLeft');
+  await page.waitForTimeout(400);
+  const before = (await marks())?.pins.length ?? -1;
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.waitForTimeout(400);
+  // 搜索
+  await page.fill('.sidebar .search-input', '渡口小镇');
+  await page.waitForTimeout(300);
+  const hitKind = await page.locator('.search-row').first().getAttribute('data-kind').catch(() => null);
+  const hit = await text('.search-row');
+  await page.fill('.sidebar .search-input', '');
+  await page.keyboard.press('Escape');
+  // 世界概览「标记」页
+  await openOverview(page, 'marks');
+  const rows = await page.locator('.chronicle.marks .mk-row').count();
+  const row = await text('.chronicle.marks .mk-row');
+  await page.locator('.chronicle.marks .mk-row').first().click();
+  await page.waitForTimeout(500);
+  const closed = !(await page.locator('.ov-root:not([hidden])').count());
+  const card2 = await text('.inspector .mk-card .mk-title');
+  // 删除 → 撤销
+  await page.click('.inspector .mk-card [data-act=more]');
+  await page.click('[data-act=mark-delete]');
+  await page.waitForTimeout(300);
+  const gone = (await marks())?.pins.length ?? 0;
+  const delTip = await text('.toast');
+  await page.click('.toast [data-act=mark-restore]').catch(() => {});
+  await page.waitForTimeout(400);
+  const back = (await marks())?.pins.filter((x) => x.label === '主角的故乡').length ?? 0;
+  // 州卡片「更多」→ 在这里加标记:默认圈这一州
+  await page.evaluate(() => (window as any).__wfSelect('region', 324));
+  await page.waitForTimeout(500);
+  await page.click('.inspector [data-act=more]');
+  await page.click('[data-act=add-mark]');
+  await page.waitForTimeout(400);
+  const chips = await page.locator('.inspector .mk-editing .mk-chips span').count();
+  await page.fill('[data-mk=title]', '第一卷');
+  await page.click('[data-act=mark-done]');
+  await page.waitForTimeout(500);
+  const pill = (await marks())?.areas.find((a) => a.pill?.text === '第一卷');
+  // 导出菜单:有标记时多一行
+  await page.keyboard.press('Escape');
+  await page.click('.export-btn');
+  await page.waitForTimeout(300);
+  const exportRow = await text('.export-marks');
+  await page.click('.export-btn');
+  console.log(
+    `作者标记:按钮按下 ${pressed}、提示「${tip}」;点城 → 填写 ${editing}「${sub}」→ 卡片「${card.slice(0, 40)}…」、图钉 ${pin ? '有' : '没有'};` +
+      `悬停「${hover}」在左上方 ${above};撤销 ${undone}「${undoTip}」、重做 ${redone};2412 年 ${before} 个;搜「${hit}」(${hitKind});` +
+      `概览 ${rows} 行「${row.slice(0, 30)}」→ 收起 ${closed}、卡片「${card2}」;删除 ${gone}「${delTip}」→ 撤销 ${back};州卡片加标记 ${chips} 州、名字牌 ${pill ? '有' : '没有'};导出「${exportRow}」`,
+  );
+  if (pressed !== 'true' || !tip.includes('点地图放标记')) errs.push(`作者标记:「标记」按钮没有进入放标记(${pressed};${tip})`);
+  if (!city || !editing || !/^作者标记，在.+的.+/.test(sub)) errs.push(`作者标记:点地图没有打开填写卡片(${!!city};${editing};${sub})`);
+  if (!card.includes('主角的故乡') || !card.includes('作者标记，2490–2531 年') || !card.includes('主角出生的渡口小镇') || !pin) errs.push(`作者标记:完成后卡片 / 地图不对(${card.slice(0, 80)};${!!pin})`);
+  if (!hover.includes('主角的故乡') || !hover.includes('点开看说明') || !above) errs.push(`作者标记:悬停小卡片不对(${hover};${above})`);
+  if (undone !== 0 || !undoTip.includes('已撤销标记的修改') || redone !== 1) errs.push(`作者标记:撤销 / 重做不对(${undone};${undoTip};${redone})`);
+  if (before !== 0) errs.push(`作者标记:还没到年份时地图上还画着(${before})`);
+  if (hitKind !== 'mark' || !hit.includes('主角的故乡')) errs.push(`作者标记:按说明搜不到(${hit};${hitKind})`);
+  if (rows !== 1 || !row.includes('2490') || !closed || card2 !== '主角的故乡') errs.push(`作者标记:概览「标记」页不对(${rows};${row};${closed};${card2})`);
+  if (gone !== 0 || !delTip.includes('已删除标记「主角的故乡」') || back !== 1) errs.push(`作者标记:删除 / 放回不对(${gone};${delTip};${back})`);
+  if (chips !== 1 || !pill) errs.push(`作者标记:州卡片加的标记不对(${chips};${!!pill})`);
+  if (!exportRow.includes('作者标记')) errs.push(`作者标记:导出菜单没有"作者标记"一行(${exportRow})`);
   await page.evaluate(() => localStorage.clear());
 }
 
@@ -4074,7 +4204,7 @@ for (const style of ['realistic', 'fantasy']) {
   await gBrowser.close();
 }
 
-// 手机布局(390×844,触屏):底部是收起的世界卡片(搜索框 + 世界名一行),时间轴胶囊浮在它上面、一行;右上竖排图层、地球、助手三个按钮;
+// 手机布局(390×844,触屏):底部是收起的世界卡片(搜索框 + 世界名一行),时间轴胶囊浮在它上面、一行;右上竖排图层、标记、地球、助手四个按钮;
 // 右下没有 + −、操作提示是"双指缩放"、悬停卡片不出来;往上拖世界卡片 → 拉到顶(四个大按钮、整个世界,胶囊藏起来)→ 点拖动条收起;
 // 拉到顶后点"改地形" → 卡片收起;
 // 双指捏合 → 地图比例变了;点国家 → 详情卡片升到半屏(胶囊跟上去,国家落在胶囊上方)→ 往上拖拉到顶 → 干预 → 结盟 → 点名牌 → 已生效 → 撤销;
@@ -4300,8 +4430,8 @@ for (const style of ['realistic', 'fantasy']) {
     errs.push(`手机:时间轴胶囊不在世界卡片上面 / 不是一行(${JSON.stringify(row)})`);
   if (!track || !row || track.height < 32 || track.y < row.y || track.y + track.height > row.y + row.height) errs.push(`手机:时间轴轨道不在胶囊里 / 太矮(${JSON.stringify(track)})`);
   if (!/^种子 7，现存 \d+ 国$/.test(sub)) errs.push(`手机:世界名后面的副标不对(${sub})`);
-  if (btnActs !== 'layers,globe,assistant' || !btns || Math.abs(btns.x + btns.width - (VW - 12)) > 1 || btns.y > 20 || btns.height < 120)
-    errs.push(`手机:右上不是竖排的图层、地球、助手三个按钮(${btnActs} ${JSON.stringify(btns)})`);
+  if (btnActs !== 'layers,mark,globe,assistant' || !btns || Math.abs(btns.x + btns.width - (VW - 12)) > 1 || btns.y > 20 || btns.height < 160)
+    errs.push(`手机:右上不是竖排的图层、标记、地球、助手四个按钮(${btnActs} ${JSON.stringify(btns)})`);
   if (!wsFull || Math.abs(wsFull.y - 0.08 * VH) > 8 || tiles !== 4 || !capsuleHidden) errs.push(`手机:往上拖世界卡片没有拉到顶(${JSON.stringify(wsFull)},大按钮 ${tiles},胶囊藏起 ${capsuleHidden})`);
   if (!ws1 || Math.abs(ws1.y - (VH - PEEK)) > 2) errs.push(`手机:点拖动条没有收起世界卡片(${JSON.stringify(ws1)})`);
   if (!hint0.includes('双指缩放') || hint1 !== 0) errs.push(`手机:操作提示不对 / 捏合后没消失(${hint0})`);

@@ -4,9 +4,9 @@
  *   右上 MapBar       图层分段按钮(政区 / 民族 / 信仰 / 地形 / 实景 / 更多图层)、导出、编年史、助手;写史书时最前面是写作进度
  *                     新建世界这一步还没有历史:只有地形 / 实景 / 高程 / 更多图层、助手(没有政区、民族、信仰,不放导出、编年史)
  *                     「助手」开关右边的助手面板(Assistant.tsx),开着时按钮是按下去的样子
- *   右下 MapControls  "地球 / 平面"切换、放大、缩小(触屏不放 + −,窄屏整个不放)
+ *   右下 MapControls  「标记」(点了在地图上放作者标记)、"地球 / 平面"切换、放大、缩小(触屏不放 + −,窄屏整个不放)
  *   窄屏(手机):
- *   右上 PhoneButtons 竖排的毛玻璃按钮:图层与投影(弹层从底部升起)、地球 / 平面、助手;写史书时进度条在它们左边。
+ *   右上 PhoneButtons 竖排的毛玻璃按钮:图层与投影(弹层从底部升起)、放标记、地球 / 平面、助手;写史书时进度条在它们左边。
  *                     世界名、搜索、存档、成书都在底部的世界卡片里(PhoneSheet.tsx)
  *   底部 FirstHint    第一次打开时的一行操作提示,第一次拖动 / 缩放 / 点击之后不再出现(触屏换成"双指缩放"的说法)
  *   跟随鼠标 HoverCard 悬停小卡片(内容见 hoverInfo.ts)
@@ -23,6 +23,7 @@ import { ExportMenu, type ExportMenuProps } from './ExportMenu';
 import { openOverview } from './overviewStore';
 import { layerDef, type MapLayer } from './mapLayers';
 import { toggleAssistant, useAstOpen } from './astPanel';
+import { togglePlacing } from './markStore';
 import { useAssistant } from './assistantStore';
 import { useAiOn } from '../ai/client';
 import './book.css';
@@ -119,7 +120,18 @@ function BookChip() {
 }
 
 /** 手机右上:竖排的毛玻璃按钮(图层与投影、地球 / 平面、助手;「使用 AI 功能」关着时没有助手);写史书时进度条在它们左边 */
-export function PhoneButtons({ layers, globeOn, onToggleGlobe }: { layers: LayerPopoverProps; globeOn: boolean; onToggleGlobe: () => void }) {
+export function PhoneButtons({
+  layers,
+  globeOn,
+  onToggleGlobe,
+  marking,
+}: {
+  layers: LayerPopoverProps;
+  globeOn: boolean;
+  onToggleGlobe: () => void;
+  /** 「标记」按钮:正在放标记 = true;不放这个按钮(还没有历史、新建时)= undefined */
+  marking?: boolean;
+}) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   const astOpen = useAstOpen();
   const aiOn = useAiOn();
@@ -128,6 +140,19 @@ export function PhoneButtons({ layers, globeOn, onToggleGlobe }: { layers: Layer
       <BookChip />
       <div className="pb-group">
         <LayerPopover {...layers} trigger="icon" />
+        {marking !== undefined && (
+          <button
+            className={`pb-btn${marking ? ' on' : ''}`}
+            data-act="mark"
+            aria-pressed={marking}
+            disabled={layers.disabled}
+            onClick={togglePlacing}
+            aria-label="放标记"
+            title="在地图上放一个标记"
+          >
+            <Icon name="pin" size={20} />
+          </button>
+        )}
         <button
           className={`pb-btn globe-toggle${globeOn ? ' on' : ''}`}
           data-act="globe"
@@ -163,6 +188,7 @@ export function MapControls({
   shifted,
   hidden,
   zoom = true,
+  marking,
 }: {
   globeOn: boolean;
   onToggleGlobe: () => void;
@@ -171,11 +197,19 @@ export function MapControls({
   hidden?: boolean;
   /** 放不放 + −(触屏用双指捏合,不放) */
   zoom?: boolean;
+  /** 「标记」按钮:正在放标记 = true;不放这个按钮(还没有历史)= undefined */
+  marking?: boolean;
 }) {
   if (hidden) return null;
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   return (
     <div className={`map-controls${shifted ? ' shifted' : ''}`} onPointerDown={stop} onDoubleClick={stop}>
+      {marking !== undefined && (
+        <button className={`glass mc-btn mc-globe mc-mark${marking ? ' on' : ''}`} data-act="mark" aria-pressed={marking} onClick={togglePlacing} title="在地图上放一个标记(Esc 取消)">
+          <Icon name="pin" size={18} />
+          <span>标记</span>
+        </button>
+      )}
       <button className="glass mc-btn mc-globe globe-toggle" data-act="globe" onClick={onToggleGlobe} title={globeOn ? '回到平面地图' : '显示成可以转动的地球仪'}>
         <Icon name={globeOn ? 'map' : 'globe'} size={18} />
         <span>{globeOn ? '平面' : '地球'}</span>
@@ -216,8 +250,12 @@ export function FirstHint({ show, touch }: { show: boolean; touch?: boolean }) {
   return <div className="first-hint">{touch ? '拖动地图，双指缩放，点国家看它的历史' : '拖动地图，滚轮缩放，点一个国家看它的历史'}</div>;
 }
 
-/** 悬停小卡片:跟着鼠标,靠右 / 靠下时翻到另一边;放在鼠标下面会压住底部的时间轴时也翻到上面 */
-export function HoverCard({ info, x, y }: { info: HoverInfo; x: number; y: number }) {
+/**
+ * 悬停小卡片:跟着鼠标,靠右 / 靠下时翻到另一边;放在鼠标下面会压住底部的时间轴时也翻到上面。
+ * place(作者标记用):'above' = x、y 是图钉尖,卡片放在图钉左上方,不压住写在图钉右边的名字;
+ * 'left' = 放在鼠标左边(圈州时不挡住右边正在圈的地方)。放不下再照常放
+ */
+export function HoverCard({ info, x, y, place }: { info: HoverInfo; x: number; y: number; place?: 'above' | 'left' }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
@@ -229,18 +267,33 @@ export function HoverCard({ info, x, y }: { info: HoverInfo; x: number; y: numbe
   });
   const vw = typeof window === 'undefined' ? 1e4 : window.innerWidth;
   const vh = typeof window === 'undefined' ? 1e4 : window.innerHeight;
-  const left = x + 16 + size.w > vw - 8 ? x - 12 - size.w : x + 16;
+  if (place === 'above' && x - 14 - size.w >= 8 && y - 34 - size.h >= 8) {
+    return (
+      <div ref={ref} className="hover hover-card" style={{ left: x - 14 - size.w, top: y - 34 - size.h }} role="tooltip">
+        <HoverLines info={info} />
+      </div>
+    );
+  }
+  const left = place === 'left' && x - 14 - size.w >= 8 ? x - 14 - size.w : x + 16 + size.w > vw - 8 ? x - 12 - size.w : x + 16;
   let top = y + 14 + size.h > vh - 8 ? y - 10 - size.h : y + 14;
   const bar = ref.current?.closest('.app')?.querySelector('.bottom-row .timebar')?.getBoundingClientRect();
   if (bar && bar.height && top > y && y < bar.top && top + size.h > bar.top - 4 && left < bar.right && left + size.w > bar.left) top = y - 10 - size.h;
   return (
     <div ref={ref} className="hover hover-card" style={{ left, top }} role="tooltip">
+      <HoverLines info={info} />
+    </div>
+  );
+}
+
+function HoverLines({ info }: { info: HoverInfo }) {
+  return (
+    <>
       <div className="hc-line">
         {info.color && <i className="hc-sw" style={{ background: info.color }} />}
         <span className="hc-name">{info.name}</span>
         {info.sub && <span className="hc-sub">{info.sub}</span>}
       </div>
       {info.extra && <div className="hc-extra">{info.extra}</div>}
-    </div>
+    </>
   );
 }

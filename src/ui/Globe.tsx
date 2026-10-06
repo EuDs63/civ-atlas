@@ -149,15 +149,21 @@ export interface GlobeExport {
   h: number;
 }
 
+/**
+ * 导出时在球上再画点东西(作者标记):ctx 已经按导出的像素密度放大好,用屏幕上的坐标画;
+ * pt = 世界坐标 → 这一面上的坐标(背面 = null),k = 相当于平面主图的几倍
+ */
+export type GlobeExtra = (ctx: CanvasRenderingContext2D, view: { pt(wx: number, wy: number): [number, number] | null; w: number; h: number; k: number; dpr: number }) => void;
+
 /** 开着的地球仪的导出函数(没开 = null) */
-let globeExporter: (() => Promise<GlobeExport>) | null = null;
+let globeExporter: ((extra?: GlobeExtra) => Promise<GlobeExport>) | null = null;
 
 /**
  * 导出菜单用:把地球仪现在看到的这一面画成 PNG(两倍像素密度,长边不超过 3000;不带选中的记号,文字按导出的密度重排)。
  * 地球仪没开 = null。下载、提示由调用方负责
  */
-export function exportGlobeView(): Promise<GlobeExport> | null {
-  return globeExporter ? globeExporter() : null;
+export function exportGlobeView(extra?: GlobeExtra): Promise<GlobeExport> | null {
+  return globeExporter ? globeExporter(extra) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +194,8 @@ export interface GlobeApi {
   worldToClient(wx: number, wy: number): [number, number] | null;
   /** 经纬度(度)→ 屏幕坐标(clientX / clientY);在球的背面(或贴着边缘)= null */
   lonLatToClient(lon: number, lat: number): [number, number] | null;
+  /** 视图的指纹(转了、缩放了、球挪了位置就变)和相当于平面主图的几倍(作者标记按它决定写不写名字);还没量好尺寸 = null */
+  viewSig(): { sig: string; k: number } | null;
 }
 
 export interface GlobeProps {
@@ -1426,6 +1434,11 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
     zoomBy: (f, cx, cy, live) => zoomBy(f, cx, cy, live),
     worldToClient,
     lonLatToClient: (lon, lat) => llToClient(lon * D, lat * D),
+    viewSig: () => {
+      if (!s.size.w) return null;
+      const f = frameOf(s.view, s.size.w, s.size.h);
+      return { sig: `${s.view.lon},${s.view.lat},${f.cx},${f.cy},${f.R}`, k: equivalentZoom(f.R, REF_MAP_CSS) };
+    },
   };
   useEffect(
     () => () => {
@@ -1651,7 +1664,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   };
 
   // ---- 导出当前视图(导出菜单里的"导出地球仪这一面",见 exportGlobeView) ----
-  const exportView = async (): Promise<GlobeExport> => {
+  const exportView = async (extra?: GlobeExtra): Promise<GlobeExport> => {
     const cvs = glRef.current;
     const p = props.current;
     if (!cvs) throw new Error('地球仪还没画出来');
@@ -1687,6 +1700,24 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
       drawOverlay(ov.getContext('2d')!, { ...overlayInput(w, h, sc, false, [], false), selection: null, selWorld: null, lines: civLineStrokes(civParamsOf(p)) });
       octx.drawImage(ov, 0, 0);
       ov.width = ov.height = 0;
+      if (extra) {
+        const f = frameOf(s.view, w, h);
+        const wd = p.world;
+        octx.save();
+        octx.scale(sc, sc);
+        extra(octx, {
+          pt: (wx, wy) => {
+            const [lon, lat] = worldToLonLat(wx, wy, wd.width, wd.height);
+            const [x, y, d] = lonLatToScreen(s.view, f, lon, lat);
+            return d > EDGE_D ? [x, y] : null;
+          },
+          w,
+          h,
+          k: equivalentZoom(f.R, REF_MAP_CSS),
+          dpr: sc,
+        });
+        octx.restore();
+      }
       // 文件名在编码之前定下:编码要一会儿,这期间换了年份、打开了别的世界,名字照样对得上画出来的这一张
       const civ = p.civ;
       const year = civ ? Math.floor(Math.max(0, Math.min(civ.endYear, getCivTime().year ?? civ.endYear))) : 0;
@@ -1703,7 +1734,7 @@ export function Globe({ world, raster, civ, geo, style, layer, terrain, terrainK
   const exportRef = useRef(exportView);
   exportRef.current = exportView;
   useEffect(() => {
-    const f = () => exportRef.current();
+    const f = (extra?: GlobeExtra) => exportRef.current(extra);
     globeExporter = f;
     return () => {
       if (globeExporter === f) globeExporter = null;

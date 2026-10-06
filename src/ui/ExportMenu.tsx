@@ -14,6 +14,7 @@
  * 用的是 App 当前显示的 civ(套过改名等修改的那份),不重新生成。
  * 世界里有从 AI 起名里挑的名字时,清晰度下面多一行"AI 起的名字:带上 / 换回原名":换回原名 = 地图、图例、编年史用 App 给的 plain
  * (AI 起的名字换回挑之前的,见 gen/edits.ts 的 namesWithoutAi)。
+ * 有作者标记时再多一行"作者标记:带上 / 不带"(默认带上):地图图片、地球仪这一面画上那一年有的标记(都写名字,见 render/marks.ts)。
  * 文件名带世界名(没起名 = 种子)、年份、画风:文明与地图-九州大陆-第3000年-手绘.png、文明与地图-种子7-第3000年-手绘.png(JPEG 是 .jpg)
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -25,7 +26,10 @@ import { fullChronicle } from '../gen/civ/religionText';
 import { AZGAAR_SEA_GRAY, heightmapNote, type HeightmapBits } from '../gen/heightmap';
 import { LAYERS, type LayerId } from '../render/layers';
 import type { CivShow, CivStyle } from '../render/civ/overlay';
-import { IMAGE_FORMATS, drawLegend, drawMapBase, drawMapLabels, type ExportScale, type ImageFormat } from '../render/export';
+import { IMAGE_FORMATS, drawExportMarks, drawLegend, drawMapBase, drawMapLabels, type ExportScale, type ImageFormat } from '../render/export';
+import { canvasMeasure, drawMarks, layoutMarks, type MarkItem } from '../render/marks';
+import { useEdits } from './editsStore';
+import { markItemsAt } from './markInfo';
 import type { ExportRequest, ExportResponse } from '../exportWorker';
 import { getCivShow, getCivTime, useCivTime } from './civView';
 import { getMapCenter, xOfLon } from './mapWrap';
@@ -177,6 +181,8 @@ interface MapInput {
   /** 投影、经纬网(和屏幕上一样) */
   projection?: ProjectionId;
   graticule?: boolean;
+  /** 作者标记(那一年有的;不带 = 空) */
+  marks?: readonly MarkItem[];
 }
 
 /** 地图图片:后台线程画地形和文明底图,主线程叠文字、编码 PNG / JPEG */
@@ -219,6 +225,7 @@ async function exportMap(m: MapInput, scale: ExportScale, format: ImageFormat): 
   detail.worker = t1 - t0;
   const t2 = performance.now();
   const n = await drawMapLabels(ctx, { ...m }, scale);
+  detail.markCount = m.marks?.length ? drawExportMarks(ctx, m, scale, m.marks, n.placed) : 0;
   const t3 = performance.now();
   detail.labels = t3 - t2;
   detail.labelCount = n.labels;
@@ -244,6 +251,8 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
   const [open, setOpen] = useState(false);
   const [scale, setScale] = useState<ExportScale>(1);
   const [usePlain, setUsePlain] = useState(false);
+  const [withMarks, setWithMarks] = useState(true);
+  const marks = useEdits().marks;
   const civ = usePlain && plain ? plain : shown;
   const busy = useExportStatus()?.kind === 'busy';
   const time = useCivTime();
@@ -287,6 +296,7 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
     const yi = Math.floor(y);
     const show = { ...getCivShow() };
     const params = paramsText(world.params);
+    const markItems = withMarks && civ && ok ? markItemsAt(civ, world, marks, yi) : [];
     const what: Record<Job, string> = {
       map: `地图图片(${scale}×)`,
       mapjpg: `地图图片 JPEG(${scale}×)`,
@@ -303,7 +313,15 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
     try {
       let dbg: ExportDebug;
       if (job === 'globe') {
-        const r = await exportGlobeView();
+        // 地球仪这一面:标记照屏幕上的规矩(缩得小时不写名字、挨得近的合起来)
+        const r = await exportGlobeView(
+          markItems.length
+            ? (ctx, v) => {
+                const layout = layoutMarks(markItems, { pt: v.pt, period: 0, win: [0, v.w], w: v.w, h: v.h, k: v.k, cut: 0 }, { measure: canvasMeasure(ctx) });
+                drawMarks(ctx, layout, v.dpr);
+              }
+            : undefined,
+        );
         if (!r) throw new Error('地球仪没有打开');
         download(r.blob, r.name);
         dbg = { job, name: r.name, bytes: r.blob.size, w: r.w, h: r.h, ms: performance.now() - t0 };
@@ -316,7 +334,7 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
         const center = wrapOf(world) ? xOfLon(getMapCenter(), world.width) : undefined;
         const projection = flatProjection(getProjection());
         const graticule = getGraticule();
-        const r = await exportMap({ world, raster, civ: ok ? civ : null, style, layer, year: y, show, center, projection, graticule }, scale, format);
+        const r = await exportMap({ world, raster, civ: ok ? civ : null, style, layer, year: y, show, center, projection, graticule, marks: markItems }, scale, format);
         download(r.blob, name);
         dbg = { job, name, bytes: r.blob.size, w: r.w, h: r.h, ms: performance.now() - t0, detail: r.detail };
         const mb = r.blob.size >= 1e6 ? `${(r.blob.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(r.blob.size / 1e3))} KB`;
@@ -421,6 +439,19 @@ export function ExportMenu({ data, civ: shown, plain, style, layer, icon }: Expo
                 </button>
                 <button className={usePlain ? 'on' : ''} onClick={() => setUsePlain(true)} title="导出的地图、图例、编年史里用原来的名字">
                   换回原名
+                </button>
+              </div>
+            </div>
+          )}
+          {!!marks?.length && (
+            <div className="export-scale export-marks">
+              <span>作者标记</span>
+              <div className="seg">
+                <button className={withMarks ? 'on' : ''} onClick={() => setWithMarks(true)} title="地图图片、地球仪这一面上画出这一年有的标记">
+                  带上
+                </button>
+                <button className={withMarks ? '' : 'on'} onClick={() => setWithMarks(false)}>
+                  不带
                 </button>
               </div>
             </div>
