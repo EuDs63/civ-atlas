@@ -156,9 +156,10 @@ describe('存档文件 · 坏文件、别的 JSON、别的版本', () => {
     expect(old.ok && old.save.edits).toEqual(EDITS);
   });
 
-  it('只动了改过地形的世界的那一版:没改地形的世界不提示,改过的提示', () => {
+  it('只动了改过地形的世界的那一版:没改地形的世界不按它说,改过的按它说', () => {
+    // 7 → 现在:第 8 版只动了改过地形的世界(历史重新推演),第 9 版人人都有(编年史的字)
     const plain = parseSave(JSON.stringify({ ...good(), generator: 7 }));
-    expect(plain.ok && plain.warnings).toEqual([]);
+    expect(plain.ok && plain.warnings).toEqual(['来自旧版本：疆域和兴亡没变，编年史写得更细了']);
     const g = good();
     g.generator = 7;
     (g.edits as Record<string, unknown>).terrain = [{ kind: 'volcano', pts: [812, 403], r: 28, s: 1.05 }];
@@ -167,7 +168,7 @@ describe('存档文件 · 坏文件、别的 JSON、别的版本', () => {
     // 地形修改全是坏的(读进来一处都没有)= 按没改地形生成,也就没变
     (g.edits as Record<string, unknown>).terrain = [{ kind: 'meteor', pts: [1, 2] }];
     const bad = parseSave(JSON.stringify(g));
-    expect(bad.ok && bad.warnings).toEqual(['有 1 处地形修改格式不对,已跳过']);
+    expect(bad.ok && bad.warnings).toEqual(['来自旧版本：疆域和兴亡没变，编年史写得更细了', '有 1 处地形修改格式不对,已跳过']);
   });
 
   it('版本提示排在参数提示之后、改名提示之前', () => {
@@ -915,8 +916,11 @@ describe('旧版本的提示:照实说变了什么', () => {
   it('按跨过的几版里最大的那种改动说', () => {
     expect(versionNote(GENERATOR_VERSION, false)).toBeNull();
     expect(versionNote(GENERATOR_VERSION, true)).toBeNull();
+    // 第 9 版:君主的世系,只改了编年史的字
+    expect(versionNote(8, false)).toBe('来自旧版本：疆域和兴亡没变，编年史写得更细了');
+    expect(versionNote(8, true)).toBe('来自旧版本：疆域和兴亡没变，编年史写得更细了');
     // 第 8 版只动了改过地形的世界
-    expect(versionNote(7, false)).toBeNull();
+    expect(versionNote(7, false)).toBe('来自旧版本：疆域和兴亡没变，编年史写得更细了');
     expect(versionNote(7, true)).toBe('来自旧版本：地形和气候没变，历史重新推演了');
     // 第 6、7 版:人物和战役 < 洋流(气候、河流、历史)
     expect(versionNote(6, false)).toBe('来自旧版本：陆地和山没变，气候、河流和历史都重算了');
@@ -931,8 +935,11 @@ describe('旧版本的提示:照实说变了什么', () => {
   });
   it('版本不同、但世界应该一样时照样核对地形', () => {
     const save = makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EMPTY_EDITS, 'aaaaaaaaaaaa');
-    expect(checkWarning({ ...save, generator: 7 }, 'aaaaaaaaaaaa')).toBeNull();
-    expect(checkWarning({ ...save, generator: 7 }, 'bbbbbbbbbbbb')).toBe(CHECK_WARNING);
+    // 8 → 现在只改了编年史的字;7 → 现在,没改地形的世界也只是这样(第 8 版只动改过地形的)
+    for (const generator of [8, 7]) {
+      expect(checkWarning({ ...save, generator }, 'aaaaaaaaaaaa')).toBeNull();
+      expect(checkWarning({ ...save, generator }, 'bbbbbbbbbbbb')).toBe(CHECK_WARNING);
+    }
     // 世界本来就变了(已经说过变了什么):不重复
     expect(checkWarning({ ...save, generator: 6 }, 'bbbbbbbbbbbb')).toBeNull();
     const edited = { ...save, generator: 7, edits: { ...save.edits, terrain: [{ kind: 'lake' as const, pts: [300, 400], r: 16, s: 1 }] } };

@@ -195,14 +195,14 @@ export const NEWER_NOTE = '来自更新的版本，刷新页面换到最新版�
 
 /**
  * 从第 from 版生成器到现在,同样的种子、参数(改没改过地形)生成出来的世界变了什么:跨过的几版里最大的那种改动。
- * 一样 = null(比如只动了改过地形的世界的那一版,这个世界没改地形);比现在新 = NEWER_NOTE;
- * 认不出的旧版本(没记版本号、不是整数、表里没有的)按整颗星球重新生成说
+ * 一样 = null(比如只动了改过地形的世界的那一版,这个世界没改地形);比现在新 = 'newer';
+ * 认不出的旧版本(没记版本号、不是整数、表里没有的)按整颗星球重新生成算
  */
-export function versionNote(from: number, terrainEdited: boolean): string | null {
+function changeSince(from: number, terrainEdited: boolean): GeneratorChange | 'newer' | null {
   if (from === GENERATOR_VERSION) return null;
-  // 不是整数的版本号(手改过、坏了的存档)认不出,不管比现在大还是小,都按整颗星球重新生成说
-  if (!Number.isInteger(from)) return `来自旧版本：${CHANGE_TEXT.planet}`;
-  if (from > GENERATOR_VERSION) return NEWER_NOTE;
+  // 不是整数的版本号(手改过、坏了的存档)认不出,不管比现在大还是小,都按整颗星球重新生成算
+  if (!Number.isInteger(from)) return 'planet';
+  if (from > GENERATOR_VERSION) return 'newer';
   let top = -1;
   for (let v = Math.max(1, from) + 1; v <= GENERATOR_VERSION; v++) {
     const c = GENERATOR_CHANGES[v];
@@ -210,7 +210,13 @@ export function versionNote(from: number, terrainEdited: boolean): string | null
     if (c?.edited && !terrainEdited) continue;
     top = Math.max(top, rank);
   }
-  return top < 0 ? null : `来自旧版本：${CHANGE_TEXT[CHANGE_RANK[top]]}`;
+  return top < 0 ? null : CHANGE_RANK[top];
+}
+
+/** 打开旧存档、旧链接时说清变了什么(见 changeSince);一样 = null;比现在新 = NEWER_NOTE */
+export function versionNote(from: number, terrainEdited: boolean): string | null {
+  const c = changeSince(from, terrainEdited);
+  return c === null ? null : c === 'newer' ? NEWER_NOTE : `来自旧版本：${CHANGE_TEXT[c]}`;
 }
 
 /** 生成器版本相同、地形却对不上时的提示 */
@@ -515,12 +521,15 @@ export function parseSave(text: string): ParseResult {
   return { ok: true, save, warnings };
 }
 
+/** 跨过这几种改动,世界(地形、疆域、兴亡)和原来一样:只换了默认的名字、编年史的字 */
+const SAME_WORLD: readonly (GeneratorChange | 'newer' | null)[] = [null, 'names', 'chronicle'];
+
 /**
- * 按存档的参数生成完以后核对地形:生成器版本相同(或版本不同、但按 versionNote 世界应该一样)、地形哈希却对不上时给提示
+ * 按存档的参数生成完以后核对地形:生成器版本相同(或版本不同、但世界应该一样,见 SAME_WORLD)、地形哈希却对不上时给提示
  * (版本不同、世界变了的,parseSave 已经说过变了什么,这里不重复)。对得上 = null
  */
 export function checkWarning(save: SaveFile, check: string): string | null {
-  if (save.generator !== GENERATOR_VERSION && versionNote(save.generator, (save.edits.terrain?.length ?? 0) > 0) !== null) return null;
+  if (!SAME_WORLD.includes(changeSince(save.generator, (save.edits.terrain?.length ?? 0) > 0))) return null;
   if (!save.check || save.check === check) return null;
   return CHECK_WARNING;
 }

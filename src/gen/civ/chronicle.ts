@@ -1664,7 +1664,7 @@ function deathWord(p: Polity, tier: number): [string, string] {
  * 东方 "大昌太宗崩,在位 23 年;太子李昭即位,是为高宗"(王国"世子",年少的加",时年 9 岁");
  * 汗国、部落 "乌耐汗国咄苾可汗卒,在位 12 年;其弟阿史那继为可汗";
  * 西幻 "索拉特国王阿尔德里克二世驾崩,在位 31 年;其子阿尔德里克三世即位";共和国 "提布里亚执政官卡西乌斯任满,马库斯继任"。
- * 父子、兄弟按两人的年纪差说(peopleText.ts 的 kinOf:差十四岁以上是子,四十岁以上是孙,不然是弟;新君年长的是兄)。
+ * 新君是先君的什么人按世系说(peopleText.ts 的 kinOf:子、孙、弟、兄、侄、叔父……;连不上的写"宗室")。
  * 标签"嗣",重要度 1;id = civ.annals.length + 新君的 Person.id。没有人物 = 空数组。
  * 不在 buildChronicle 里(那里只有史事,AI 材料、地点的纪事都用它);要列继位的地方自己并进去(mergeChronicle)。按 civ 缓存
  */
@@ -1689,8 +1689,8 @@ export function reignEntries(civ: Civ): ChronicleEntry[] {
       if (p.lineage === 'republic') text = `${ref}任满,${x.name}继任`;
       else {
         const [died, killed] = deathWord(p, tier);
-        const k = kinOf(prev, x);
-        const kin = k !== '子' ? `其${k}` : p.eastern && p.lineage !== 'khanate' && tier >= 3 ? '太子' : p.eastern && p.lineage !== 'khanate' && tier === 2 ? '世子' : '其子';
+        const k = kinOf(civ, prev, x);
+        const kin = !k ? '宗室' : k !== '子' ? `其${k}` : p.eastern && p.lineage !== 'khanate' && tier >= 3 ? '太子' : p.eastern && p.lineage !== 'khanate' && tier === 2 ? '世子' : '其子';
         const age = ageAt(x, y);
         const young = age < 15 ? `,时年 ${age} 岁` : '';
         let then: string;

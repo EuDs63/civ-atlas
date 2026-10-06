@@ -516,6 +516,341 @@
   color: var(--ink);
 }
 
+/* ---- 人物页的世系图(PeopleLineage.tsx):左边朝代一列,右边一朝一棵家谱树 ---- */
+.chron-acts .lg-seg {
+  margin-right: 8px;
+  border-radius: 9px;
+}
+.chron-acts .lg-seg button {
+  padding: 6px 12px;
+  border-radius: 7px;
+  color: var(--ink);
+  line-height: 1;
+}
+.chron-acts .lg-seg button.on {
+  background: var(--surface);
+  box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+.chron-list.lg-box {
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.lg-wrap {
+  display: flex;
+  gap: 24px;
+  height: 100%;
+  min-height: 0;
+}
+.lg-dyns {
+  flex: none;
+  width: 208px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 10px;
+  overflow-y: auto;
+}
+.lg-dyns h4 {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.lg-dyn {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.lg-dyn:hover:not(.on) {
+  background: var(--hover-bg);
+}
+.lg-dyn.on {
+  background: var(--btn);
+}
+.lg-dyn b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.lg-dyn small,
+.lg-dyn span {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.lg-dyn span {
+  grid-column: 1 / -1;
+}
+.lg-legend {
+  margin-top: auto;
+  padding: 12px 10px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.lg-legend div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lg-key {
+  flex: none;
+  width: 18px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.2);
+}
+.lg-key.prince {
+  background: transparent;
+  box-shadow: none;
+  border: 1px dashed var(--line-strong);
+}
+.lg-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.lg-head b {
+  flex: none;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.lg-scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 16px;
+}
+.lg-distant {
+  margin: 22px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.lg-tree {
+  position: relative;
+  margin: 18px auto 0;
+}
+.lg-tree svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+.lg-tree path {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.2;
+}
+.lg-tree path.fut {
+  opacity: 0.45;
+}
+.lg-node {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.lg-node:hover {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+.lg-node.fut {
+  opacity: 0.45;
+}
+.lg-node.on,
+.lg-node.focus {
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 1px 4px rgba(0, 122, 255, 0.18);
+}
+.lg-n {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.lg-node.on .lg-n {
+  color: var(--accent);
+  font-weight: 600;
+}
+.lg-t {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lg-t b {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.lg-nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lg-t b .cp-badge {
+  flex: none;
+}
+.lg-t > em {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.2;
+  color: var(--ink-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.lg-prince {
+  padding-left: 10px;
+  background: transparent;
+  box-shadow: none;
+  border: 1px dashed var(--line-strong);
+}
+.lg-prince:hover {
+  box-shadow: none;
+  background: var(--hover-bg);
+}
+.lg-prince .lg-t b {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.lg-prince .lg-t > em {
+  color: var(--ink-3);
+}
+.lg-prince.focus {
+  border: 1.5px solid var(--accent);
+  box-shadow: none;
+}
+.lg-tail {
+  position: absolute;
+  width: 240px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--ink-2);
+}
+/* 手机:朝代换成一排横滑的按钮,整页上下滑,树左右滑 */
+.lg-phone {
+  display: block;
+  height: auto;
+}
+.chron-list.lg-box:has(.lg-phone) {
+  overflow-y: auto;
+}
+.lg-phone .lg-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.lg-phone .lg-tree {
+  margin: 14px 0 0;
+}
+.lg-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 0 8px;
+  scrollbar-width: none;
+}
+.lg-chips::-webkit-scrollbar {
+  display: none;
+}
+.lg-chip {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--btn);
+  color: var(--ink);
+  text-align: left;
+}
+.lg-chip b {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.lg-chip span {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.lg-chip.on {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.lg-chip.on span {
+  color: var(--on-accent);
+  opacity: 0.85;
+}
+.lg-chip.on .cp-badge {
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--on-accent);
+}
+.lg-phone .lg-t b {
+  font-size: 13px;
+}
+.lg-phone .lg-t > em {
+  font-size: 11px;
+}
+
 /* ---- 我的干预页 ---- */
 .ov-iv {
   display: flex;

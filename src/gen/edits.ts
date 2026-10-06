@@ -136,6 +136,8 @@
  *   7:洋流(currents.ts):大陆两岸冷暖不同,气温、降水、群落、海冰跟着变;地形不变,历史换了一遍。
  *   8:改过地形的世界,扩张节拍按没改地形时的同一颗星球定(civ/index.ts 的 planetTempo),不再因为节拍被拨动而让全世界的历史错开。
  *      没改地形的世界和 7 逐字节相同;改过地形的世界历史换了一遍。
+ *   9:君主有了世系(谁是谁的父亲,civ/lineage.ts),补上没即位的宗室;疆域、兴亡、君主和将领都和 8 一样,
+ *      只是继位时年纪对不上的"其弟 / 其兄"改成了"其侄 / 叔父"这类(每个世界几十句)。
  */
 import type { Civ, Culture, Faith, Place, Polity, Settlement } from './civ/types';
 import type { AuthorCharacter } from './characters';
@@ -143,7 +145,7 @@ import { polityRootAt } from './civ/growth';
 import { TERRAIN_H, TERRAIN_W } from './terrainEdits';
 
 /** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对);加一时在 GENERATOR_CHANGES 里补一条 */
-export const GENERATOR_VERSION = 8;
+export const GENERATOR_VERSION = 9;
 
 /**
  * 一版生成器的改动有多大(从小到大):打开旧存档、旧链接时,按跨过的几版里最大的那一种说清变了什么(savefile.ts 的 versionNote)
@@ -165,6 +167,7 @@ export const GENERATOR_CHANGES: Readonly<Record<number, { change: GeneratorChang
   6: { change: 'chronicle' },
   7: { change: 'climate' },
   8: { change: 'history', edited: true },
+  9: { change: 'chronicle' },
 };
 
 /** 干预的种类(见文件头的表) */

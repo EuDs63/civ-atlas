@@ -770,7 +770,8 @@ export function App() {
     const pp = getPeople().polity;
     if (pp !== null) {
       const r = old.polities[pp] ? resolveKey(civ, polityKey(old, pp)) : null;
-      setPeople({ polity: r && r.kind === 'polity' ? r.id : null });
+      // 世系图看哪一朝、圈出谁跟着旧历史的编号,作废
+      setPeople({ polity: r && r.kind === 'polity' ? r.id : null, dynasty: null, focus: null });
     }
   };
   /**

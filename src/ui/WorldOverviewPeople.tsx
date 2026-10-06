@@ -6,9 +6,10 @@
  *   名人   全世界的名将、名君、开国之君(gen/civ/peopleInfo.ts 按事迹打分挑的),按上台的年份排,新的在上;
  *          每人一行:年份、名字、一句为什么出名("大景王朝君主，在位时得五州，亲征萨尔斯坦帝国")
  *   君主   选了国家:按朝代分组(组名停在顶上),新的在上;一句"继父睿宗即位，时年 14 岁，在位 28 年，驾崩"。
- *          全部国家:先按国家(鼎盛时大的在前)、再按朝代分组;这时不是一条时间线,不画"现在"线
+ *          全部国家:先按国家(鼎盛时大的在前)、再按朝代分组;这时不是一条时间线,不画"现在"线。
+ *          只看一国、不是共和国时右上多「列表 | 世系图」:世系图一朝一棵家谱树(PeopleLineage.tsx)
  *   将领   按第一次领兵的年份排,新的在上;一句"伐萨尔斯坦帝国，攻取三州"(全部国家时前面加"大景将领")
- * 国家下拉框只看这一国(国家卡片的"全部 N 位"进来 = 这国的君主);"复制全文"复制成纯文字。
+ * 国家下拉框只看这一国(国家卡片的"全部 N 位"进来 = 这国的君主);"复制全文"复制成纯文字(世系图 = 缩进的家谱)。
  * 和编年史一样跟着时间轴:还没上台的淡显,"现在"线在第一位已经上台的上方(Chronicle.tsx 的 useNowLine)。
  */
 import { useMemo, useRef, useState, type ReactNode } from 'react';
@@ -30,6 +31,7 @@ import {
   riseText,
 } from '../gen/civ/peopleInfo';
 import { generalRole, isConsul, personName, rulerFateWord } from '../gen/civ/peopleText';
+import { hasLineage, lineageText } from '../gen/civ/lineageInfo';
 import { closeOverview, setPeople, usePeople, type PeopleList } from './overviewStore';
 import { useEdits } from './editsStore';
 import { setSelection } from './civView';
@@ -41,6 +43,7 @@ import { useNowLine } from './Chronicle';
 import { polityHistory } from './WorldOverviewCountries';
 import { copyText, selectPerson } from './panelParts';
 import { PolityFlag } from './Flag';
+import { PeopleLineage } from './PeopleLineage';
 import './timeline.css';
 
 const F = Math.floor;
@@ -179,9 +182,12 @@ export function PeoplePage({ civ, data }: { civ: Civ | null; data: { world: Worl
     if (polity !== null) return rulerGroups(c, polity, false);
     return choices.flatMap((ch) => rulerGroups(c, ch.id, true));
   }, [ok, civ, view.list, polity, famous, choices, mine, data, year, chars]);
+  // 世系图:「君主」、只看一国、不是共和国
+  const canTree = ok && view.list === 'rulers' && polity !== null && hasLineage(civ!, polity);
+  const tree = canTree && view.tree;
   // 全部国家的君主不是一条时间线(一国一国列):只淡显,不画"现在"线
   const timeline = !(view.list === 'rulers' && polity === null);
-  useNowLine({ listRef, nowRef, civ, jumpKey: groups, line: timeline });
+  useNowLine({ listRef, nowRef, civ, jumpKey: groups, line: timeline, deps: [tree] });
 
   if (!civ) return <section className="chronicle people" />;
 
@@ -201,8 +207,9 @@ export function PeoplePage({ civ, data }: { civ: Civ | null; data: { world: Worl
   const end = civ.endYear;
 
   const copy = async () => {
-    const lines = [`人物 · ${listName} · 种子 ${civ.seed}${focus ? ` · 只看${focusName}` : ''}`, ''];
-    for (const g of groups) {
+    const lines = [`人物 · ${listName}${tree ? ' · 世系图' : ''} · 种子 ${civ.seed}${focus ? ` · 只看${focusName}` : ''}`, ''];
+    if (tree) lines.push(lineageText(civ, polity!));
+    for (const g of tree ? [] : groups) {
       if (g.head) lines.push(`${g.head.name}(${g.head.note})`);
       for (const r of g.rows) lines.push(`${F(r.from)}–${r.until !== null ? F(r.until) : ''} ${r.name} ${r.line}`);
       if (g.head) lines.push('');
@@ -264,11 +271,26 @@ export function PeoplePage({ civ, data }: { civ: Civ | null; data: { world: Worl
               新建人物
             </button>
           )}
-          <button className="ov-btn chron-copy" data-act="people-copy" onClick={() => void copy()} disabled={!total} title="把列出的人物复制成纯文本">
+          {canTree && (
+            <span className="seg lg-seg" role="group" aria-label="怎么看">
+              <button className={tree ? '' : 'on'} data-act="people-as-list" aria-pressed={!tree} onClick={() => setPeople({ tree: false })}>
+                列表
+              </button>
+              <button className={tree ? 'on' : ''} data-act="people-as-tree" aria-pressed={tree} title="一朝一棵家谱树" onClick={() => setPeople({ tree: true, dynasty: null, focus: null })}>
+                世系图
+              </button>
+            </span>
+          )}
+          <button className="ov-btn chron-copy" data-act="people-copy" onClick={() => void copy()} disabled={!total} title={tree ? '把这国的家谱复制成纯文本' : '把列出的人物复制成纯文本'}>
             {copied ? '已复制' : '复制全文'}
           </button>
         </span>
       </div>
+      {tree ? (
+        <div className="chron-list lg-box">
+          <PeopleLineage civ={civ} polity={polity!} dynasty={view.dynasty} focus={view.focus} year={year} />
+        </div>
+      ) : (
       <div className="chron-list" ref={listRef}>
         {groups.map((g, gi) => (
           <div key={gi} className="pp-sect">
@@ -334,6 +356,7 @@ export function PeoplePage({ civ, data }: { civ: Civ | null; data: { world: Worl
         </div>
         {empty && <div className="ov-empty">{empty}</div>}
       </div>
+      )}
     </section>
   );
 }

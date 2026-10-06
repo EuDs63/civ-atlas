@@ -8,7 +8,7 @@
  *   概况  国都、君主(这一年在位的那位,点了看他;共和国写"执政")、疆域(历年州数的小柱图,和概览"国家"表同一份)、
  *         人口(境内城镇)、主体民族、国教(可点,"某年起";没有写"没有")、邻国(可点),来历 / 结局 / 历任国都(有才写)
  *   历代君主  当前这位和前后各两位(新的在上;遇弑、被废这类结局写在名字后面),点一行看这个人;
- *         "全部 N 位"打开概览的人物页、只看这国的君主
+ *         "全部 N 位"打开概览的人物页、只看这国的君主;"世系图"(不是共和国才有)打开这国的世系图,停在时间轴那一年的那一朝
  *   朝代  改朝换代过才有:一朝一行(新的在上),当前那一朝标"当前";点一行 = 时间轴跳到它开始的那年
  *   大事  到当前年份为止最近 5 条(可点:跳到那一年,地图上闪出事发地);"全部 N 件"打开概览的编年史页、只看这国的"全部"
  *         (N 和那里"全部"的条数一样,连同历代君主继位)
@@ -40,7 +40,7 @@ import { CommandPage } from './CommandPage';
 import { setPanelTab, setSheet, usePanel } from './panelStore';
 import { shownYearOf } from './flyTo';
 import { SPARK_N, polityHistory } from './WorldOverviewCountries';
-import { openOverview, openPeople } from './overviewStore';
+import { openLineage, openOverview, openPeople } from './overviewStore';
 import { Act, Acts, AiBox, AiSuggestLink, CenterAct, EventList, Link, MoreAct, PanelHead, Row, Spark, Stats, SubLine, rgb, useRevealAi } from './panelParts';
 import { AiMenuItem, MenuItem, MenuSep } from './PopMenu';
 import { Icon } from './icons';
@@ -418,9 +418,16 @@ function RulerList({ civ, id, year }: { civ: Civ; id: number; year: number }) {
     <section className="cp-sec cp-dyns cp-rulers">
       <div className="cp-sec-head cp-events-head">
         <span>{consul ? '历任执政' : '历代君主'}</span>
-        <button className="ins-link cp-more" data-act="all-rulers" onClick={() => openPeople({ list: 'rulers', polity: id })}>
-          全部 {rs.length} 位
-        </button>
+        <span className="cp-more-links">
+          {!consul && (
+            <button className="ins-link cp-more" data-act="rulers-lineage" onClick={() => openLineage(id)}>
+              世系图
+            </button>
+          )}
+          <button className="ins-link cp-more" data-act="all-rulers" onClick={() => openPeople({ list: 'rulers', polity: id })}>
+            全部 {rs.length} 位
+          </button>
+        </span>
       </div>
       <div className="cp-group">
         {near.map((r) => {

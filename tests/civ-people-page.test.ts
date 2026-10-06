@@ -20,7 +20,7 @@ import {
   rulerAt,
   rulerNeighbors,
 } from '../src/gen/civ/peopleInfo';
-import { KIN_BACK, kinOf, personName, rulerFateWord, rulerRole, rulerShort } from '../src/gen/civ/peopleText';
+import { kinOf, personName, rulerFateWord, rulerRole, rulerShort } from '../src/gen/civ/peopleText';
 import { searchCiv } from '../src/ui/searchIndex';
 import { mapTarget, personKey, resolvePersonKey, selectionKey } from '../src/ui/flyTo';
 
@@ -78,14 +78,14 @@ describe.each([7, 2024])('人物页 · seed=%i', (seed) => {
         expect(rulerRole(civ, x)).not.toMatch(/undefined|NaN/);
         if (x.until !== undefined) expect(rulerFateWord(civ, x)).not.toMatch(/undefined/);
         expect(riseText(civ, x)).not.toMatch(/undefined|NaN/);
-        // 同一朝的上一位传给他:编年史那一条写"其弟 / 其孙 / 其兄 / 太子 / 其子"
+        // 同一朝的上一位传给他:编年史那一条写"其弟 / 其孙 / 其侄 / 太子 / 其子……",人物页写"继兄 / 继祖父 / 继叔父……某某即位"
         if (prev && x.rise === 'heir') {
           const e = reigns.find((r) => r.people?.[0] === prev.id && r.people?.[1] === x.id);
           if (!e || civ.polities[x.polity].lineage === 'republic') continue;
-          const k = kinOf(prev, x);
+          const k = kinOf(civ, prev, x);
           if (k === '子') expect(e.text).toMatch(/太子|世子|其子/);
-          else expect(e.text).toContain(`其${k}`);
-          expect(KIN_BACK[k]).toBeTruthy();
+          else if (k) expect(e.text).toContain(`其${k}`);
+          expect(riseText(civ, x)).toMatch(new RegExp(`^继${kinOf(civ, x, prev)}`));
           kinChecked++;
         }
       }
@@ -144,12 +144,31 @@ describe.each([7, 2024])('人物页 · seed=%i', (seed) => {
 });
 
 describe('人物页 · 几处写法', () => {
-  it('亲属:差 14–39 岁是子,40 岁以上是孙,比上一位小不到 14 岁是弟,比他大是兄', () => {
-    const p = (born: number) => ({ born }) as never;
-    expect(kinOf(p(100), p(125))).toBe('子');
-    expect(kinOf(p(100), p(145))).toBe('孙');
-    expect(kinOf(p(100), p(105))).toBe('弟');
-    expect(kinOf(p(100), p(98))).toBe('兄');
+  it('亲属按世系说:子、孙、父、兄弟、侄、伯父 / 叔父(比父亲年长是伯)、从兄弟、隔三代的;连不上的是空串', () => {
+    // 甲生乙、丙;乙生丁、戊;丙生己、壬;丁生辛;庚和他们不是一家
+    const born = [100, 130, 135, 160, 162, 170, 120, 185, 150];
+    const parent = [undefined, 0, 0, 1, 1, 2, undefined, 3, 2];
+    const people = born.map((b, id) => ({ id, born: b, parent: parent[id] }));
+    const civ = { people } as never;
+    const [甲, 乙, 丙, 丁, 戊, 己, 庚, 辛, 壬] = people as never[];
+    expect(kinOf(civ, 甲, 乙)).toBe('子');
+    expect(kinOf(civ, 甲, 丁)).toBe('孙');
+    expect(kinOf(civ, 乙, 甲)).toBe('父');
+    expect(kinOf(civ, 丁, 甲)).toBe('祖父');
+    expect(kinOf(civ, 乙, 丙)).toBe('弟');
+    expect(kinOf(civ, 丙, 乙)).toBe('兄');
+    expect(kinOf(civ, 丙, 丁)).toBe('侄');
+    expect(kinOf(civ, 丁, 丙)).toBe('叔父');
+    expect(kinOf(civ, 己, 乙)).toBe('伯父');
+    expect(kinOf(civ, 丁, 己)).toBe('从弟');
+    expect(kinOf(civ, 己, 戊)).toBe('从兄');
+    expect(kinOf(civ, 丁, 庚)).toBe('');
+    // 隔三代:曾孙、侄孙、叔祖;父亲的堂兄弟比父亲年长是从伯父
+    expect(kinOf(civ, 甲, 辛)).toBe('曾孙');
+    expect(kinOf(civ, 丙, 辛)).toBe('侄孙');
+    expect(kinOf(civ, 辛, 丙)).toBe('叔祖');
+    expect(kinOf(civ, 辛, 己)).toBe('从叔父');
+    expect(kinOf(civ, 辛, 壬)).toBe('从伯父');
   });
 
   it('seed=7:大景圣宗(柳玄)是名人,继兄即位;搜"圣宗"第一个就是他', () => {

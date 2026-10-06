@@ -3,11 +3,14 @@
  * 地图上亮出他的国家(civView.ts 的 MapSelection、flyTo.ts 的 mapTarget);点人名不挪时间轴,按"即位那年 / 出征那年"才跳。
  *
  *   顶部  国家颜色块、称呼("圣宗柳玄""阿尔德里克三世""楚尧")、"大景皇帝，2485–2519 年在位" / "大景将领，2478–2509 年领兵"
- *   按钮  即位那年 / 出征那年(主操作:时间轴跳过去)、编年史(这国的编年史,滚到他在台上那段)、复制生平(纯文字,写设定用)、
- *         更多(加一个和他有关的作者人物:亲友里先填上他)
- *   概况  君主:事迹(名人才有)、国家、生卒、在位、前任、继任(后面的小字是亲属,和编年史的"其子 / 其弟"同一个算法)、
- *         结局、亲征、将领(在位时本国领兵的);共和国写"在任""执政"
+ *         / "大景宗室，2428–2467"(没即位的宗室:世系图里补上的父辈)
+ *   按钮  即位那年 / 出征那年(主操作:时间轴跳过去;宗室换成「世系图」)、编年史(这国的编年史,滚到他在台上那段)、
+ *         复制生平(纯文字,写设定用)、更多(加一个和他有关的作者人物:亲友里先填上他)
+ *   概况  君主:事迹(名人才有)、国家、生卒、在位、前任、继任(后面的小字是亲属,和编年史的"其子 / 其侄"同一个算法:按世系)、
+ *         父亲、子嗣(世系图里有的人,没即位的写"未即位")、结局、亲征、将领(在位时本国领兵的);
+ *         右上「世系图」打开这国的世系图,停在他那一朝、圈出他。共和国写"在任""执政",没有父亲、子嗣、世系图
  *         将领:事迹、国家、生卒、领兵(伐谁 / 抗谁)、效力(那几年在位的君主)、对手(同一场仗对面的统帅)、结局
+ *         宗室:国家、生卒、父亲、子嗣
  *   作者的人物  亲友里有他、经历里勾了他的作者人物(characterInfo.ts 的 charactersOfPerson),没有就不显示
  *   在位时 / 领兵时  他在台上那几年本国的事(将领 = 他经手的那几仗),新的在上;点一条跳到那一年
  */
@@ -16,9 +19,10 @@ import type { Civ, Person } from '../gen/civ/types';
 import { polityName } from '../gen/civ/growth';
 import { buildChronicle, filterChronicle, reignEntries, type ChronicleEntry } from '../gen/civ/chronicle';
 import { commandFoes, peopleIndex, personFame, personSpan, rulerNeighbors, type Foe } from '../gen/civ/peopleInfo';
-import { KIN_BACK, ageAt, generalRole, isConsul, kinOf, personName, rulerFateWord, rulerRole } from '../gen/civ/peopleText';
+import { ageAt, generalRole, isConsul, kinOf, personName, princeRole, rulerFateWord, rulerRole } from '../gen/civ/peopleText';
+import { fatherOf, hasLineage, kidsOf } from '../gen/civ/lineageInfo';
 import { personKey } from '../gen/characters';
-import { openOverview } from './overviewStore';
+import { openLineage, openOverview } from './overviewStore';
 import { useEdits } from './editsStore';
 import { newCharacterDraft } from './characterStore';
 import { charactersOfPerson } from './characterInfo';
@@ -53,6 +57,28 @@ function peopleLine(civ: Civ, list: readonly Person[], max = 6): { node: ReactNo
       </>
     ),
     text: shown.map((g) => personName(civ, g)).join('、') + (more > 0 ? ` 等 ${list.length} 位` : ''),
+  };
+}
+
+/** 子嗣:人名都能点,没即位的后面小字"未即位";多于 max 个只列前面的 */
+function kidsLine(civ: Civ, list: readonly Person[], max = 6): { node: ReactNode; text: string } {
+  const shown = list.slice(0, max);
+  const more = list.length - shown.length;
+  const note = (k: Person) => (k.role === 'prince' ? '未即位' : '');
+  return {
+    node: (
+      <>
+        {shown.map((k, i) => (
+          <Fragment key={k.id}>
+            {i > 0 && '、'}
+            <Link to={{ kind: 'person', id: k.id }}>{personName(civ, k)}</Link>
+            {note(k) && <em className="cp-num-note">{note(k)}</em>}
+          </Fragment>
+        ))}
+        {more > 0 && <em className="cp-num-note">等 {list.length} 位</em>}
+      </>
+    ),
+    text: shown.map((k) => personName(civ, k) + (note(k) ? `(${note(k)})` : '')).join('、') + (more > 0 ? ` 等 ${list.length} 位` : ''),
   };
 }
 
@@ -94,16 +120,20 @@ export function PersonPanel({ civ, id, year }: DetailProps) {
   const refs = useMemo(() => charactersOfPerson(civ, chars, id), [civ, chars, id]);
   if (!x || !p) return null;
   const ruler = x.role === 'ruler';
+  const prince = x.role === 'prince';
   const consul = isConsul(civ, x);
   const span = personSpan(x);
   const end = span.until ?? civ.endYear;
-  const sub = ruler
-    ? span.until === null
-      ? `${rulerRole(civ, x)}，${F(span.from)} 年${consul ? '就任' : '即位'}`
-      : `${rulerRole(civ, x)}，${F(span.from)}–${F(span.until)} 年${consul ? '在任' : '在位'}`
-    : `${generalRole(civ, x)}，${F(span.from)}–${F(end)} 年领兵`;
+  const sub = prince
+    ? `${princeRole(civ, x)}，${F(x.born)}–${x.died !== undefined ? F(x.died) : ''}`
+    : ruler
+      ? span.until === null
+        ? `${rulerRole(civ, x)}，${F(span.from)} 年${consul ? '就任' : '即位'}`
+        : `${rulerRole(civ, x)}，${F(span.from)}–${F(span.until)} 年${consul ? '在任' : '在位'}`
+      : `${generalRole(civ, x)}，${F(span.from)}–${F(end)} 年领兵`;
   const name = personName(civ, x);
   const head = ruler ? (consul ? '在任时' : '在位时') : '领兵时';
+  const lineage = () => openLineage(x.polity, { dynasty: x.dynasty ?? 0, focus: x.id });
 
   const copy = async () => {
     const out = [name, sub, ...lines.map((l) => `${l.k}：${l.text}`)];
@@ -124,9 +154,15 @@ export function PersonPanel({ civ, id, year }: DetailProps) {
         <SubLine parts={[sub]} />
       </PanelHead>
       <Acts>
-        <Act icon="history" primary act="person-year" onClick={() => jumpTo(span.from)} title={`时间轴跳到 ${F(span.from)} 年`}>
-          {ruler ? (consul ? '就任那年' : '即位那年') : '出征那年'}
-        </Act>
+        {prince ? (
+          <Act icon="lineage" primary act="person-lineage" onClick={lineage} title="看这一朝的世系图">
+            世系图
+          </Act>
+        ) : (
+          <Act icon="history" primary act="person-year" onClick={() => jumpTo(span.from)} title={`时间轴跳到 ${F(span.from)} 年`}>
+            {ruler ? (consul ? '就任那年' : '即位那年') : '出征那年'}
+          </Act>
+        )}
         <Act icon="scroll" act="person-chronicle" onClick={() => openOverview('chronicle', { polity: x.polity, major: false, at: end })}>
           编年史
         </Act>
@@ -140,7 +176,17 @@ export function PersonPanel({ civ, id, year }: DetailProps) {
         </MoreAct>
       </Acts>
       <div className="cp-body">
-        <Stats items={[]}>
+        <Stats
+          items={[]}
+          more={
+            ruler &&
+            hasLineage(civ, x.polity) && (
+              <button className="ins-link cp-more" data-act="person-lineage" onClick={lineage}>
+                世系图
+              </button>
+            )
+          }
+        >
           {lines.map((l) => (
             <Row key={l.k} k={l.k}>
               {l.node}
@@ -148,6 +194,7 @@ export function PersonPanel({ civ, id, year }: DetailProps) {
           ))}
         </Stats>
         <CharacterRefs refs={refs} />
+        {!prince && (
         <EventList
           civ={civ}
           self={id}
@@ -161,6 +208,7 @@ export function PersonPanel({ civ, id, year }: DetailProps) {
             </button>
           }
         />
+        )}
       </div>
     </div>
   );
@@ -173,7 +221,8 @@ function personLines(civ: Civ, x: Person): Line[] {
   const fame = personFame(civ, x);
   if (fame?.deeds) out.push({ k: '事迹', node: fame.deeds, text: fame.deeds });
   const span = personSpan(x);
-  const pn = polityName(p, span.from);
+  // 宗室(可能生在立国之前):按卒年那会儿的国名
+  const pn = polityName(p, x.role === 'prince' ? Math.max(p.founded, Math.min(x.died ?? x.born, p.ended ?? civ.endYear) - 1 / 512) : span.from);
   out.push({ k: '国家', node: <Link to={{ kind: 'polity', id: p.id }}>{pn}</Link>, text: pn });
   if (x.died !== undefined) {
     // 享年按实际活了多久算(和编年史的"时年"一样),不是两个年份相减
@@ -188,10 +237,22 @@ function personLines(civ: Civ, x: Person): Line[] {
       text: `${F(x.born)}–${F(x.died)} 年，享年 ${age} 岁`,
     });
   } else out.push({ k: '生卒', node: `${F(x.born)} 年生`, text: `${F(x.born)} 年生` });
+  if (x.role === 'prince') {
+    kinLines(civ, x, out);
+    return out;
+  }
   const foes = commandFoes(civ, x);
   if (x.role === 'ruler') rulerLines(civ, x, out, foes);
   else generalLines(civ, x, out, foes);
   return out;
+}
+
+/** 父亲、子嗣(世系图里有的人;没即位的小字"未即位") */
+function kinLines(civ: Civ, x: Person, out: Line[]) {
+  const f = fatherOf(civ, x);
+  if (f) out.push(personRow('父亲', civ, f, f.role === 'prince' ? '未即位' : ''));
+  const ks = kidsOf(civ, x);
+  if (ks.length) out.push({ k: '子嗣', ...kidsLine(civ, ks) });
 }
 
 function rulerLines(civ: Civ, x: Person, out: Line[], foes: Foe[]) {
@@ -214,16 +275,17 @@ function rulerLines(civ: Civ, x: Person, out: Line[], foes: Foe[]) {
     out.push({ k: consul ? '在任' : '在位', node: t, text: t });
   }
   const { prev, next } = rulerNeighbors(civ, x);
-  // 亲属:同一朝、继位的才写(和编年史的"其子 / 其弟"一致);换了朝代写"前朝 / 新朝"
+  // 亲属:同一朝、继位的才写(和编年史的"其子 / 其侄"一致,连不上的是"宗室");换了朝代写"前朝 / 新朝"
   const sameDyn = (a: Person, b: Person) => (a.dynasty ?? 0) === (b.dynasty ?? 0);
   if (prev) {
-    const note = consul ? '' : !sameDyn(prev, x) ? '前朝' : x.rise === 'heir' ? KIN_BACK[kinOf(prev, x)] : '';
+    const note = consul ? '' : !sameDyn(prev, x) ? '前朝' : x.rise === 'heir' ? kinOf(civ, x, prev) || '宗室' : '';
     out.push(personRow('前任', civ, prev, note));
   }
   if (next) {
-    const note = consul ? '' : !sameDyn(x, next) ? '新朝' : next.rise === 'heir' ? kinOf(x, next) : '';
+    const note = consul ? '' : !sameDyn(x, next) ? '新朝' : next.rise === 'heir' ? kinOf(civ, x, next) || '宗室' : '';
     out.push(personRow('继任', civ, next, note));
   }
+  if (!consul) kinLines(civ, x, out);
   const fate = rulerFateWord(civ, x);
   if (fate) {
     // 失位以后又活了些年(被废、出奔……)的,写上卒年

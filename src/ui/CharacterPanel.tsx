@@ -11,9 +11,9 @@
  *   这些年身边的事  他在世那些年他的国家的事、换君主、他去过的州的事(当前那年前后最多 8 条),后面「在编年史中查看」
  *
  * 填的时候(新建、编辑)
- *   名字输入框、生卒(各带"用第 N 年")、出生地(点地图挑,「换一处」)、国家(默认跟着出生地)、身份、颜色、简介、
+ *   名字输入框、生卒(各带"用第 N 年")、出生地(点地图挑,「换一处」「去掉」)、国家(默认跟着出生地)、身份、颜色、简介、
  *   一生(一行一段,点了改;「加一段经历」)、亲友(点了改;「加亲友」)、底部 取消 / 完成
- *   加一段经历:年份(算好几岁)、经历、在哪(点地图)、勾推演里那几年那一处的事和人;底部 取消 / 加上
+ *   加一段经历:年份(算好几岁)、经历、在哪(点地图;「去掉」清掉)、勾推演里那几年那一处的事和人;底部 取消 / 加上
  *   加亲友:关系(随便写)、是谁(自己的人物或推演里的人,能搜);底部 取消 / 加上
  */
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
@@ -450,8 +450,8 @@ export function CharacterRefs({ refs }: { refs: readonly CharRef[] }) {
 
 const digits = (s: string) => s.replace(/[^\d]/g, '').slice(0, 5);
 
-/** 挑地方的那一格:已经有 = 名字 + 小字 +「换一处」;正在挑 =「取消」;没有 = 一句提示 */
-function PickRow({ name, note, picking, onPick, act }: { name: string | null; note?: string; picking: boolean; onPick: () => void; act: string }) {
+/** 挑地方的那一格:已经有 = 名字 + 小字 +「去掉」「换一处」;正在挑 =「取消」;没有 = 一句提示 */
+function PickRow({ name, note, picking, onPick, onClear, act }: { name: string | null; note?: string; picking: boolean; onPick: () => void; onClear: () => void; act: string }) {
   return (
     <div className={`oc-pick${picking ? ' picking' : ''}`} data-oc={act}>
       {name ? (
@@ -462,9 +462,16 @@ function PickRow({ name, note, picking, onPick, act }: { name: string | null; no
       ) : (
         <span className="oc-pick-empty">{picking ? '在地图上点一处' : '还没选'}</span>
       )}
-      <button className="cp-step" data-act={`${act}-pick`} onClick={picking ? stopPicking : onPick}>
-        {picking ? '取消' : name ? '换一处' : '选一处'}
-      </button>
+      <span className="oc-pick-acts">
+        {name && !picking && (
+          <button className="cp-step" data-act={`${act}-clear`} onClick={onClear}>
+            去掉
+          </button>
+        )}
+        <button className="cp-step" data-act={`${act}-pick`} onClick={picking ? stopPicking : onPick}>
+          {picking ? '取消' : name ? '换一处' : '选一处'}
+        </button>
+      </span>
     </div>
   );
 }
@@ -559,7 +566,7 @@ function CharEdit({ civ, raster, world, year, draft: d, picking }: CharacterPane
         </section>
         <section className="cp-sec">
           <div className="cp-sec-head">出生地</div>
-          <PickRow name={birth?.name ?? null} note={birth && !birth.missing ? placeNote(civ, birth, bornYear) : undefined} picking={picking} onPick={() => startPicking('birth')} act="character-birth" />
+          <PickRow name={birth?.name ?? null} note={birth && !birth.missing ? placeNote(civ, birth, bornYear) : undefined} picking={picking} onPick={() => startPicking('birth')} onClear={() => patchDraft({ birthplace: null })} act="character-birth" />
           <div className="cp-note">点地图上的城，或者任意一处。不填也行。</div>
         </section>
         <section className="cp-sec">
@@ -732,7 +739,7 @@ function LifeCard({ civ, raster, world, year, draft: d, l, picking }: CharacterP
         </section>
         <section className="cp-sec">
           <div className="cp-sec-head">在哪</div>
-          <PickRow name={pl?.name ?? null} note={pl && !pl.missing ? placeNote(civ, pl, ly) : undefined} picking={picking} onPick={() => startPicking('life')} act="character-life-where" />
+          <PickRow name={pl?.name ?? null} note={pl && !pl.missing ? placeNote(civ, pl, ly) : undefined} picking={picking} onPick={() => startPicking('life')} onClear={() => patchLife({ where: null })} act="character-life-where" />
           <div className="cp-note">点地图上的城、州，或者任意一处。不填也行。</div>
         </section>
         <section className="cp-sec" data-oc="life-events">

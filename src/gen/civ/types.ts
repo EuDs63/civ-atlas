@@ -444,7 +444,8 @@ export interface Religion {
  */
 export interface Person {
   id: number;
-  role: 'ruler' | 'general';
+  /** ruler 君主、general 将领、prince 没即位的宗室(世系里补出来的,见 lineage.ts) */
+  role: 'ruler' | 'general' | 'prince';
   /** 哪国的人 */
   polity: number;
   /** 本名:东方中式 = 姓 + 名("李昭");东方边塞、山海和西幻 = 名("咄苾""阿尔德里克") */
@@ -469,6 +470,8 @@ export interface Person {
   title?: string;
   /** 领兵打过的仗(君主亲征也记在这里) */
   commands?: PersonCommand[];
+  /** 父亲(Person.id;君主和宗室才有;一朝的第一位、共和国执政官、将领没有) */
+  parent?: number;
 }
 
 /** 一次领兵:哪场战争、哪一方、任期 */

@@ -136,7 +136,7 @@ export function resolvePersonKey(civ: Civ, key: string): number {
   return personIndex(civ).byKey.get(key) ?? -1;
 }
 
-const PERSON_KEY = /^person:polity:(r-?\d{1,7}|c\d{1,7})#\d{1,5}\|(ruler|general)\|[^|\n]{1,32}\|-?\d{1,6}(#\d{1,4})?$/;
+const PERSON_KEY = /^person:polity:(r-?\d{1,7}|c\d{1,7})#\d{1,5}\|(ruler|general|prince)\|[^|\n]{1,32}\|-?\d{1,6}(#\d{1,4})?$/;
 const EVENT_KEY = /^event:\d{1,5}\|[a-z]{1,16}\|[^|\n]{1,48}\|[^|\n]{1,100}#\d{1,4}$/;
 export const isPersonKey = (k: unknown): k is string => typeof k === 'string' && PERSON_KEY.test(k);
 export const isEventKey = (k: unknown): k is string => typeof k === 'string' && EVENT_KEY.test(k);

@@ -140,8 +140,21 @@ export function generalRole(civ: Civ, x: Person): string {
   return `${polityShortTitle(p, clampTier(polityTierAt(p, y)), y)}将领`;
 }
 
-/** 一个人简短的身份:"大景将领""大景君主"(共和国:"某某执政";国名按他上台那年的简称)。作者的人物勾选推演里的人时用 */
+/**
+ * 没即位的宗室的身份:"大景宗室"(国名按卒年的简称;死在他那一朝开国之前的(开国之君的父亲)按开国那年,
+ * 免得起兵代衍朝的太祖的父亲写成"大衍宗室")
+ */
+export function princeRole(civ: Civ, x: Person): string {
+  const p = polityOfPerson(civ, x);
+  if (!p) return '宗室';
+  const start = x.dynasty ? (p.dynasties?.[x.dynasty]?.year ?? p.founded) : p.founded;
+  const y = Math.max(start, Math.min(x.died ?? x.born, p.ended ?? civ.endYear) - 1 / 512);
+  return `${polityShortTitle(p, clampTier(polityTierAt(p, y)), y)}宗室`;
+}
+
+/** 一个人简短的身份:"大景将领""大景君主""大景宗室"(共和国:"某某执政";国名按他上台那年的简称)。作者的人物勾选推演里的人时用 */
 export function personRoleShort(civ: Civ, x: Person): string {
+  if (x.role === 'prince') return princeRole(civ, x);
   if (x.role !== 'ruler') return generalRole(civ, x);
   const p = polityOfPerson(civ, x);
   if (!p) return '君主';
@@ -154,19 +167,48 @@ export function isConsul(civ: Civ, x: Person): boolean {
   return x.role === 'ruler' && polityOfPerson(civ, x)?.lineage === 'republic';
 }
 
-/**
- * 后一位君主是前一位的什么人:按两人的年纪差说(差十四岁以上是子,四十岁以上是孙,不然是弟;后一位年长的是兄)。
- * 推演没有记父子,编年史的"其子 / 其弟"和人物卡片的"父 / 兄"都按这个算,两边一致
- */
-export function kinOf(prev: Person, next: Person): '子' | '孙' | '弟' | '兄' {
-  const gap = next.born - prev.born;
-  if (gap >= 40) return '孙';
-  if (gap < 0) return '兄';
-  return gap >= 14 ? '子' : '弟';
+/** 往上数几代的祖先(0 = 自己);没记父亲的到此为止 */
+function ancestors(civ: Civ, x: Person, max: number): Person[] {
+  const out = [x];
+  for (let p = x; out.length <= max && p.parent !== undefined; ) {
+    const f = civ.people?.[p.parent];
+    if (!f) break;
+    out.push(f);
+    p = f;
+  }
+  return out;
 }
 
-/** kinOf 倒过来:前一位是后一位的什么人 */
-export const KIN_BACK: Record<ReturnType<typeof kinOf>, string> = { 子: '父', 孙: '祖父', 弟: '兄', 兄: '弟' };
+/**
+ * b 是 a 的什么人,按世系(Person.parent,lineage.ts)说:子、孙、父、兄、弟、侄、伯父、叔父、从兄、从弟……;
+ * 往上三代都找不到同一位祖先 = 空串(同一朝的宗室远支,或者根本不是一家)。
+ * 编年史的"其子 / 其侄"(kinOf(先君, 新君))、人物页的"继叔父某某即位"(kinOf(新君, 先君))、人物卡片前任继任后面的小字都用它
+ */
+export function kinOf(civ: Civ, a: Person, b: Person): string {
+  const up = 3;
+  const as = ancestors(civ, a, up);
+  const bs = ancestors(civ, b, up);
+  for (let n = 1; n <= up * 2; n++) {
+    for (let i = Math.max(0, n - up); i <= Math.min(up, n); i++) {
+      const j = n - i;
+      if (as[i] === undefined || bs[j] === undefined || as[i] !== bs[j]) continue;
+      // a 往上 i 代、b 往上 j 代是同一位
+      const elder = b.born < a.born;
+      if (i === 0) return ['', '子', '孙', '曾孙'][j];
+      if (j === 0) return ['', '父', '祖父', '曾祖父'][i];
+      if (i === 1 && j === 1) return elder ? '兄' : '弟';
+      if (i === 1 && j === 2) return '侄';
+      if (i === 1 && j === 3) return '侄孙';
+      if (i === 2 && j === 1) return b.born < as[1].born ? '伯父' : '叔父';
+      if (i === 2 && j === 2) return elder ? '从兄' : '从弟';
+      if (i === 2 && j === 3) return '从侄';
+      if (i === 3 && j === 1) return b.born < as[2].born ? '伯祖' : '叔祖';
+      if (i === 3 && j === 2) return b.born < as[1].born ? '从伯父' : '从叔父';
+      return elder ? '族兄' : '族弟';
+    }
+  }
+  return '';
+}
 
 /** 君主的结局(卡片、人物页):"驾崩""遇弑""被废""殉国"……;还在位 = 空串 */
 export function rulerFateWord(civ: Civ, x: Person): string {

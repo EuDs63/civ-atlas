@@ -5,7 +5,7 @@
  * **君主**(每个国家从立国到灭亡,一朝接一朝,中间不断档):
  *   - 每一朝的第一位:立国之君 / 叛离自立的守将(分裂)/ 故国王室之后(复国;东方沿用故国末代的姓)/
  *     篡位的权臣(新朝的根据地就是国都)/ 起兵代之的新朝开国之君
- *   - 之后父死子继(年纪对不上时是兄终弟及):即位的年纪、在位多少年按"国家的位置锚 + 第几位"随机取,一生不超过 MAX_AGE 岁;
+ *   - 之后同一家里继位:即位的年纪、在位多少年按"国家的位置锚 + 第几位"随机取,一生不超过 MAX_AGE 岁;
  *     共和国的执政官任期短、任满卸任
  *   - 一朝结束(改朝换代、亡国、并入他国)时在位的那一位是末代:被废、死于兵乱、殉国、出降、出奔、归附
  *   - 称号(Person.title)去世以后才定,还在位的没有:东方按去世那年的国号档位 —— 帝国(王朝)用庙号(开国之君太祖,
@@ -13,6 +13,7 @@
  *     西幻:同一国里同名的国王按先后编序数("阿尔德里克三世"),帝国里开疆最多的一位称"大帝";共和国执政官、汗不编序数
  * **统帅**(按战争先后):开战时两边各有一位 —— 好战的君主有时亲征,否则派一位将领(本国在世、正闲着的将领先用,没有就新起一位);
  *   每一仗输的一方统帅有机会战死,下一仗换人;将领到年纪卸甲、去世也换人。君主亲征不会战死。
+ * **世系**(lineage.ts):按年纪给继位的君主连上父亲(子、孙、兄弟、侄、叔伯……),对不上的地方补一位没即位的宗室。
  *
  * 随机数一律 keyed4(subSeed(seed, 'civ-people'), 国家的位置锚, 第几位, 用途, 种类):国家的位置锚 = 立国时国都的地块
  * (+ 这块地上第几个立国,同 naming.ts);一场战争里按"攻守两国的位置锚 + 宣战的年份"取(同 wars.ts)。
@@ -23,6 +24,7 @@ import type { Annal, Civ, Person, PersonCommand, PersonFate, Polity, RulerRise, 
 import { anchorTag, keyed4, subSeed } from './rand';
 import { anchorsOf, personNamers } from './naming';
 import { capitalAt, polityTierAt } from './growth';
+import { buildLineage } from './lineage';
 
 // ---- 调参 ----
 /** 开国之君、新朝之君即位的年纪(随机) */
@@ -179,7 +181,7 @@ const ENDED: ReadonlySet<PersonFate> = new Set(['deposed', 'overthrown', 'fell',
 
 /**
  * 排出所有人物(Civ.people)。没有文明 / 没有国家 = 空数组。
- * 先排君主(按国家编号、即位先后),再按战争先后排统帅;下标 = Person.id
+ * 先排君主(按国家编号、即位先后),再按战争先后排统帅,最后是世系里补出来的没即位的宗室(lineage.ts);下标 = Person.id
  */
 export function buildPeople(civ: PeopleInput): Person[] {
   const { polities, settlements, cultures, endYear } = civ;
@@ -385,8 +387,11 @@ export function buildPeople(civ: PeopleInput): Person[] {
     }
   }
 
-  const out = [...rulers.flat(), ...generals];
+  // ---- 世系:谁是谁的父亲,补上没即位的宗室(排在最后,君主、将领的编号不变)----
+  const { princes, parentOf } = buildLineage(polities, rulers, generals, { tag, namerOf: (p) => namerOf(styleOf(p)), surnameOf: (r) => splitSurname(r.name) });
+  const out = [...rulers.flat(), ...generals, ...princes];
   out.forEach((p, i) => (p.id = i));
+  for (const [x, f] of parentOf) x.parent = f.id;
   return out;
 }
 

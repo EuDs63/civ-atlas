@@ -14,7 +14,7 @@
 import type { Annal, Civ, Person, PersonCommand, Year } from './types';
 import { polityName, polityShortTitle, polityTierAt } from './growth';
 import { cnNumber } from './chronicle';
-import { KIN_BACK, isConsul, kinOf, rulerRef, rulerShort } from './peopleText';
+import { isConsul, kinOf, rulerRef, rulerShort } from './peopleText';
 
 /** 够这么多分算名人 */
 export const FAME_MIN = 6;
@@ -190,7 +190,7 @@ export function riseText(civ: Civ, x: Person): string {
       if (!prev) return consul ? '就任' : '即位';
       if (consul) return `接${rulerShort(civ, prev)}继任`;
       if ((prev.dynasty ?? 0) !== (x.dynasty ?? 0)) return '即位';
-      return `继${KIN_BACK[kinOf(prev, x)]}${rulerShort(civ, prev)}即位`;
+      return `继${kinOf(civ, x, prev)}${rulerShort(civ, prev)}即位`;
   }
 }
 
@@ -211,7 +211,7 @@ function fameMap(civ: Civ): Map<number, Fame> {
   const out = new Map<number, Fame>();
   const ix = peopleIndex(civ);
   for (const x of civ.people ?? []) {
-    if (x.polity < 0 || !civ.polities[x.polity]) continue;
+    if (x.polity < 0 || !civ.polities[x.polity] || x.role === 'prince') continue;
     const deeds: string[] = [];
     let score = 0;
     if (x.role === 'ruler') {

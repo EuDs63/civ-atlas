@@ -86,6 +86,14 @@ const PATHS = {
       <path d="M9 10h7M9 14h7" />
     </>
   ),
+  lineage: (
+    <>
+      <rect x="9" y="3" width="6" height="5" rx="1.2" />
+      <path d="M12 8v4M6 12h12M6 12v3M18 12v3" />
+      <rect x="3" y="15" width="6" height="5" rx="1.2" />
+      <rect x="15" y="15" width="6" height="5" rx="1.2" />
+    </>
+  ),
   history: (
     <>
       <path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" />

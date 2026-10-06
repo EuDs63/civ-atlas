@@ -1393,3 +1393,8 @@
   }
   /* 顶部提示条(选目标、推演中、已生效):左右留 12px 铺开(app.css) */
 }
+.cp-more-links {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 14px;
+}

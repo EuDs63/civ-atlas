@@ -209,10 +209,10 @@ export function searchCiv(
       weight: built && !ruined ? populationAt(s, year) : 0,
     });
   }
-  // 人物:名字、称号、称号 + 名字
+  // 人物:名字、称号、称号 + 名字(没即位的宗室不列,只在世系里出现)
   for (const x of civ.people ?? []) {
     const P = civ.polities[x.polity];
-    if (!P) continue;
+    if (!P || x.role === 'prince') continue;
     const forms = [personName(civ, x), x.name];
     if (x.role === 'ruler') {
       forms.push(rulerShort(civ, x));

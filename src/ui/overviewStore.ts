@@ -5,6 +5,7 @@
  *   openOverview('chronicle', { polity: 3 })     打开编年史,只看 3 号国家的事
  *   openOverview('interventions')                打开"我的干预"
  *   openPeople({ list: 'rulers', polity: 3 })    打开人物页,看 3 号国家的历代君主(usePeople() 读人物页的筛选)
+ *   openLineage(3, { dynasty: 4, focus: 120 })   打开人物页,看 3 号国家的世系图:第 4 朝,圈出 120 号人物
  *   closeOverview()                              收起(编年史的"只看这一国"一起清掉)
  *   useOverview() / getOverview()                { open, tab }
  *
@@ -100,9 +101,15 @@ export interface PeopleView {
   list: PeopleList | null;
   /** 只看这一国(null = 全部国家) */
   polity: number | null;
+  /** 君主看世系图(只看一国、不是共和国时才有;不然照列表看) */
+  tree: boolean;
+  /** 世系图看哪一朝(Polity.dynasties 的下标;null = 时间轴那一年的那一朝) */
+  dynasty: number | null;
+  /** 世系图里圈出这个人(人物编号;从人物卡片点「世系图」进来);null = 不圈 */
+  focus: number | null;
 }
 
-let people: PeopleView = { list: null, polity: null };
+let people: PeopleView = { list: null, polity: null, tree: false, dynasty: null, focus: null };
 const peopleSubs = new Set<() => void>();
 
 export function getPeople(): PeopleView {
@@ -110,7 +117,14 @@ export function getPeople(): PeopleView {
 }
 
 export function setPeople(patch: Partial<PeopleView>) {
-  people = { ...people, ...patch };
+  const next = { ...people, ...patch };
+  // 世系图只在「君主」、只看一国时有:换成全部国家或别的档,回到列表;换了国家,看哪一朝、圈出谁作废
+  if (next.polity === null || next.list !== 'rulers') next.tree = false;
+  if (next.polity !== people.polity) {
+    if (patch.dynasty === undefined) next.dynasty = null;
+    if (patch.focus === undefined) next.focus = null;
+  }
+  people = next;
   peopleSubs.forEach((f) => f());
 }
 
@@ -122,8 +136,13 @@ export function usePeople(): PeopleView {
   );
 }
 
-/** 打开概览的人物页(国家卡片的"全部 N 位" = 这国的历代君主) */
+/** 打开概览的人物页(国家卡片的"全部 N 位" = 这国的历代君主,照列表看) */
 export function openPeople(patch: Partial<PeopleView> = {}) {
-  setPeople(patch);
+  setPeople({ tree: false, dynasty: null, focus: null, ...patch });
   set({ open: true, tab: 'people' });
+}
+
+/** 打开一国的世系图(人物卡片、国家卡片的「世系图」);不给朝代 = 时间轴那一年的那一朝 */
+export function openLineage(polity: number, opts: { dynasty?: number; focus?: number } = {}) {
+  openPeople({ list: 'rulers', polity, tree: true, dynasty: opts.dynasty ?? null, focus: opts.focus ?? null });
 }

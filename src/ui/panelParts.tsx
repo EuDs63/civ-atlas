@@ -179,11 +179,17 @@ export interface Stat {
   title?: string;
 }
 
-/** 一组圆角的行:左边名目、右边数值;title = 上面的小标题;children = 接在后面的行(Row) */
-export function Stats({ items, title = '概况', children }: { items: Stat[]; title?: string; children?: ReactNode }) {
+/** 一组圆角的行:左边名目、右边数值;title = 上面的小标题;more = 小标题右边的链接;children = 接在后面的行(Row) */
+export function Stats({ items, title = '概况', more, children }: { items: Stat[]; title?: string; more?: ReactNode; children?: ReactNode }) {
   return (
     <section className="cp-sec">
-      {title && <div className="cp-sec-head">{title}</div>}
+      {title && !more && <div className="cp-sec-head">{title}</div>}
+      {title && more && (
+        <div className="cp-sec-head cp-events-head">
+          <span>{title}</span>
+          {more}
+        </div>
+      )}
       <div className="cp-grid cp-stats">
         {items.map((s, i) => (
           <Row key={i} k={s.k} stat title={s.title}>

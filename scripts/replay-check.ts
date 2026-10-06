@@ -1,7 +1,7 @@
 /**
  * 冒烟检查:npx tsx scripts/replay-check.ts
  * 界面骨架(左边侧栏 + 地图、右上图层按钮、图层与投影弹层、世界概览浮层、侧栏里的详情面板)、回放、悬停、点选改名、
- * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、人物(人物卡片、历代君主、编年史里的人名、人物页、搜人名)、作者标记、作者的人物、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
+ * 存档读档分享、导出、干预、改地形、AI、键盘快捷键、人物(人物卡片、历代君主、编年史里的人名、人物页、世系图、搜人名)、作者标记、作者的人物、信仰图层与宗教卡片、东西相连、多种投影、地球仪、宽屏侧栏收起;手机布局(390×844 触屏:底部的世界 / 详情卡片、时间轴胶囊、双指捏合)。
  * 宽屏:存档在侧栏顶上,成书、AI 设置在侧栏右上的"更多"里,导出在地图右上;创建时定下的种子、参数、地形在世界概览的"世界设定"页(只能看)
  * (点侧栏顶上的世界名打开);某一点的完整读数用 window.__wfProbe(悬停卡片只露一两行)。
  */
@@ -540,6 +540,19 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   const polityPick = await page.locator('[data-act=people-polity]').inputValue();
   const groups = await page.locator('.chronicle.people .pp-group').count();
   const rows = await page.locator('.chronicle.people .pp-row').count();
+  // 世系图:时间轴那一年的那一朝、在位的那位蓝框;点没即位的宗室 → 宗室卡片,卡片上「世系图」→ 回来圈出他
+  await page.click('[data-act=people-as-tree]');
+  await page.waitForTimeout(500);
+  const lgHead = await text('.lg-head');
+  const lgNodes = await page.locator('.lg-node').count();
+  const lgOn = await text('.lg-node.on');
+  const princeId = await page.locator('.lg-node.lg-prince').first().getAttribute('data-person').catch(() => null);
+  await page.locator('.lg-node.lg-prince').first().click().catch(() => {});
+  await page.waitForTimeout(500);
+  const princeCard = await text('.inspector .cp.pp');
+  await page.click('.inspector [data-act=person-lineage]').catch(() => {});
+  await page.waitForTimeout(600);
+  const lgFocus = await page.locator(`.lg-node.focus[data-person="${princeId}"]`).count();
   await closeOverview();
   // 搜索
   await page.fill('.sidebar .search-input', '圣宗');
@@ -552,7 +565,8 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   console.log(
     `人物:国家卡片「${stats.slice(0, 40)}…」,历代君主 ${rulers} 行、当前「${cur}」、「${all}」;卡片「${card1.slice(0, 50)}…」,复制 ${copied.length} 字;` +
       `将领卡片「${card2.slice(0, 30)}…」、出征那年 → ${y1};编年史开 ${chronOpen}、蓝字 ${names} 个,点「${pickName}」→ 收起 ${closed}、卡片 ${card3Id}/${pickId}、年份 ${y1} → ${y2};` +
-      `人物页名人 ${famousOn}/${famous} 行「${famousFirst.slice(0, 30)}」→ 卡片「${card4.slice(0, 20)}」;全部 N 位 → 君主 ${rulersOn}、只看 ${polityPick}、${groups} 组 ${rows} 行;搜"圣宗"「${hit}」(${hitKind})→「${card5}」`,
+      `人物页名人 ${famousOn}/${famous} 行「${famousFirst.slice(0, 30)}」→ 卡片「${card4.slice(0, 20)}」;全部 N 位 → 君主 ${rulersOn}、只看 ${polityPick}、${groups} 组 ${rows} 行;` +
+      `世系图「${lgHead.slice(0, 40)}」${lgNodes} 人、当前「${lgOn}」,宗室卡片「${princeCard.slice(0, 30)}」→ 圈出 ${lgFocus};搜"圣宗"「${hit}」(${hitKind})→「${card5}」`,
   );
   if (!/君主\s*圣宗柳玄\s*2485 年即位/.test(stats)) errs.push(`人物:国家卡片没有「君主」行(${stats.slice(0, 80)})`);
   if (rulers !== 5 || !/圣宗柳玄\s*当前/.test(cur) || !/全部 \d+ 位/.test(all)) errs.push(`人物:国家卡片的历代君主不对(${rulers} 行;${cur};${all})`);
@@ -563,6 +577,8 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (!chronOpen || names < 3 || !closed || pickId < 0 || card3Id !== pickId || y2 !== y1) errs.push(`人物:编年史里的人名点不开,或点了跳了年份(${chronOpen};${names};${closed};${card3Id}/${pickId};${y1} → ${y2})`);
   if (!famousOn || famous < 20 || !card4) errs.push(`人物:人物页的名人不对,或点一行没打开卡片(${famousOn};${famous};${card4.slice(0, 30)})`);
   if (!rulersOn || polityPick !== '0' || groups < 1 || rows !== 102) errs.push(`人物:「全部 N 位」没有打开这国的君主(${rulersOn};${polityPick};${groups};${rows})`);
+  if (!lgHead.startsWith('景 2377–2794 年，27 位君主') || lgNodes < 27 || !/明宗柳尧霄.*当前/.test(lgOn)) errs.push(`人物:世系图不对(${lgHead};${lgNodes};${lgOn})`);
+  if (!/大景宗室，\d+–\d+/.test(princeCard) || !princeCard.includes('子嗣') || lgFocus !== 1) errs.push(`人物:宗室卡片 / 从卡片回到世系图不对(${princeCard.slice(0, 60)};${lgFocus})`);
   if (!/^圣宗柳玄 大景皇帝，2485–2519$/.test(hit) || hitKind !== 'person' || card5 !== '圣宗柳玄') errs.push(`人物:搜"圣宗"不对(${hit};${hitKind};${card5})`);
   await page.fill('.sidebar .search-input', '');
   await page.keyboard.press('Escape');
