@@ -5,7 +5,8 @@
  * 存储不可用(隐私模式)时退回内存、配额满了删最旧的;这几种情况顶部提示条上说一句;读档提示的短说法。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { copyNotes, listNotes, putNote } from '../src/ai/library';
+import { copyNotes, getNote, listNotes, putNote, replaceNotes } from '../src/ai/library';
+import { asHistoryNote } from '../src/ai/history';
 import { DEFAULT_PARAMS, generateWorld, type World } from '../src/gen/world';
 import { generateCiv } from '../src/gen/civ';
 import type { Civ } from '../src/gen/civ/types';
@@ -30,12 +31,18 @@ import {
   versionNote,
   worldCheck,
   worldKey,
+  cleanOrigin,
+  cleanSignature,
+  type SaveFile,
+  type SaveOrigin,
 } from '../src/gen/savefile';
+import { BUNDLE_FORMAT, bundleFileName, bundleText, importBundle, openBundleText, parseBundle } from '../src/ui/bundle';
+import { forgetNotes } from '../src/ai/library';
 import * as saveStore from '../src/ui/saveStore';
 import { clearEdits, getEdits, setEdits, setName } from '../src/ui/editsStore';
 import { getProjection, setProjection } from '../src/ui/projection';
 import { getMapCenter, publishMapCenter } from '../src/ui/mapWrap';
-import { _resetToasts, clearToast, peekToast } from '../src/ui/toastStore';
+import { _resetToasts, clearToast, getToast, peekToast } from '../src/ui/toastStore';
 
 const SMALL = { ...DEFAULT_PARAMS, cells: 12000 };
 const worlds = new Map<number, World>();
@@ -332,7 +339,7 @@ function useStorage(s: unknown) {
 }
 
 /** 模拟 App 打开一个世界:换世界(先 detach 再清空),生成完套上修改(存着的就套存着的),再 attach */
-function openWorld(seed: number, o: { id?: string; kind?: saveStore.WorldKind; title?: string; pristine?: boolean; edits?: WorldEdits } = {}) {
+function openWorld(seed: number, o: { id?: string; kind?: saveStore.WorldKind; title?: string; pristine?: boolean; edits?: WorldEdits; origin?: SaveOrigin } = {}) {
   const p = { ...DEFAULT_PARAMS, seed };
   saveStore.detachWorld();
   clearEdits();
@@ -349,6 +356,7 @@ function openWorld(seed: number, o: { id?: string; kind?: saveStore.WorldKind; t
     saved: stored?.save.edits ?? edits,
     view: stored?.save.view,
     pristine: o.pristine,
+    origin: o.origin ?? stored?.save.origin,
   });
   return id;
 }
@@ -1072,5 +1080,564 @@ describe('投影和中央经线跟着世界存(view)', () => {
     expect(getMapCenter()).toBe(0);
     // 原样打开不重写(看法还是存着的那个)
     expect(saveStore.loadWorld(id)?.save.view).toEqual({ projection: 'mollweide', center: -100 });
+  });
+});
+
+/** 打开别人分享短链接、另存时记下的底稿出处 */
+const ORIGIN: SaveOrigin = { by: '明月', title: '苍澜界', url: 'https://atlas.example.com/s/k7Qm2xPa' };
+
+describe('底稿出处(origin)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    tick();
+    useStorage(new FakeStorage());
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    stopAuto?.();
+    stopAuto = null;
+    delete g.localStorage;
+    saveStore._resetForTest();
+    clearEdits();
+    _resetToasts();
+  });
+
+  it('存档文件带着出处(往返不变);没有署名的不带 by;分享链接里也在', async () => {
+    const save = makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c', '苍澜界（二）', undefined, null, ORIGIN);
+    const r = parseSave(saveText(save));
+    expect(r.ok && r.save.origin).toEqual(ORIGIN);
+    const anon = makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c', undefined, undefined, null, { title: '', url: ORIGIN.url });
+    expect(anon.origin).toEqual({ title: '', url: ORIGIN.url });
+    const d = await decodeShare(await encodeShare(save));
+    expect(d.ok && d.save.origin).toEqual(ORIGIN);
+    // 没有出处的存档不带这个字段
+    expect('origin' in makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c')).toBe(false);
+  });
+
+  it('格式不对的出处当没有:链接不是 http(s) 的分享短链接、不是对象;署名、世界名去掉控制字符、超长截断', () => {
+    for (const url of ['javascript:alert(1)//s/abcd', 'https://a.example/s/', 'https://a.example/x/abcd1234', 'ftp://a.example/s/abcd1234', 'https://a.example/s/abcd1234?x=1', 'https://a.ex ample/s/abcd1234', 'https://a.example/?next=/s/Ab12', 'https://a.example/#/s/Ab12', 'https://a.example/x?/s/Ab12', 'https://u:p@a.example/s/Ab12', 'https://a.example/x/../s/Ab12', 'https://A.example/s/Ab12', 'https://a.example:443/s/Ab12'])
+      expect(cleanOrigin({ title: 't', url }), url).toBeNull();
+    expect(cleanOrigin('https://a.example/s/abcd1234')).toBeNull();
+    expect(cleanOrigin({ title: 't' })).toBeNull();
+    expect(cleanOrigin({ by: '  明\u0007月  ', title: '苍澜界\n', url: 'http://localhost:5173/app/s/Ab12' })).toEqual({ by: '明月', title: '苍澜界', url: 'http://localhost:5173/app/s/Ab12' });
+    expect(cleanOrigin({ by: '一二三四五六七八九十一二三四五六七八九十多出来', title: 1, url: ORIGIN.url })).toEqual({ by: '一二三四五六七八九十一二三四五六七八九十', title: '', url: ORIGIN.url });
+    expect(cleanOrigin({ by: 7, title: 't', url: ORIGIN.url })).toEqual({ title: 't', url: ORIGIN.url });
+    // 看不见的字符去掉(零宽空格、方向控制符、软连字符……),换行制表算空白;和服务器存署名时一样
+    expect(cleanSignature('明\u200b\u202e月\u00ad\u0085')).toBe('明月');
+    expect(cleanSignature('明\n\t月\u2028')).toBe('明 月');
+    expect(cleanSignature('\u200b\u2060')).toBe('');
+    // 组合表情要用的看不见的字符留着(👩‍💻 不拆成 👩💻、❤️ 不变成黑白的 ❤、旗帜里的标签);只有这些、没有看得见的字 = 没署名
+    for (const e of ['👩\u200d💻', '\u2764\ufe0f', '🏴\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}', 'क्\u200dष', 'ᠠ\u180bᠢ\u180f', '葛\u{e0100}']) expect(cleanSignature(` ${e}\u200b `)).toBe(e);
+    expect(cleanSignature('\u200d\ufe0f \u200c')).toBe('');
+    expect(cleanSignature('\u200d'.repeat(25) + '明')).toBe('明');
+    // 一个字后面挂上一长串看不见的字符:总长限住
+    expect(cleanSignature('明月' + '\u200d'.repeat(400))).toBe('明');
+    expect(cleanSignature('明'.repeat(1_000_000))).toBe('明'.repeat(20));
+    expect(cleanSignature('一二三四五六七八九十一二三四五六七八九 十')).toBe('一二三四五六七八九十一二三四五六七八九');
+    // 字数按看到的算:一个组合表情、一个 ❤️ 都是一个字
+    for (const e of ['一二三四五六七八九十一二三四五六七八九\u2764\ufe0f', '\u2764\ufe0f'.repeat(20), '👩\u200d💻'.repeat(20)]) expect(cleanSignature(e)).toBe(e);
+    expect(cleanSignature('👩\u200d💻'.repeat(21))).toBe('👩\u200d💻'.repeat(20));
+    const text = JSON.stringify({ ...makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c'), origin: { by: 'x', title: 't', url: 'javascript:void(0)' } });
+    const r = parseSave(text);
+    expect(r.ok && r.save.origin).toBeUndefined();
+  });
+
+  it('打开别人的分享短链接:只是看看时不存;改了另存进我的世界,出处写进存档;存成文件、复制一份都带着', () => {
+    const id = openWorld(7, { kind: 'visit', edits: EDITS, title: '苍澜界', origin: ORIGIN });
+    expect(saveStore.loadWorld(id)).toBeNull();
+    expect(saveStore.currentWorld()?.origin).toEqual(ORIGIN);
+    setName('settlement:r1#0', '饕餮城');
+    expect(saveStore.loadWorld(id)?.save.origin).toEqual(ORIGIN);
+    expect(saveStore.currentSave()?.origin).toEqual(ORIGIN);
+    // 改名也不丢
+    saveStore.renameWorld(id, '我的苍澜界');
+    expect(saveStore.loadWorld(id)?.save).toMatchObject({ title: '我的苍澜界', origin: ORIGIN });
+    const copy = saveStore.duplicateWorld(id);
+    expect(copy && saveStore.loadWorld(copy)?.save.origin).toEqual(ORIGIN);
+    // 换个世界再回来:还带着
+    openWorld(2024);
+    openWorld(7, { id });
+    expect(saveStore.currentWorld()?.origin).toEqual(ORIGIN);
+  });
+
+  it('长链接(没有出处)、新建中的世界不记出处', () => {
+    const id = openWorld(7, { kind: 'visit', edits: EDITS });
+    setName('settlement:r1#0', '饕餮城');
+    expect(saveStore.loadWorld(id)?.save.origin).toBeUndefined();
+    const d = openWorld(8, { kind: 'draft', title: '新世界', origin: ORIGIN });
+    expect(saveStore.currentWorld()?.origin).toBeUndefined();
+    expect(saveStore.loadWorld(d)?.save.origin).toBeUndefined();
+  });
+});
+
+describe('全部存成文件(bundle)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    tick();
+    useStorage(new FakeStorage());
+    forgetNotes();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    stopAuto?.();
+    stopAuto = null;
+    delete g.localStorage;
+    saveStore._resetForTest();
+    clearEdits();
+    forgetNotes();
+    _resetToasts();
+  });
+
+  /** 换一个空的浏览器(像清理了浏览器数据) */
+  function freshBrowser(s = new FakeStorage()) {
+    useStorage(s);
+    forgetNotes();
+  }
+
+  const THUMB = 'data:image/jpeg;base64,/9j/AAAA';
+
+  function threeWorlds() {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界'))!;
+    putNote(a, NOTE);
+    tick();
+    const b = openWorld(2024, { kind: 'visit', edits: EDITS, title: '赤水纪', origin: ORIGIN });
+    setName('settlement:r1#0', '饕餮城');
+    saveStore.setWorldStats(16);
+    tick();
+    const c = openWorld(99, { kind: 'draft', title: '没建完' });
+    saveStore.detachWorld();
+    return { a, b, c };
+  }
+
+  it('文件名:文明与地图-全部世界-本地日期.json', () => {
+    expect(bundleFileName(new Date(2026, 9, 5, 23, 59))).toBe('文明与地图-全部世界-2026-10-05.json');
+  });
+
+  it('全部存成一个文件:每个世界的存档、卡片上的几样、AI 写的东西都在;清理浏览器以后放回来,一个不少', () => {
+    const { a, b, c } = threeWorlds();
+    // 缩略图:网页自己截的 data URL
+    const kv = globalThis.localStorage as unknown as FakeStorage;
+    kv.setItem(`wenming-ditu:thumb:${a}`, THUMB);
+    const before = saveStore.listWorlds();
+    const out = bundleText(new Date('2026-10-05T09:00:00.000Z'))!;
+    expect(out.count).toBe(3);
+    const raw = JSON.parse(out.text);
+    expect(raw).toMatchObject({ app: SAVE_APP, bundle: BUNDLE_FORMAT, savedAt: '2026-10-05T09:00:00.000Z' });
+    expect(raw.worlds.map((w: { save: { title: string } }) => w.save.title).sort()).toEqual(['没建完', '苍澜界', '赤水纪']);
+
+    freshBrowser();
+    expect(saveStore.listWorlds()).toEqual([]);
+    expect(openBundleText(out.text, 'x.json')).toBe(true);
+    expect(getToast()).toMatchObject({ kind: 'ok', text: '已放回 3 个世界' });
+    const after = saveStore.listWorlds();
+    // 顺序、名字、修改、没建完、现存几国、出处都和原来一样(编号是新的)
+    const pick = (l: saveStore.StoredWorld[]) => l.map((w) => ({ title: w.save.title, edits: w.save.edits, draft: w.draft, alive: w.alive, origin: w.save.origin, at: w.at }));
+    expect(pick(after)).toEqual(pick(before));
+    expect(after.map((w) => w.id).some((id) => [a, b, c].includes(id))).toBe(false);
+    const na = after.find((w) => w.save.title === '苍澜界')!;
+    expect(na.thumb).toBe(THUMB);
+    expect(listNotes(na.id)).toEqual([NOTE]);
+    expect(after.find((w) => w.save.title === '赤水纪')).toMatchObject({ alive: 16, save: { origin: ORIGIN } });
+  });
+
+  it('同一个文件再放一次:一模一样的不重复放;改过的那个两份都留', () => {
+    const { a } = threeWorlds();
+    const text = bundleText()!.text;
+    expect(openBundleText(text)).toBe(true);
+    expect(getToast()).toMatchObject({ text: '这些世界都已经在「我的世界」里了' });
+    expect(saveStore.listWorlds()).toHaveLength(3);
+    saveStore.renameWorld(a, '苍澜界改');
+    openBundleText(text);
+    expect(getToast()).toMatchObject({ kind: 'ok', text: '已放回 1 个世界', more: ['2 个原来就有，没重复放'] });
+    expect(saveStore.listWorlds().map((w) => w.save.title).sort()).toEqual(['没建完', '苍澜界', '苍澜界改', '赤水纪']);
+  });
+
+  it('再放一次时,原来就有的那份缺了 AI 写的东西、缩略图、现存几国:用文件里的补上(这边另有的 AI 写的东西留着)', () => {
+    const { a, b } = threeWorlds();
+    const kv = globalThis.localStorage as unknown as FakeStorage;
+    kv.setItem(`wenming-ditu:thumb:${a}`, THUMB);
+    const text = bundleText()!.text;
+    // 这边丢了:a 的 AI 写的东西和缩略图,b 的现存几国;a 另外又写了一条
+    kv.removeItem(`civ-atlas:ai-notes:${a}`);
+    kv.removeItem(`wenming-ditu:thumb:${a}`);
+    kv.setItem(`wenming-ditu:meta:${b}`, '{}');
+    forgetNotes();
+    const other = { ...NOTE, key: '名字由来:饕餮城', kind: '名字由来', title: '饕餮城' };
+    putNote(a, other);
+    expect(openBundleText(text)).toBe(true);
+    expect(getToast()).toMatchObject({ kind: 'ok', text: '这些世界都已经在「我的世界」里了', more: ['2 个原来就有的补上了缺的 AI 写的东西或缩略图'] });
+    expect(saveStore.listWorlds()).toHaveLength(3);
+    expect(listNotes(a).map((n) => n.key).sort()).toEqual([NOTE.key, other.key].sort());
+    expect(saveStore.listWorlds().find((w) => w.id === a)?.thumb).toBe(THUMB);
+    expect(saveStore.listWorlds().find((w) => w.id === b)?.alive).toBe(16);
+    // 什么都不缺了:再放一次不说补上
+    openBundleText(text);
+    expect(getToast()?.more ?? []).toEqual([]);
+  });
+
+  it('没建完的世界以另一个世界为底稿:放回来以后记着的底稿换成新编号,还能回到那个世界', () => {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界'))!;
+    tick();
+    saveStore.detachWorld();
+    clearEdits();
+    const d = saveStore.newWorldId();
+    saveStore.attachWorld({
+      id: d,
+      params: { ...DEFAULT_PARAMS, seed: 8 },
+      check: 'check8',
+      kind: 'draft',
+      title: '苍澜界续篇',
+      saved: EMPTY_EDITS,
+      pristine: false,
+      base: { id: a, title: '苍澜界', names: 0, interventions: 0 },
+    });
+    saveStore.detachWorld();
+    expect(saveStore.listWorlds().find((w) => w.id === d)?.base?.id).toBe(a);
+    const text = bundleText()!.text;
+    // 文件里没建完的那个排在前面(最近改的在前):放的时候也要先有底稿的新编号
+    expect(JSON.parse(text).worlds.map((w: { meta: { draft?: boolean } }) => !!w.meta.draft)).toEqual([true, false]);
+    freshBrowser();
+    openBundleText(text);
+    const after = saveStore.listWorlds();
+    const na = after.find((w) => !w.draft)!;
+    const nd = after.find((w) => w.draft)!;
+    expect(na.id).not.toBe(a);
+    expect(nd.base).toEqual({ id: na.id, title: '苍澜界', names: 0, interventions: 0 });
+  });
+
+  it('正在看的世界一次都没能存进浏览器(存储满了):也放进文件,放回来就有了', () => {
+    const kv = globalThis.localStorage as unknown as FakeStorage;
+    expect(saveStore.listWorlds()).toEqual([]);
+    kv.cap = 0;
+    const id = openWorld(7, { title: '只在页面里' });
+    expect(saveStore.currentUnsaved()).toBe(true);
+    expect(saveStore.listWorlds().some((w) => w.id === id)).toBe(false);
+    const out = bundleText()!;
+    expect(out.count).toBe(1);
+    saveStore.detachWorld();
+    freshBrowser();
+    openBundleText(out.text);
+    expect(saveStore.listWorlds().map((w) => w.save.title)).toEqual(['只在页面里']);
+  });
+
+  it('AI 写的东西各功能另记的(史书的书目、释名记的名字):跟着存进文件、跟着放回来,史书还认得出来', () => {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界'))!;
+    const book = { ...NOTE, book: { title: '世界通史', range: '第 0—3000 年', scope: { kind: 'world' }, style: 'classic', length: 'medium', fp: 'fp1', seed: 7, calls: 2 } };
+    const name = { ...NOTE, key: '释名:settlement:c1#0', kind: '释名', title: '饕餮城', name: '饕餮城', shown: '饕餮城', stamp: 's1' };
+    putNote(a, book);
+    putNote(a, name);
+    expect(asHistoryNote(getNote(a, book.key))).not.toBeNull();
+    const text = bundleText()!.text;
+    freshBrowser();
+    openBundleText(text);
+    const na = saveStore.listWorlds()[0];
+    expect(listNotes(na.id)).toEqual([book, name]);
+    expect(asHistoryNote(getNote(na.id, book.key))).not.toBeNull();
+    // 另记的太大的不要(正文照样放回来)
+    const huge = { ...NOTE, key: '史书:huge', book: { title: 'x'.repeat(30_000) } };
+    const r = parseBundle(JSON.stringify({ app: SAVE_APP, bundle: 1, worlds: [{ save: makeSave({ ...DEFAULT_PARAMS, seed: 8 }, EDITS, 'c8', '大'), notes: [huge] }] }));
+    expect(r && r.ok ? r.bundle.worlds[0].notes : null).toEqual([NOTE].map((n) => ({ ...n, key: '史书:huge' })));
+  });
+
+  it('参数、修改、名字都一样,底稿出处不一样:不算同一个,文件里的出处不丢', () => {
+    const save = makeSave({ ...DEFAULT_PARAMS, seed: 5 }, EDITS, 'c5', '同名');
+    const a = saveStore.importSave(save)!;
+    const withOrigin: SaveFile = { ...save, origin: ORIGIN };
+    const b = saveStore.importSave(withOrigin)!;
+    expect(b).not.toBe(a);
+    expect(saveStore.loadWorld(b)?.save.origin).toEqual(ORIGIN);
+    expect(saveStore.importSave({ ...withOrigin, origin: { ...ORIGIN } })).toBe(b);
+    const r = importBundle({ worlds: [{ save: { ...save, origin: { ...ORIGIN, by: '别人' } }, meta: {}, thumb: null, notes: [] }, { save: withOrigin, meta: {}, thumb: null, notes: [] }], bad: 0 });
+    expect(r).toMatchObject({ same: 1 });
+    expect(r.added).toHaveLength(1);
+    expect(saveStore.loadWorld(r.added[0])?.save.origin?.by).toBe('别人');
+  });
+
+  it('AI 写的东西上次没能写进浏览器(存储满了,只在页面里):腾出地方以后再放一次,这回写进去', () => {
+    threeWorlds();
+    const text = bundleText()!.text;
+    const s = new FakeStorage();
+    const put = s.setItem.bind(s);
+    let full = true;
+    s.setItem = (k: string, v: string) => {
+      if (full && k.startsWith('civ-atlas:ai-notes:')) {
+        const e = new Error('quota');
+        e.name = 'QuotaExceededError';
+        throw e;
+      }
+      put(k, v);
+    };
+    freshBrowser(s);
+    openBundleText(text);
+    expect(getToast()?.more?.some((m) => m.includes('AI 写的东西没能放回来'))).toBe(true);
+    const na = saveStore.listWorlds().find((w) => w.save.title === '苍澜界')!;
+    // 页面里有,浏览器里没有
+    expect(listNotes(na.id)).toEqual([NOTE]);
+    expect(s.getItem(`civ-atlas:ai-notes:${na.id}`)).toBeNull();
+    full = false;
+    openBundleText(text);
+    expect(getToast()).toMatchObject({ text: '这些世界都已经在「我的世界」里了', more: ['1 个原来就有的补上了缺的 AI 写的东西或缩略图'] });
+    expect(JSON.parse(s.getItem(`civ-atlas:ai-notes:${na.id}`)!)).toEqual([NOTE]);
+  });
+
+  it('没建完的世界:存档一样、底稿不一样的不算同一个;这边丢了底稿的,用文件里的补上', () => {
+    const kv = globalThis.localStorage as unknown as FakeStorage;
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界'))!;
+    const b = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 9 }, EDITS, 'c9', '赤水纪'))!;
+    const save = makeSave({ ...DEFAULT_PARAMS, seed: 8 }, EMPTY_EDITS, 'c8', '续篇');
+    const baseA = { id: a, title: '苍澜界', names: 0, interventions: 0 };
+    const baseB = { id: b, title: '赤水纪', names: 0, interventions: 0 };
+    const draftOf = (base: typeof baseA) => ({ worlds: [{ save, meta: { draft: true, base }, thumb: null, notes: [] }], bad: 0 });
+    const d = importBundle(draftOf(baseA)).added[0];
+    expect(saveStore.listWorlds().find((w) => w.id === d)?.base).toEqual(baseA);
+    expect(importBundle(draftOf(baseB)).added).toHaveLength(1);
+    expect(importBundle(draftOf(baseA))).toMatchObject({ added: [], same: 1, filled: 0 });
+    kv.setItem(`wenming-ditu:meta:${d}`, JSON.stringify({ draft: true }));
+    expect(importBundle(draftOf(baseA))).toMatchObject({ added: [], same: 1, filled: 1 });
+    expect(saveStore.listWorlds().find((w) => w.id === d)?.base).toEqual(baseA);
+    expect(saveStore.listWorlds()).toHaveLength(4);
+  });
+
+  it('正在看的世界刚点了「创建世界」,存储满了没改写进浏览器:文件里按页面里的算(建好了,不再记底稿)', () => {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界'))!;
+    tick();
+    const d = saveStore.newWorldId();
+    saveStore.attachWorld({
+      id: d,
+      params: { ...DEFAULT_PARAMS, seed: 8 },
+      check: 'check8',
+      kind: 'draft',
+      title: '续篇',
+      saved: EMPTY_EDITS,
+      pristine: false,
+      base: { id: a, title: '苍澜界', names: 0, interventions: 0 },
+    });
+    expect(saveStore.listWorlds().find((w) => w.id === d)?.draft).toBe(true);
+    (globalThis.localStorage as unknown as FakeStorage).cap = 0;
+    expect(saveStore.markCreated()).toBe(false);
+    expect(saveStore.currentUnsaved()).toBe(true);
+    expect(saveStore.loadWorld(d)?.draft).toBe(true);
+    const w = JSON.parse(bundleText()!.text).worlds.find((x: { id: string }) => x.id === d);
+    expect(w.meta).toEqual({});
+    expect(w.save.title).toBe('续篇');
+  });
+
+  it('再放一次时,原来那份没记投影(旧版存的):用文件里的;这边记着的不换', () => {
+    const save = makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界');
+    const a = saveStore.importSave(save)!;
+    expect(saveStore.loadWorld(a)?.save.view).toBeUndefined();
+    const view = { projection: 'robinson', center: 30 };
+    const one = (v: typeof view) => ({ worlds: [{ save: { ...save, view: v }, meta: {}, thumb: null, notes: [] }], bad: 0 });
+    expect(importBundle(one(view))).toMatchObject({ added: [], same: 1, filled: 1 });
+    expect(saveStore.loadWorld(a)?.save.view).toEqual(view);
+    expect(importBundle(one({ ...view, center: 60 }))).toMatchObject({ added: [], same: 1, filled: 0 });
+    expect(saveStore.loadWorld(a)?.save.view).toEqual(view);
+  });
+
+  it('正在看的世界是放回时原来就有的那个:补上的底稿下次自动存还在;投影按页面上的,不补', () => {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界'))!;
+    tick();
+    const d = openWorld(8, { kind: 'draft', title: '续篇', pristine: false });
+    const cur = saveStore.loadWorld(d)!;
+    expect(cur.base).toBeUndefined();
+    const base = { id: a, title: '苍澜界', names: 0, interventions: 0 };
+    const r = importBundle({ worlds: [{ save: cur.save, meta: { draft: true, base, alive: 9 }, thumb: null, notes: [] }], bad: 0 });
+    expect(r).toMatchObject({ added: [], same: 1, filled: 1 });
+    expect(saveStore.loadWorld(d)).toMatchObject({ base, alive: 9 });
+    // 接着改一处(自动存):补上的底稿、现存几国还在
+    setName('settlement:r1#0', '新名字');
+    expect(saveStore.loadWorld(d)).toMatchObject({ base, alive: 9, save: { edits: { names: { 'settlement:r1#0': '新名字' } } } });
+
+    // 正在看的世界存档里没记投影(旧版存的、原样打开没重写):不补,页面上是什么样下次就存什么样
+    const old = makeSave({ ...DEFAULT_PARAMS, seed: 9 }, EDITS, 'check9', '赤水纪');
+    const b = saveStore.importSave(old)!;
+    openWorld(9, { id: b });
+    expect(saveStore.loadWorld(b)?.save.view).toBeUndefined();
+    const view = { projection: 'robinson', center: 30 };
+    expect(importBundle({ worlds: [{ save: { ...old, view }, meta: {}, thumb: null, notes: [] }], bad: 0 })).toMatchObject({ same: 1, filled: 0 });
+    expect(saveStore.loadWorld(b)?.save.view).toBeUndefined();
+  });
+
+  it('AI 写的东西多(5000 条以上)、很长的:都存进文件,都放回来', () => {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c7', '苍澜界'))!;
+    const many = Array.from({ length: 5002 }, (_, i) => ({ ...NOTE, key: `释名:settlement:c${i}#0`, kind: '释名', text: `${i}` }));
+    many.push({ ...NOTE, key: '史书:long', text: '长'.repeat(250_000) });
+    replaceNotes(a, many);
+    const text = bundleText()!.text;
+    freshBrowser();
+    openBundleText(text);
+    expect(getToast()).toMatchObject({ kind: 'ok', text: '已放回 1 个世界' });
+    const na = saveStore.listWorlds()[0];
+    expect(listNotes(na.id)).toHaveLength(5003);
+    expect(getNote(na.id, '史书:long')?.text).toHaveLength(250_000);
+  });
+
+  it('一个文件放不下:先不带 AI 写的东西,还放不下再不带缩略图,存出来的都能放回来;都不带也放不下就不存', () => {
+    const { a } = threeWorlds();
+    const kv = globalThis.localStorage as unknown as FakeStorage;
+    kv.setItem(`wenming-ditu:thumb:${a}`, THUMB);
+    const at = new Date('2026-10-05T09:00:00.000Z');
+    const full = bundleText(at)!;
+    expect(full.dropped).toBeUndefined();
+    expect(full.text).toContain(NOTE.text);
+    // 上限比全带上的短一点:不带 AI 写的东西
+    const noNotes = bundleText(at, full.text.length - 1)!;
+    expect(noNotes).toMatchObject({ count: 3, dropped: 'notes' });
+    expect(noNotes.text.length).toBeLessThanOrEqual(full.text.length - 1);
+    expect(noNotes.text).not.toContain(NOTE.text);
+    expect(noNotes.text).toContain(THUMB);
+    // 还放不下:缩略图也不带
+    const bare = bundleText(at, noNotes.text.length - 1)!;
+    expect(bare).toMatchObject({ count: 3, dropped: 'notes+thumbs' });
+    expect(bare.text).not.toContain(THUMB);
+    // 存出来的,同样的上限下都能读
+    for (const [t, max] of [[noNotes.text, full.text.length - 1], [bare.text, noNotes.text.length - 1]] as const) {
+      const r = parseBundle(t, max);
+      expect(r?.ok && r.bundle.worlds).toHaveLength(3);
+    }
+    // 世界本身就放不下:不存
+    expect(bundleText(at, 100)).toMatchObject({ text: '', count: 3, tooBig: true });
+  });
+
+  it('参数、名字、修改都一样,生成器版本或地形哈希不同:可能是两个不同的世界,都放回来', () => {
+    const save = makeSave({ ...DEFAULT_PARAMS, seed: 5 }, EDITS, 'c5', '同名');
+    const r = importBundle({
+      worlds: [
+        { save, meta: {}, thumb: null, notes: [] },
+        { save: { ...save, generator: save.generator - 1 }, meta: {}, thumb: null, notes: [] },
+        { save: { ...save, check: 'other' }, meta: {}, thumb: null, notes: [] },
+      ],
+      bad: 0,
+    });
+    expect(r).toMatchObject({ same: 0, left: 0 });
+    expect(r.added).toHaveLength(3);
+    // 同一个文件再放一次:都不重复
+    expect(importBundle({ worlds: [{ save, meta: {}, thumb: null, notes: [] }, { save: { ...save, check: 'other' }, meta: {}, thumb: null, notes: [] }], bad: 0 })).toMatchObject({ same: 2, added: [] });
+  });
+
+  it('最近打开过(比最后一次修改晚):放回来以后卡片上的时间和排序一样', () => {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'check7', '苍澜界'))!;
+    tick();
+    saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 8 }, EDITS, 'check8', '赤水纪'));
+    tick();
+    // 苍澜界又打开了一次、没改:排到前面
+    openWorld(7, { id: a });
+    saveStore.detachWorld();
+    const before = saveStore.listWorlds();
+    expect(before[0].id).toBe(a);
+    expect(before[0].at > before[0].save.savedAt).toBe(true);
+    const text = bundleText()!.text;
+    freshBrowser();
+    openBundleText(text);
+    const pick = (l: saveStore.StoredWorld[]) => l.map((w) => [w.save.title, w.at]);
+    expect(pick(saveStore.listWorlds())).toEqual(pick(before));
+  });
+
+  it('原来就有的那份丢了"最近打开"(或比文件里的早):再放一次时用文件里的,卡片时间、排序回来,不算补上了', () => {
+    const a = saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'check7', '苍澜界'))!;
+    tick();
+    saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 8 }, EDITS, 'check8', '赤水纪'));
+    tick();
+    openWorld(7, { id: a });
+    saveStore.detachWorld();
+    const before = saveStore.listWorlds();
+    expect(before[0].id).toBe(a);
+    const text = bundleText()!.text;
+    const kv = globalThis.localStorage as unknown as FakeStorage;
+    kv.setItem(`wenming-ditu:meta:${a}`, '{}');
+    expect(saveStore.listWorlds()[0].id).not.toBe(a);
+    expect(openBundleText(text)).toBe(true);
+    expect(getToast()).toMatchObject({ kind: 'ok', text: '这些世界都已经在「我的世界」里了' });
+    expect(getToast()?.more ?? []).toEqual([]);
+    const pick = (l: saveStore.StoredWorld[]) => l.map((w) => [w.id, w.at]);
+    expect(pick(saveStore.listWorlds())).toEqual(pick(before));
+  });
+
+  it('浏览器不让网页存数据(只在内存里):放回来了也说一声,文件先别删', () => {
+    threeWorlds();
+    const text = bundleText()!.text;
+    freshBrowser(throwing as unknown as FakeStorage);
+    expect(saveStore.persistent()).toBe(false);
+    expect(openBundleText(text)).toBe(true);
+    const t = getToast();
+    expect(t).toMatchObject({ kind: 'warn', text: '已放回 3 个世界' });
+    expect(t?.more?.[0]).toContain('只留在这个页面里');
+  });
+
+  it('没建完的和建好的分开算:同样的参数、名字,一个没建完一个建好的,不算同一个', () => {
+    const save = makeSave({ ...DEFAULT_PARAMS, seed: 5 }, EMPTY_EDITS, 'c5', '同名');
+    const r = importBundle({ worlds: [{ save, meta: { draft: true }, thumb: null, notes: [] }], bad: 0 });
+    expect(r.added).toHaveLength(1);
+    const r2 = importBundle({ worlds: [{ save, meta: {}, thumb: null, notes: [] }, { save, meta: { draft: true }, thumb: null, notes: [] }], bad: 0 });
+    expect(r2).toMatchObject({ same: 1, left: 0 });
+    expect(r2.added).toHaveLength(1);
+    expect(saveStore.listWorlds().map((w) => w.draft).sort()).toEqual([false, true]);
+  });
+
+  it('放满了就停,不删别的世界;存不下也停;都说一声', () => {
+    for (let i = 0; i < saveStore.MAX_WORLDS - 1; i++) saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 1000 + i }, EMPTY_EDITS, 'c', `旧${i}`));
+    const worlds = [1, 2, 3].map((k) => ({ save: makeSave({ ...DEFAULT_PARAMS, seed: k }, EMPTY_EDITS, 'c', `新${k}`), meta: {}, thumb: null, notes: [] }));
+    const r = importBundle({ worlds, bad: 0 });
+    expect(r).toMatchObject({ left: 2, why: 'full' });
+    expect(r.added).toHaveLength(1);
+    expect(saveStore.listWorlds()).toHaveLength(saveStore.MAX_WORLDS);
+    expect(saveStore.listWorlds().some((w) => w.save.title === '旧0')).toBe(true);
+
+    // 浏览器存储满了:不为它删旧世界
+    freshBrowser(new FakeStorage(2000));
+    saveStore.importSave(makeSave({ ...DEFAULT_PARAMS, seed: 1 }, EMPTY_EDITS, 'c', '原来的'));
+    const big = [1, 2, 3, 4, 5, 6].map((k) => ({ save: makeSave({ ...DEFAULT_PARAMS, seed: 10 + k }, EDITS, 'c', `大${k}`), meta: {}, thumb: null, notes: [] }));
+    const text = JSON.stringify({ app: SAVE_APP, bundle: 1, worlds: big });
+    expect(openBundleText(text)).toBe(true);
+    const t = getToast()!;
+    expect(t.kind).toBe('warn');
+    expect(t.more?.some((m) => m.includes('浏览器存储已满'))).toBe(true);
+    const left = saveStore.listWorlds();
+    expect(left.length).toBeGreaterThan(1);
+    expect(left.length).toBeLessThan(7);
+    expect(left.some((w) => w.save.title === '原来的')).toBe(true);
+  });
+
+  it('读文件:不是这种文件交给单个存档;更新版本、没有世界、坏了的世界给中文说明', () => {
+    const single = saveText(makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c', '苍澜界'));
+    expect(parseBundle(single)).toBeNull();
+    expect(parseBundle('不是 JSON')).toBeNull();
+    expect(openBundleText(single)).toBe(false);
+    expect(parseBundle(JSON.stringify({ app: SAVE_APP, bundle: 2, worlds: [] }))).toMatchObject({ ok: false, error: expect.stringContaining('更新版本') });
+    expect(parseBundle(JSON.stringify({ app: SAVE_APP, bundle: 1 }))).toMatchObject({ ok: false });
+    const ok = makeSave({ ...DEFAULT_PARAMS, seed: 7 }, EDITS, 'c', '好的');
+    const r = parseBundle(
+      '\ufeff' +
+        JSON.stringify({
+          app: SAVE_APP,
+          bundle: 1,
+          worlds: [
+            { save: { app: '别的' } },
+            7,
+            { save: ok, meta: { draft: 'yes', alive: -3, extra: 1 }, thumb: 'javascript:alert(1)', notes: [NOTE, { key: 1 }, { ...NOTE }] },
+          ],
+        }),
+    );
+    expect(r).toMatchObject({ ok: true, bundle: { bad: 2 } });
+    const w = r && r.ok ? r.bundle.worlds[0] : null;
+    expect(w).toMatchObject({ meta: {}, thumb: null, notes: [NOTE] });
+    openBundleText(JSON.stringify({ app: SAVE_APP, bundle: 1, worlds: [{ save: { app: '别的' } }] }), '坏.json');
+    expect(getToast()).toMatchObject({ kind: 'error', text: '打不开 坏.json', more: ['里面的 1 个世界都读不出来'] });
+  });
+
+  it('正在看的世界最新的改动没存进浏览器(存储满了):存成文件用页面里那份', () => {
+    const id = openWorld(7, { title: '苍澜界' });
+    const kv = globalThis.localStorage as unknown as FakeStorage;
+    kv.cap = 0;
+    setName('settlement:r1#0', '最新的名字');
+    expect(saveStore.currentUnsaved()).toBe(true);
+    const raw = JSON.parse(bundleText()!.text);
+    expect(raw.worlds).toHaveLength(1);
+    expect(raw.worlds[0].save.edits.names['settlement:r1#0']).toBe('最新的名字');
+    expect(saveStore.loadWorld(id)?.save.edits.names['settlement:r1#0']).toBeUndefined();
+  });
+
+  it('一个世界都没有:没有可存的', () => {
+    expect(bundleText()).toBeNull();
   });
 });

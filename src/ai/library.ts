@@ -139,6 +139,14 @@ export function exportNotes(world: string): AiNote[] {
   return read(world).slice();
 }
 
+/** 这个世界的笔记都写进浏览器了没有(存储满了、只留在页面里的 = false;浏览器本来就不让存的算写进去了) */
+export function notesSaved(world: string): boolean {
+  const list = read(world);
+  const raw = stored(world);
+  if (raw === undefined || !persistent()) return true;
+  return (list.length ? JSON.stringify(list) : null) === raw;
+}
+
 /** 同步下来的笔记换上(null / 空 = 没有);不存这个世界(它已经在"我的世界"里了)。返回写进浏览器没有(存储满了 = false) */
 export function replaceNotes(world: string, list: AiNote[] | null): boolean {
   const clean = (list ?? []).filter((x) => x && typeof x.key === 'string' && typeof x.text === 'string');

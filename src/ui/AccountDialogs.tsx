@@ -6,7 +6,7 @@
  *   账号       云同步、最近删除、AI 积分(「使用 AI 功能」关着时不显示)、分享出去的世界(复制链接、停止分享);左下注销账号,右下退出登录
  *   退出登录   问这台设备上的世界留不留(默认留);选"删掉"先全部同步好再删
  *   注销账号   给自己的邮箱发验证码,填上才注销(账号里的都删掉;这台设备上的不动)
- *   分享       一个开关管开和停;短链接、复制;手机上多一个"发给…"(系统分享)
+ *   分享       一个开关管开和停;署名(别人另存时写进底稿出处,默认不填);短链接、复制;手机上多一个"发给…"(系统分享)
  *
  *   openLogin() / openAccount() / openShareDialog(id, 名字)   打开它们(「我的世界」右上、AI 设置、存档菜单)
  *   openTrash()   「我的世界」那一页换成最近删除(App 回到我的世界)
@@ -29,6 +29,7 @@ import { ServerError } from '../account/server';
 import { deleteAccount, displayName, fetchAuthOptions, getSession, login, pendingInvite, sendCode, useSession, type AuthOptions } from '../account/session';
 import { accountDeleted, behindCloud, signOut, syncNow, unsyncedCount, useSyncView } from '../account/sync';
 import { createShare, listShares, listTrash, shortLink, stopShare, type ShareInfo, type TrashEntry } from '../account/cloud';
+import { SIGNATURE_UNITS, cleanSignature } from '../gen/savefile';
 import './account.css';
 
 // ---------------------------------------------------------------------------
@@ -794,9 +795,18 @@ async function pushForShare(worldId: string, token: string | undefined): Promise
 
 function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; worldId: string; title: string; onClose: () => void }) {
   const [st, setSt] = useState<ShareState>({ phase: 'prep' });
+  /** 正在开 / 停分享 */
   const [busy, setBusy] = useState(false);
+  /** 同一件事,给不等重新渲染就要看的地方(刚离开署名框就点了开关) */
+  const busyRef = useRef(false);
+  /** 正在存署名 */
+  const [savingBy, setSavingBy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [manual, setManual] = useState(false);
+  /** 刚改的署名存好了,但系统的分享面板没让打开(等存的时候"刚点过"过期了):请再点一次 */
+  const [again, setAgain] = useState(false);
+  /** 署名输入框里的字(链接开着时按链接上的填好) */
+  const [by, setBy] = useState('');
   useEffect(() => {
     let live = true;
     const token = getSession()?.token;
@@ -815,6 +825,7 @@ function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; world
       const share = list.find((x) => x.worldId === worldId) ?? (await createShare(worldId));
       still();
       setSt({ phase: 'on', share });
+      setBy(share.by ?? '');
     })().catch((e) => {
       if (!live || e instanceof ShareAborted) return;
       const c = codeOf(e);
@@ -835,38 +846,99 @@ function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; world
   const on = !!live || st.phase === 'prep';
   const url = live ? shortLink(live.code) : '';
   const toggle = async () => {
-    if (busy || st.phase === 'prep') return;
+    if (busyRef.current || st.phase === 'prep') return;
     const token = getSession()?.token;
+    busyRef.current = true;
     setBusy(true);
     try {
+      // 刚离开署名框就点了开关:署名那次先存完再停 / 开(两个请求一起发的话,后回来的会把开关改回去)
+      if (pendingBy.current) await pendingBy.current;
       if (live) {
         sameLogin(token);
         await stopShare(worldId);
         setSt({ phase: 'off' });
       } else {
+        // 停了再开是一个新链接:署名跟着框里的
         await pushForShare(worldId, token);
         sameLogin(token);
-        const share = await createShare(worldId);
+        const share = await createShare(worldId, cleanSignature(by));
         sameLogin(token);
         setSt({ phase: 'on', share });
+        setBy(share.by ?? '');
       }
     } catch (e) {
       if (e instanceof ShareAborted) return;
       // 停没停成:链接照旧算开着(服务器出错时确实还开着;断网时不知道,按开着说)
       setSt({ phase: 'error', message: errText(e), share: live });
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
+  /** 正在存的署名(离开输入框时开始存、紧接着点了完成:等这一次) */
+  const pendingBy = useRef<Promise<boolean> | null>(null);
+  /** 署名改完(离开输入框、回车):和链接上的不一样就存上去;没存成的说一声,框里换回原来的。返回存好了没有(没改 = 存好了) */
+  const saveBy = (): Promise<boolean> => {
+    if (pendingBy.current) return pendingBy.current;
+    if (!live) return Promise.resolve(true);
+    const next = cleanSignature(by);
+    if (next === (live.by ?? '')) {
+      setBy(next);
+      return Promise.resolve(true);
+    }
+    if (busyRef.current) return Promise.resolve(false);
+    const token = getSession()?.token;
+    setSavingBy(true);
+    const p = (async () => {
+      try {
+        sameLogin(token);
+        const share = await createShare(worldId, next);
+        sameLogin(token);
+        setSt({ phase: 'on', share });
+        setBy(share.by ?? '');
+        return true;
+      } catch (e) {
+        // 换了账号、退出了:这个窗口本来就该关
+        if (e instanceof ShareAborted) return true;
+        setSt({ phase: 'error', message: errText(e), share: live });
+        setBy(live.by ?? '');
+        return false;
+      } finally {
+        setSavingBy(false);
+        pendingBy.current = null;
+      }
+    })();
+    pendingBy.current = p;
+    return p;
+  };
+  /** 关窗口(完成、Esc、点外面):署名还没存的先存上,存好了再关;没存成就留着窗口,上面说为什么 */
+  const done = () => {
+    void saveBy().then((ok) => {
+      if (ok) onClose();
+    });
+  };
+  const name = title || '未命名世界';
+  /** 复制链接、发给别人:署名刚改了的先存好(发出去的链接打开就是新署名);没存成就不发,上面说为什么 */
   const copy = async () => {
-    if (!url) return;
+    if (!url || !(await saveBy())) return;
     const ok = await copyText(url);
     setCopied(ok);
     setManual(!ok);
     (window as unknown as { __wfShortShare?: { url: string; copied: boolean } }).__wfShortShare = { url, copied: ok };
   };
+  const sendTo = async () => {
+    if (!url) return;
+    setAgain(false);
+    // 署名没改:马上打开系统的分享面板(要在点按钮的那一下里打开)
+    const dirty = !!pendingBy.current || cleanSignature(by) !== (live?.by ?? '');
+    if (dirty && !(await saveBy())) return;
+    const act = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+    if (dirty && act && !act.isActive) return setAgain(true);
+    await navigator.share({ title: `「${name}」`, url }).catch((e: unknown) => {
+      if (dirty && e instanceof DOMException && e.name === 'NotAllowedError') setAgain(true);
+    });
+  };
   const canSend = phone && typeof navigator !== 'undefined' && typeof navigator.share === 'function';
-  const name = title || '未命名世界';
   const urlBox = (
     <div className={`url${live ? '' : ' off'}`} data-testid="share-url">
       <Icon name="link" size={15} />
@@ -880,7 +952,7 @@ function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; world
     </button>
   );
   return (
-    <Dialog phone={phone} label={`分享「${name}」`} width={480} onClose={onClose} testId="share-dialog">
+    <Dialog phone={phone} label={`分享「${name}」`} width={480} onClose={done} testId="share-dialog">
       <div className="acct-body" style={{ paddingTop: phone ? 8 : 10, gap: phone ? 14 : 16 }}>
         <div className="acct-grp">
           <div className="acct-gr" style={{ minHeight: phone ? 58 : 56 }}>
@@ -899,6 +971,27 @@ function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; world
               onClick={() => void toggle()}
             />
           </div>
+          <div className="acct-gr" style={{ minHeight: phone ? 58 : 56 }}>
+            <Icon name="person" size={19} />
+            <span className="main">
+              <b>署名</b>
+              <small>别人另存时写进出处，可以不填</small>
+            </span>
+            <input
+              className="acct-in sm"
+              data-act="share-by"
+              aria-label="署名"
+              value={by}
+              // 只防太长;按看到的字截到 20 个由 cleanSignature 做(maxLength 按 UTF-16 算,一个组合表情就占好几个)
+              maxLength={SIGNATURE_UNITS}
+              disabled={!live || busy || savingBy}
+              onChange={(e) => setBy(e.target.value)}
+              onBlur={() => void saveBy()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur();
+              }}
+            />
+          </div>
         </div>
         {phone ? (
           <>
@@ -910,7 +1003,7 @@ function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; world
                   className="acct-btn full"
                   style={{ fontWeight: 500 }}
                   disabled={!live}
-                  onClick={() => void navigator.share({ title: `「${name}」`, url }).catch(() => {})}
+                  onClick={() => void sendTo()}
                 >
                   <Icon name="share" size={17} />
                   发给…
@@ -929,6 +1022,7 @@ function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; world
             没能自动复制，请手动复制：{url}
           </p>
         )}
+        {again && <p className="acct-small">署名存好了，再点一次「发给…」</p>}
         {st.phase === 'error' && <p className="acct-err">{st.message}</p>}
         <ul className="acct-notes">
           <li>
@@ -941,14 +1035,14 @@ function ShareDialog({ phone, worldId, title, onClose }: { phone: boolean; world
           </li>
           <li>
             <Icon name="check" size={14} />
-            对方想改，会另存一份到自己的「我的世界」，动不到你的。
+            对方想改，会另存一份到自己的「我的世界」，写明底稿来自你的「{name}」，动不到你的。
           </li>
         </ul>
       </div>
       {!phone ? (
         <div className="acct-foot">
           <span className="acct-sp" />
-          <button className="acct-btn lg" onClick={onClose}>
+          <button className="acct-btn lg" onClick={done}>
             完成
           </button>
         </div>
@@ -1011,15 +1105,18 @@ export function ShareGone({ phone, state, onHome, onNew }: { phone: boolean; sta
   );
 }
 
-export function SharedHint({ phone, onOk }: { phone: boolean; onOk: () => void }) {
+/** 地图下的说明。short = 从分享短链接打开的(另存时写明底稿出处);by = 分享的人填的署名 */
+export function SharedHint({ phone, short, by, onOk }: { phone: boolean; short: boolean; by: string; onOk: () => void }) {
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
   return (
     <div className="shared-hint" role="status" data-testid="shared-hint" onPointerDown={stop} onClick={stop} onDoubleClick={stop}>
       <Icon name="info" size={18} />
       <span>
-        {phone
-          ? '别人分享给你的世界，随便看。改了会另存一份到你的「我的世界」，原来的不受影响。'
-          : '别人分享给你的世界，随便看。改了名字或历史会另存一份到你的「我的世界」，原来的不受影响。'}
+        {short
+          ? `${by || '别人'}分享给你的世界，随便看。改了会另存一份到你的「我的世界」，并写明底稿出处。`
+          : phone
+            ? '别人分享给你的世界，随便看。改了会另存一份到你的「我的世界」，原来的不受影响。'
+            : '别人分享给你的世界，随便看。改了名字或历史会另存一份到你的「我的世界」，原来的不受影响。'}
       </span>
       <button data-act="shared-ok" onClick={onOk}>
         知道了

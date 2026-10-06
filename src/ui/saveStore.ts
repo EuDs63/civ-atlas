@@ -30,6 +30,7 @@ import {
   CHECK_WARNING,
   SHARE_BROKEN,
   TITLE_MAX,
+  cleanOrigin,
   cleanTitle,
   editCount,
   makeSave,
@@ -37,6 +38,7 @@ import {
   sameView,
   worldKey,
   type SaveFile,
+  type SaveOrigin,
   type SaveView,
 } from '../gen/savefile';
 import { getEdits, subscribeEdits } from './editsStore';
@@ -321,6 +323,8 @@ export interface SaveNotice {
   more?: string[];
   /** 右侧的按钮 */
   action?: ToastAction;
+  /** 左边一个绿点(存好了一个文件这类) */
+  dot?: boolean;
   stamp: number;
 }
 
@@ -331,7 +335,7 @@ let notice: SaveNotice | null = null;
  */
 export function notify(n: Omit<SaveNotice, 'stamp'> | null) {
   notice = n ? { ...n, stamp: performance.now() } : null;
-  if (n) showToast({ id: 'save', kind: n.kind, text: n.text, more: n.more?.length ? n.more : undefined, action: n.action });
+  if (n) showToast({ id: 'save', kind: n.kind, text: n.text, more: n.more?.length ? n.more : undefined, action: n.action, dot: n.dot });
   else clearToast('save');
   changed();
 }
@@ -732,14 +736,24 @@ export function duplicateWorld(id: string): string | null {
   return nid;
 }
 
+/** 两份存档是不是同一个世界的同一个样子(参数、修改、名字、底稿出处都相同;投影、存档时间不算) */
+export function sameSave(a: SaveFile, b: SaveFile): boolean {
+  return worldKey(a.params) === worldKey(b.params) && (a.title ?? '') === (b.title ?? '') && JSON.stringify(a.edits) === JSON.stringify(b.edits) && sameOrigin(a.origin, b.origin);
+}
+
+/** 两个底稿出处是不是一样(都没有也算) */
+export function sameOrigin(a: SaveFile['origin'], b: SaveFile['origin']): boolean {
+  if (!a || !b) return !a && !b;
+  return (a.by ?? '') === (b.by ?? '') && a.title === b.title && a.url === b.url;
+}
+
 /**
  * 从文件打开:存进"我的世界"(算建好的),返回它的编号。
- * 已经有一个一模一样的(参数、修改、名字都相同,比如同一个文件打开了两次)就用那一个,不重复存
+ * 已经有一个一模一样的(参数、修改、名字、底稿出处都相同,比如同一个文件打开了两次)就用那一个,不重复存
  */
 export function importSave(save: SaveFile): string | null {
-  const same = (s: SaveFile) => worldKey(s.params) === worldKey(save.params) && (s.title ?? '') === (save.title ?? '') && JSON.stringify(s.edits) === JSON.stringify(save.edits);
   for (const w of listWorlds()) {
-    if (w.draft || !same(w.save)) continue;
+    if (w.draft || !sameSave(w.save, save)) continue;
     // 只差投影 / 中央经线:用文件里的(下次打开还是文件里的样子)
     if (!sameView(w.save.view, save.view)) {
       const next: SaveFile = { ...w.save, savedAt: new Date().toISOString() };
@@ -787,6 +801,8 @@ interface Current {
   gone?: 'deleted' | 'changed';
   /** 浏览器里存着的这个世界、这里知道的最新一份(这里写进去的、打开时存着的):别的标签页写的和它不一样 = 那边改过 */
   wrote?: string | null;
+  /** 底稿出处(从别人的分享短链接另存来的;存进存档) */
+  origin?: SaveOrigin;
 }
 
 let current: Current | null = null;
@@ -822,7 +838,7 @@ export function currentUnsaved(): boolean {
 /** 当前世界 → 存档(存成文件用) */
 export function currentSave(): SaveFile | null {
   if (!current) return null;
-  return makeSave(current.params, getEdits(), current.check, current.title, undefined, currentView());
+  return makeSave(current.params, getEdits(), current.check, current.title, undefined, currentView(), current.origin);
 }
 
 /** 过一会儿截一张缩略图(画布这时可能还没画好这个世界,截不到就再等等);force = 已经有了也重截 */
@@ -878,7 +894,7 @@ function saveCurrent(force = false): boolean {
   if (c.kind === 'visit') c.kind = 'created';
   const view = currentView();
   c.savedView = view;
-  const ok = writeSave(c.id, makeSave(c.params, edits, c.check, c.title, undefined, view), metaOf(c));
+  const ok = writeSave(c.id, makeSave(c.params, edits, c.check, c.title, undefined, view, c.origin), metaOf(c));
   c.unsaved = !ok;
   if (ok) scheduleThumb(c.id, redraw);
   changed();
@@ -929,6 +945,8 @@ export interface AttachSpec {
   pristine?: boolean;
   /** 新建中、以某个世界为底稿:原来那个世界 */
   base?: DraftBase | null;
+  /** 底稿出处(存着的世界、存档文件里带着的;打开别人的分享短链接时是那个链接)。新建中的没有 */
+  origin?: SaveOrigin | null;
 }
 
 /**
@@ -949,6 +967,7 @@ export function attachWorld(spec: AttachSpec) {
     base: spec.kind === 'draft' ? (spec.base ?? undefined) : undefined,
     saved: spec.saved,
     savedView: spec.view ?? prev?.view,
+    origin: spec.kind === 'draft' ? undefined : (cleanOrigin(spec.origin) ?? undefined),
   };
   const keep = spec.kind === 'created' || (spec.kind === 'draft' && !spec.pristine);
   const same =
@@ -956,6 +975,7 @@ export function attachWorld(spec: AttachSpec) {
     worldKey(prev.params) === worldKey(spec.params) &&
     prev.check === spec.check &&
     (prev.title ?? '') === (title ?? '') &&
+    JSON.stringify(prev.origin ?? null) === JSON.stringify(current.origin ?? null) &&
     getEdits() === spec.saved &&
     !!readMeta(spec.id).draft === (spec.kind === 'draft');
   if (keep && !same) {
@@ -1110,13 +1130,14 @@ export function rawWorld(id: string): RawWorld | null {
 
 /**
  * 把同步下来的世界写进浏览器(不为它删别的世界:写不下 = false,原来的不动)。
+ * opened:这边还没记"最近打开"时用它(「全部存成文件」放回来时带着)。
  * 正在看的就是它:先不再自动存它(App 重新打开)
  */
-export function putSyncedWorld(id: string, w: RawWorld): boolean {
+export function putSyncedWorld(id: string, w: RawWorld, opened0?: string): boolean {
   if (!ID_RE.test(id) || !parseSave(w.save).ok) return false;
   const kv = store();
   const old = kv.get(PREFIX + id);
-  const opened = readMeta(id).opened;
+  const opened = readMeta(id).opened ?? opened0;
   if (!kv.set(PREFIX + id, w.save)) return false;
   const m: Meta = { ...w.meta };
   if (opened) m.opened = opened;
@@ -1133,6 +1154,39 @@ export function putSyncedWorld(id: string, w: RawWorld): boolean {
   }
   changed();
   return true;
+}
+
+/**
+ * 「全部存成文件」放回来时,已经有的同一个世界:存档里没记投影、缺缩略图、不知道现存几国、没建完的不知道底稿的,用文件里的补上;
+ * 文件里"最近打开"更晚的也用文件里的(存不下就算了,不为它删别的);返回补了没有("最近打开"不算)
+ */
+export function fillMissing(id: string, w: { view?: SaveView; thumb: string | null; alive?: number; base?: DraftBase; opened?: string }): boolean {
+  const kv = store();
+  const save = readSave(id);
+  if (!save) return false;
+  let done = false;
+  // 正在看的这个:投影按页面上的(下次自动存就写页面上的),不补
+  const open = current?.id === id ? current : null;
+  if (w.view && !save.view && !open && kv.set(PREFIX + id, JSON.stringify({ ...save, view: w.view }))) done = true;
+  if (w.thumb && !kv.get(THUMB + id) && kv.set(THUMB + id, w.thumb)) done = true;
+  const m = readMeta(id);
+  const next: Meta = { ...m };
+  if (w.alive !== undefined && m.alive === undefined) next.alive = w.alive;
+  if (w.base && m.draft && !m.base) next.base = w.base;
+  // 文件里的"最近打开"比这边卡片上的时间晚:用文件里的(卡片时间、排序跟着回来;不算"补上了")
+  const at = m.opened && m.opened > save.savedAt ? m.opened : save.savedAt;
+  if (w.opened && w.opened > at) next.opened = w.opened;
+  const more = next.alive !== m.alive || next.base !== m.base;
+  let moved = false;
+  if ((more || next.opened !== m.opened) && kv.set(META + id, JSON.stringify(next))) {
+    // 正在看的这个也记上(下次自动存按页面里的写本地信息,不然又写没了)
+    if (open && open.alive === undefined && next.alive !== undefined) open.alive = next.alive;
+    if (open && open.kind === 'draft' && !open.base && next.base) open.base = next.base;
+    if (more) done = true;
+    moved = next.opened !== m.opened;
+  }
+  if (done || moved) changed();
+  return done;
 }
 
 /** 别的设备上删掉了:这里跟着删(不算这台设备上的删除) */

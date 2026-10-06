@@ -323,6 +323,18 @@
 .sb-row:last-child {
   border-bottom: 0;
 }
+a.sb-row {
+  color: inherit;
+  text-decoration: none;
+}
+/* 底稿出处那一行右边的"明月的「苍澜界」":长了截断 */
+.sb-row-side.sb-origin {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sb-row:hover:not(:disabled),
 .sb-row.on {
   background: var(--hover-bg);

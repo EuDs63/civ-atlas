@@ -41,6 +41,8 @@ interface Share {
   createdAt: number;
   stopped: boolean;
   opens: number;
+  /** 署名;没填 = 没有 */
+  by?: string;
 }
 
 export interface FakeAiOptions {
@@ -60,6 +62,8 @@ const CORS = {
 const WORLD_ID = /^w[0-9a-z]{6,24}$/;
 const iso = (t: number) => new Date(t).toISOString();
 const normInvite = (v: unknown) => (typeof v === 'string' ? v.toUpperCase().replace(/[\s-]/g, '') : '');
+/** 看到的几个字(一个组合表情算一个) */
+const seen = (s: string) => [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(s)].length;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
 const json = (status: number, body: unknown) =>
@@ -142,7 +146,7 @@ export function createFakeAiServer(opts: FakeAiOptions = {}) {
       const w = sh && !sh.stopped && users.get(sh.user.account) === sh.user ? sh.user.worlds.get(sh.worldId) : undefined;
       if (!sh || !w || w.deletedAt !== null) return fail(404, 'share-gone', '这个分享已经停止了');
       sh.opens++;
-      return json(200, { save: w.save, updatedAt: iso(w.updatedAt) });
+      return json(200, { save: w.save, updatedAt: iso(w.updatedAt), ...(sh.by ? { by: sh.by } : {}) });
     }
 
     const u = who(req);
@@ -249,7 +253,14 @@ export function createFakeAiServer(opts: FakeAiOptions = {}) {
       return json(200, {
         shares: list
           .sort((a, b) => b[1].createdAt - a[1].createdAt)
-          .map(([code, sh]) => ({ code, worldId: sh.worldId, title: ((u.worlds.get(sh.worldId)!.save ?? {}) as { title?: string }).title || '未命名世界', createdAt: iso(sh.createdAt), opens: sh.opens })),
+          .map(([code, sh]) => ({
+            code,
+            worldId: sh.worldId,
+            title: ((u.worlds.get(sh.worldId)!.save ?? {}) as { title?: string }).title || '未命名世界',
+            createdAt: iso(sh.createdAt),
+            opens: sh.opens,
+            ...(sh.by ? { by: sh.by } : {}),
+          })),
       });
     }
     const restore = /^\/v1\/trash\/([^/]+)\/restore$/.exec(path);
@@ -269,12 +280,21 @@ export function createFakeAiServer(opts: FakeAiOptions = {}) {
       if (one[2]) {
         const active = [...shares].find(([, sh]) => sh.user === u && sh.worldId === id && !sh.stopped);
         if (req.method === 'POST') {
+          // 署名:带了就改(空 = 不署名),不带 = 不动;最多 20 个字(按看到的字算,一个组合表情算一个),总长不超过 320
+          const raw = (await body(req))?.by;
+          if (raw !== undefined && (typeof raw !== 'string' || raw.length > 320 || seen(raw.trim()) > 20)) return fail(400, 'bad-request', '署名最多 20 个字');
+          const by = typeof raw === 'string' ? raw.trim() : undefined;
           if (!w || w.deletedAt !== null) return fail(404, 'not-found', '账号里还没有这个世界,等同步好了再分享');
-          if (active) return json(200, { code: active[0], worldId: id, createdAt: iso(active[1].createdAt), opens: active[1].opens });
+          const out = (code: string, sh: Share) => json(200, { code, worldId: id, createdAt: iso(sh.createdAt), opens: sh.opens, ...(sh.by ? { by: sh.by } : {}) });
+          if (active) {
+            if (by !== undefined) active[1].by = by || undefined;
+            return out(active[0], active[1]);
+          }
           let code = '';
           while (!code || shares.has(code)) code = Array.from({ length: 8 }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('');
-          shares.set(code, { user: u, worldId: id, createdAt: now, stopped: false, opens: 0 });
-          return json(200, { code, worldId: id, createdAt: iso(now), opens: 0 });
+          const sh: Share = { user: u, worldId: id, createdAt: now, stopped: false, opens: 0, ...(by ? { by } : {}) };
+          shares.set(code, sh);
+          return out(code, sh);
         }
         if (req.method === 'DELETE') {
           if (active) active[1].stopped = true;

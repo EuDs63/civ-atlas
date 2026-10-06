@@ -1431,6 +1431,49 @@ describe('分享短链接', () => {
     await expect(openShareCode(s2.code)).rejects.toMatchObject({ code: 'share-gone' });
     expect(await listShares()).toEqual([]);
   });
+
+  it('署名:默认不填;改了打开时一起给;别人另存的那份带着底稿出处,同步到他的另一台设备还在', async () => {
+    const a = new FakeStorage();
+    device(a);
+    const id = addWorld(7, '苍澜界');
+    await signIn();
+    const s1 = await createShare(id);
+    expect(s1.by).toBeUndefined();
+    expect((await openShareCode(s1.code)).by).toBeUndefined();
+    const s2 = await createShare(id, '明月');
+    expect([s2.code, s2.by]).toEqual([s1.code, '明月']);
+    expect((await createShare(id)).by).toBe('明月');
+    expect((await listShares())[0].by).toBe('明月');
+    const opened = await openShareCode(s1.code);
+    expect(opened.by).toBe('明月');
+
+    // 另一个人打开、改了另存(App 把这个链接记成出处)
+    const b = new FakeStorage();
+    device(b);
+    const save = opened.save as SaveFile;
+    const origin = { by: opened.by, title: save.title ?? '', url: `https://atlas.example.com/s/${s1.code}` };
+    const mine = saveStore.newWorldId();
+    setEdits(save.edits);
+    saveStore.attachWorld({ id: mine, params: save.params, check: save.check, kind: 'visit', title: save.title, saved: save.edits, origin });
+    saveStore.renameWorld(mine, '我的苍澜界');
+    expect(saveStore.loadWorld(mine)?.save.origin).toEqual(origin);
+    await signIn('reader@example.com');
+    expect(inAccount(mine)).toBe(true);
+    device(new FakeStorage());
+    await signIn('reader@example.com');
+    expect(saveStore.loadWorld(mine)?.save).toMatchObject({ title: '我的苍澜界', origin });
+
+    // 清掉署名:以后打开的人看不到名字
+    device(a);
+    await signIn();
+    expect((await createShare(id, '')).by).toBeUndefined();
+    expect((await openShareCode(s1.code)).by).toBeUndefined();
+
+    // 组合表情一个算一个字:20 个 👩‍💻 也收
+    const coder = '👩\u200d💻'.repeat(20);
+    expect((await createShare(id, coder)).by).toBe(coder);
+    expect((await openShareCode(s1.code)).by).toBe(coder);
+  });
 });
 
 describe('云同步:放满了、服务器不回话、分享前、别的标签页删了', () => {

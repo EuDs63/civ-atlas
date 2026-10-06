@@ -9,10 +9,10 @@
  *   DELETE /v1/worlds/:id?baseRev=      → { rev, deleted: true }(进最近删除,30 天);之后别的设备又改过:409
  *   GET    /v1/trash                     → { worlds: [{ id, title, seed, meta, thumb, deletedAt, purgeAt }] }
  *   POST   /v1/trash/:id/restore         → { rev, updatedAt }
- *   POST   /v1/worlds/:id/share          → { code, worldId, createdAt, opens }(开着就给原来那个)
+ *   POST   /v1/worlds/:id/share { by? }  → { code, worldId, createdAt, opens, by? }(开着就给原来那个;带了 by 改署名,空 = 不署名)
  *   DELETE /v1/worlds/:id/share          → 204(停了再开是新的码)
- *   GET    /v1/shares                    → { shares: [{ code, worldId, title, createdAt, opens }] }
- *   GET    /v1/s/:code(不用登录)        → { save, updatedAt };停了 / 删了:404 share-gone
+ *   GET    /v1/shares                    → { shares: [{ code, worldId, title, createdAt, opens, by? }] }
+ *   GET    /v1/s/:code(不用登录)        → { save, updatedAt, by? };停了 / 删了:404 share-gone
  *
  * 短链接:网站地址/s/<码>,网站把它转到 /?s=<码>,页面再来取(App.tsx)。
  */
@@ -62,6 +62,8 @@ export interface ShareInfo {
   title?: string;
   createdAt: string;
   opens: number;
+  /** 署名(别人另存时写进底稿出处);没填 = 没有 */
+  by?: string;
 }
 
 const path = (id: string) => `/v1/worlds/${encodeURIComponent(id)}`;
@@ -92,8 +94,9 @@ export function restoreTrash(id: string): Promise<{ rev: number }> {
   return authed(`/v1/trash/${encodeURIComponent(id)}/restore`, { method: 'POST' });
 }
 
-export function createShare(id: string): Promise<ShareInfo> {
-  return authed(path(id) + '/share', { method: 'POST' });
+/** 开分享(开着就给原来那个);by = 改署名(空字符串 = 不署名,不带 = 不动) */
+export function createShare(id: string, by?: string): Promise<ShareInfo> {
+  return authed(path(id) + '/share', { method: 'POST', ...(by !== undefined ? { body: { by } } : {}) });
 }
 
 export async function stopShare(id: string): Promise<void> {
@@ -105,8 +108,8 @@ export async function listShares(): Promise<ShareInfo[]> {
   return Array.isArray(r.shares) ? r.shares : [];
 }
 
-/** 打开别人的分享短链接(不用登录) */
-export function openShareCode(code: string): Promise<{ save: unknown; updatedAt?: string }> {
+/** 打开别人的分享短链接(不用登录);by = 分享的人填的署名 */
+export function openShareCode(code: string): Promise<{ save: unknown; updatedAt?: string; by?: string }> {
   return call(`/v1/s/${encodeURIComponent(code)}`);
 }
 

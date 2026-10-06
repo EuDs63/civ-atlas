@@ -27,6 +27,9 @@
  * - view:看这个世界用的投影和中央经线(`{ "projection": "robinson", "center": 120 }`,可选)。
  *   投影名原样存(render/projection.ts 的 ProjectionId,或 "globe"),认不出的由界面当成等距圆柱;
  *   旧存档没有这个字段 = 等距圆柱、中央经线 0°
+ * - origin:底稿出处(可选)。打开别人的分享短链接、改了另存进自己的"我的世界"时记下:分享的人填的署名(可以没有)、
+ *   那时的世界名、分享链接(`{ "by": "明月", "title": "苍澜界", "url": "https://…/s/k7Qm2xPa" }`)。
+ *   跟着世界走(存成文件、同步、再分享都带着);别人再从这一份另存,记的是直接的来源,不往上追
  *
  * 纯计算,不碰 DOM(Node 里可测)。
  */
@@ -52,8 +55,20 @@ export interface SaveFile {
   title?: string;
   /** 看这个世界用的投影和中央经线;没有 = 等距圆柱、0° */
   view?: SaveView;
+  /** 底稿出处:从别人的分享链接另存来的 */
+  origin?: SaveOrigin;
   /** 存档时间(ISO 8601) */
   savedAt: string;
+}
+
+/** 底稿出处 */
+export interface SaveOrigin {
+  /** 分享的人填的署名;没填 = 没有 */
+  by?: string;
+  /** 另存那时的世界名(没起名 = 空) */
+  title: string;
+  /** 分享链接(网站地址/s/<码>) */
+  url: string;
 }
 
 /** 投影 + 中央经线(存进存档、分享链接) */
@@ -77,6 +92,73 @@ export function cleanView(raw: unknown): SaveView | null {
   const t = (c + 180) / 360;
   const lon = (t - Math.floor(t)) * 360 - 180;
   return { projection: p, center: Math.round(lon * 100) / 100 };
+}
+
+/** 署名最长几个字 */
+export const SIGNATURE_MAX = 20;
+
+/** 看不见、但组合表情和连写离不开的字符:零宽连接(👩‍💻)、零宽不连接、各种变体选择(❤️、蒙古文的)、表情旗帜里的标签 */
+const JOINERS = /[\u200C\u200D\p{Variation_Selector}\u{E0020}-\u{E007F}]/u;
+const JOINERS_ALL = new RegExp(JOINERS.source, 'gu');
+/** 开头的这些字符和空白(前面没有字可以组合,没有用) */
+const LEADING = new RegExp(`^(?:${JOINERS.source}|\\s)+`, 'u');
+/** 署名最多占多长(UTF-16 码元;一个字后面挂上一长串看不见的字符也只算一个字,得另外限住) */
+export const SIGNATURE_UNITS = 320;
+
+/**
+ * 署名:去掉控制字符和别的看不见的字符(换行、制表这类算空白;零宽空格、改文字方向的都去掉,组合表情要用的留着)、首尾空白,
+ * 开头的组合用字符去掉,连续空白并成一个,超长截断(按看到的字数,另外总长不超过 SIGNATURE_UNITS);空(只剩组合用的字符也算)= 没署名
+ */
+export function cleanSignature(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const s = raw
+    .replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, (c) => (/\s/.test(c) ? ' ' : JOINERS.test(c) ? c : ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(LEADING, '');
+  let t = '';
+  let n = 0;
+  // 只分前面够用的一段(超出总长的反正放不下)
+  for (const g of graphemes(s.slice(0, SIGNATURE_UNITS + 1))) {
+    if (n >= SIGNATURE_MAX || t.length + g.length > SIGNATURE_UNITS) break;
+    t += g;
+    n++;
+  }
+  t = t.trimEnd();
+  return t.replace(JOINERS_ALL, '').trim() ? t : '';
+}
+
+/** 按看到的字分开(一个组合表情、一个带变体选择的 ❤️ 都算一个字);太旧的浏览器没有这个功能就按码位分 */
+function graphemes(s: string): string[] {
+  if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') return [...s];
+  return Array.from(new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(s), (x) => x.segment);
+}
+
+/** 分享短链接的样子:http(s)://网站地址/s/<码>(网站可以在子目录里) */
+const ORIGIN_CHARS = /^https?:\/\/[^\s"'<>\\]+$/;
+const ORIGIN_PATH = /\/s\/[A-Za-z0-9]{4,32}$/;
+
+/** 是不是分享短链接:按网址解析,路径以 /s/<码> 结尾,不带账号密码、问号后的参数、# 后的部分,而且本来就是规范写法 */
+function isShareLink(url: string): boolean {
+  if (url.length > 300 || !ORIGIN_CHARS.test(url)) return false;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password && !u.search && !u.hash && ORIGIN_PATH.test(u.pathname) && u.href === url;
+}
+
+/** 整理底稿出处:链接不像分享短链接的不要(界面上它是一个能点的链接) */
+export function cleanOrigin(raw: unknown): SaveOrigin | null {
+  if (!isObj(raw)) return null;
+  const url = raw.url;
+  if (typeof url !== 'string' || !isShareLink(url)) return null;
+  const o: SaveOrigin = { title: cleanTitle(raw.title), url };
+  const by = cleanSignature(raw.by);
+  if (by) o.by = by;
+  return o;
 }
 
 /** 两份投影设置是不是一样(中央经线差不到 0.01° 算一样) */
@@ -175,8 +257,16 @@ export function cleanTitle(raw: unknown): string {
   return cs.length > TITLE_MAX ? cs.slice(0, TITLE_MAX).join('') : s;
 }
 
-/** 生成一份存档(params 按固定顺序复制;修改复制一份,之后改原来的不影响存档)。view = 当前的投影和中央经线 */
-export function makeSave(params: WorldParams, edits: WorldEdits, check: string, title?: string, savedAt = new Date().toISOString(), view?: SaveView | null): SaveFile {
+/** 生成一份存档(params 按固定顺序复制;修改复制一份,之后改原来的不影响存档)。view = 当前的投影和中央经线;origin = 底稿出处 */
+export function makeSave(
+  params: WorldParams,
+  edits: WorldEdits,
+  check: string,
+  title?: string,
+  savedAt = new Date().toISOString(),
+  view?: SaveView | null,
+  origin?: SaveOrigin | null,
+): SaveFile {
   const p = {} as WorldParams;
   for (const k of PARAM_KEYS) p[k] = params[k] ?? DEFAULT_PARAMS[k];
   const save: SaveFile = {
@@ -200,6 +290,8 @@ export function makeSave(params: WorldParams, edits: WorldEdits, check: string, 
   if (t) save.title = t;
   const v = view ? cleanView(view) : null;
   if (v) save.view = v;
+  const o = origin ? cleanOrigin(origin) : null;
+  if (o) save.origin = o;
   return save;
 }
 
@@ -329,6 +421,9 @@ export function parseSave(text: string): ParseResult {
   // 投影和中央经线:格式不对就当没存(按等距圆柱、0° 看),不影响打开
   const view = cleanView(raw.view);
   if (view) save.view = view;
+  // 底稿出处:格式不对就当没有
+  const origin = cleanOrigin(raw.origin);
+  if (origin) save.origin = origin;
   return { ok: true, save, warnings };
 }
 

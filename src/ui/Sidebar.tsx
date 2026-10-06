@@ -6,7 +6,8 @@
  *   下面   三选一 ——
  *          搜索框里有字:搜索结果(点一条 = 选中它,地图飞过去)
  *          地图上选中了东西:它的详情(Inspector:国家 / 城 / 地理实体 / 州的面板)
- *          什么都没选:整个世界(WorldHome:信仰(只在信仰图层)、国家按大小排、最近大事、我的干预、这颗星球)
+ *          什么都没选:整个世界(WorldHome:信仰(只在信仰图层)、国家按大小排、最近大事、我的干预、这颗星球;从别人的分享另存来的,
+ *          这颗星球最后一行是底稿出处,点了在新标签页打开那个分享链接)
  * 收起:卡片右上角的侧栏图标 → 卡片往左滑走,左上角留一个小按钮(侧栏图标 + 世界名),点它滑回来;记在浏览器里(sideStore.ts)。
  *       收起时选中了东西,卡片弹出来显示它,取消选中又收回去;收起时搜索框跟着卡片一起收起。
  * 新建世界这一步左边是另一张卡片(NewWorld.tsx),不收起。
@@ -359,6 +360,10 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
   const recent = entries.slice(Math.max(0, k - RECENT_N), k).reverse();
   const nIv = edits.interventions.length;
   const nTerrain = edits.terrain.length;
+  // 底稿出处:另存进"我的世界"以后才有(打开别人的分享、还只是看看时不显示;地图下的说明讲了是谁的)
+  useSavesVersion();
+  const cur = currentWorld();
+  const origin = cur && cur.kind !== 'visit' && cur.kind !== 'draft' ? cur.origin : undefined;
   return (
     <div className="sb-home">
       {faiths.length > 0 && (
@@ -494,6 +499,18 @@ export function WorldHome(p: Pick<SidebarProps, 'civ' | 'data' | 'params' | 'gen
             </span>
             <Icon name="chevron" size={14} className="sb-chev" />
           </button>
+          {origin && (
+            <a className="sb-row" data-act="origin" href={origin.url} target="_blank" rel="noreferrer noopener" title="打开底稿的分享链接">
+              <Icon name="link" size={17} className="sb-ico" />
+              <span className="sb-row-main">
+                <b>底稿来自</b>
+              </span>
+              <span className="sb-row-side sb-origin">
+                {origin.by ? `${origin.by}的` : ''}「{origin.title || '未命名世界'}」
+              </span>
+              <Icon name="chevron" size={14} className="sb-chev" />
+            </a>
+          )}
         </div>
       </section>
     </div>

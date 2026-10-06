@@ -54,10 +54,11 @@ import { EventPins, type WorldToClient } from './EventPins';
 import { HistoryBook } from './HistoryBook';
 import { AiSettingsHost } from './AiSettings';
 import { AccountHost, ShareGone, SharedHint, closeTrash, openLogin, setGoHome, useTrashView } from './AccountDialogs';
+import { openBundleText } from './bundle';
 import { serverBase } from '../account/server';
 import { getSession, takeInviteFromUrl } from '../account/session';
 import { setReloadHandler, startSync } from '../account/sync';
-import { SHARE_CODE_RE, openShareCode } from '../account/cloud';
+import { SHARE_CODE_RE, openShareCode, shortLink } from '../account/cloud';
 import { ServerError } from '../account/server';
 import { highlightBox, highlightMarks } from '../render/civ/highlight';
 import {
@@ -112,6 +113,7 @@ import { openSaveMenu } from './SaveMenu';
 import { replayStart } from './timelineLayout';
 import {
   checkWarning,
+  cleanSignature,
   cleanTitle,
   decodeShare,
   editCount,
@@ -123,6 +125,7 @@ import {
   worldKey,
   type ParseResult,
   type SaveFile,
+  type SaveOrigin,
   type SaveView,
 } from '../gen/savefile';
 import {
@@ -131,6 +134,7 @@ import {
   attachWorld,
   briefError,
   briefWarning,
+  currentUnsaved,
   currentWorld,
   deleteWorld,
   detachWorld,
@@ -148,6 +152,7 @@ import {
   persistent,
   refreshThumb,
   renameWorld,
+  sameOrigin,
   setReopenHandler,
   setThumbMaker,
   setWorldStats,
@@ -289,6 +294,8 @@ interface Target {
   warnings?: string[];
   /** 从分享短链接打开的:它的码(还没存进我的世界时留在网址里,刷新再取一次,看到分享的人最新的改动) */
   shareCode?: string;
+  /** 底稿出处(存档里带着的;打开别人的分享短链接时是那个链接,改了另存时写进去) */
+  origin?: SaveOrigin | null;
 }
 
 /** 随机一个种子(新建世界、"换一颗") */
@@ -320,6 +327,7 @@ function storedTarget(w: StoredWorld, from: 'stored' | 'restore'): Target {
     view: from === 'restore' ? undefined : (w.save.view ?? null),
     from,
     save: w.save,
+    origin: w.save.origin ?? null,
   };
 }
 
@@ -510,7 +518,7 @@ export function App() {
   /** 分享短链接:正在取 / 停了 / 打不开(取到了 = null) */
   const [landing, setLanding] = useState<'loading' | 'gone' | { error: string } | null>(route.stage === 'home' && init.shortShare !== null && !init.share ? 'loading' : null);
   /** 打开别人分享的世界:地图下那条说明(这个世界的编号;点了"知道了"、改了存进我的世界以后不再显示) */
-  const [sharedFor, setSharedFor] = useState<string | null>(null);
+  const [sharedFor, setSharedFor] = useState<{ id: string; short: boolean; by: string } | null>(null);
   /** 新建时地图底部的一句"拖动地图看看这颗星球"(第一次拖动 / 缩放 / 换一颗之后收起) */
   const [draftTip, setDraftTip] = useState(true);
   const touchRef = useRef(() => {});
@@ -1073,7 +1081,7 @@ export function App() {
     const edits = sameT ? upgradeLegacyKeys(t.edits, rc.regions.seat) : t.edits;
     restoredIv.current = edits.interventions;
     setEdits(edits);
-    attachWorld({ id: t.id, params: world.params, check, kind: t.kind, title: t.title, saved: t.saved ?? edits, view: t.view ?? undefined, pristine: t.pristine, base: t.base });
+    attachWorld({ id: t.id, params: world.params, check, kind: t.kind, title: t.title, saved: t.saved ?? edits, view: t.view ?? undefined, pristine: t.pristine, base: t.base, origin: t.origin });
     if (t.kind !== 'draft') setWorldStats(aliveAtEnd(rc));
     const save = t.save;
     // 带种子的网址(别人发的普通链接):是旧版本画的就说清现在变了什么
@@ -1208,6 +1216,7 @@ export function App() {
       (cur.kind === 'draft') === w.draft &&
       worldKey(cur.params) === worldKey(w.save.params) &&
       (cur.title ?? '') === (w.save.title ?? '') &&
+      sameOrigin(cur.origin, w.save.origin) &&
       JSON.stringify(getEdits()) === JSON.stringify(w.save.edits);
     if (cur?.id === id && targetRef.current?.id === id && same) {
       markOpened(id);
@@ -1218,8 +1227,9 @@ export function App() {
     }
     openTarget(storedTarget(w, 'stored'));
   };
-  /** 从文件打开:存进"我的世界"(算建好的),再打开它;存不下就只打开、不存 */
+  /** 从文件打开:存进"我的世界"(算建好的),再打开它;存不下就只打开、不存。「全部存成文件」存的:全部放回我的世界,不打开 */
   const openText = (text: string, fileName?: string) => {
+    if (openBundleText(text, fileName)) return;
     const r = parseSave(text);
     if (!r.ok) {
       notify({ kind: 'error', text: fileName ? `打不开 ${fileName}` : '打不开这个存档', more: [briefError(r.error)] });
@@ -1229,11 +1239,14 @@ export function App() {
     const w = id ? loadWorld(id) : null;
     const t: Target = w
       ? { ...storedTarget(w, 'stored'), view: r.save.view ?? null }
-      : { id: newWorldId(), kind: 'visit', params: r.save.params, edits: r.save.edits, title: r.save.title, view: r.save.view ?? null, save: r.save };
+      : { id: newWorldId(), kind: 'visit', params: r.save.params, edits: r.save.edits, title: r.save.title, view: r.save.view ?? null, save: r.save, origin: r.save.origin ?? null };
     openTarget({ ...t, from: 'file', save: r.save, warnings: r.warnings });
   };
-  /** 打开分享链接(解开以后):别人的世界,先不存;改了(或起了名)才存进"我的世界" */
-  const openShare = (r: ParseResult, shareCode?: string) => {
+  /**
+   * 打开分享链接(解开以后):别人的世界,先不存;改了(或起了名)才存进"我的世界"。
+   * 短链接(short):改了另存时写明底稿出处(署名、这时的世界名、这个链接);长链接里没有分享人,不写
+   */
+  const openShare = (r: ParseResult, short?: { code: string; by?: string }) => {
     if (!r.ok) {
       const msg = briefError(r.error);
       // 世界还在生成:等生成完再说(生成时提示条上是进度)
@@ -1243,8 +1256,10 @@ export function App() {
     }
     const sv = r.save;
     const id = newWorldId();
-    setSharedFor(id);
-    openTarget({ id, kind: 'visit', params: sv.params, edits: sv.edits, saved: sv.edits, title: sv.title, view: sv.view ?? null, from: 'link', save: sv, warnings: r.warnings, shareCode });
+    const by = short ? cleanSignature(short.by) : '';
+    setSharedFor({ id, short: !!short, by });
+    const origin: SaveOrigin | null = short ? { ...(by ? { by } : {}), title: sv.title ?? '', url: shortLink(short.code) } : null;
+    openTarget({ id, kind: 'visit', params: sv.params, edits: sv.edits, saved: sv.edits, title: sv.title, view: sv.view ?? null, from: 'link', save: sv, warnings: r.warnings, shareCode: short?.code, origin });
   };
   /** 分享短链接:去服务器取存档(不用登录);停了、打不开就显示那一页 */
   const openShortShare = (code: string) => {
@@ -1256,7 +1271,7 @@ export function App() {
         const p = parseSave(JSON.stringify(r.save));
         if (!p.ok) return setLanding({ error: briefError(p.error) });
         setLanding(null);
-        openShareRef.current(p, code);
+        openShareRef.current(p, { code, by: r.by });
       })
       .catch((e) => {
         clearToast('share');
@@ -1367,9 +1382,9 @@ export function App() {
     if (!d || !t || !cur || t.id !== d.id || cur.id !== d.id) return null;
     return draftSig(t.params, getEdits(), cur.title) === d.sig ? d.id : null;
   };
-  /** 回到"我的世界"(一个都没有就直接新建) */
+  /** 回到"我的世界"(一个都没有就直接新建;正在看的这个只在页面里、没能存进浏览器的,不新建盖掉它,回去还能「全部存成文件」) */
   const goHome = () => {
-    if (!listWorlds().length) return startDraft();
+    if (!listWorlds().length && !currentUnsaved()) return startDraft();
     showHome();
   };
   /** 回到"我的世界"那一页(看最近删除时一个世界都没有也回去) */
@@ -1428,10 +1443,10 @@ export function App() {
     if (isStored(t.id) && new URLSearchParams(location.search).get('w') !== t.id) writeWorldUrl(t);
   }, [v, home]);
   // 我的世界里一个都不剩了(删光了、别的页面里删掉了):直接新建。
-  // 刚删掉的是最后一个、提示条上还能"撤销"时先停在这儿,提示收起了(没点撤销)再新建
+  // 刚删掉的是最后一个、提示条上还能"撤销"时先停在这儿,提示收起了(没点撤销)再新建;刚才那个世界只在页面里(存不进浏览器)的也停在这儿
   const undeleting = useToastOpen('save', 'world-undelete');
   useEffect(() => {
-    if (home && !landing && !trashView && !undeleting && !listWorlds().length) startDraft();
+    if (home && !landing && !trashView && !undeleting && !listWorlds().length && !currentUnsaved()) startDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home, v, landing, trashView, undeleting]);
   // 把 .json 拖进页面 = 从文件打开
@@ -2705,7 +2720,7 @@ export function App() {
   const world = stage === 'world';
   const curWorld = currentWorld();
   /** 打开别人分享的世界、还没改过:地图下那条说明代替第一次打开的操作提示 */
-  const sharedOn = world && !!data && !!sharedFor && curWorld?.id === sharedFor && curWorld.kind === 'visit' && !terrainTool.on;
+  const sharedOn = world && !!data && !!sharedFor && curWorld?.id === sharedFor.id && curWorld.kind === 'visit' && !terrainTool.on;
   const layerProps = { layer: mapLayer, civ, onLayer: applyLayer, thumbs, requestThumbs, disabled: !data };
   const newWorldProps = {
     params,
@@ -2903,7 +2918,7 @@ export function App() {
       <ToastBar />
       {/* 右下(时间轴上方):地球 / 平面、放大、缩小。触屏不放 + −(用双指捏合);窄屏整个不放(地球在右上竖排的按钮里) */}
       <MapControls globeOn={globeOn} onToggleGlobe={toggleGlobe} onZoom={zoomButton} shifted={false} hidden={!data || narrow || home} zoom={!coarse} />
-      {sharedOn ? <SharedHint phone={narrow} onOk={() => setSharedFor(null)} /> : <FirstHint show={hintOn && !!data && world && !terrainTool.on} touch={coarse} />}
+      {sharedOn ? <SharedHint phone={narrow} short={sharedFor.short} by={sharedFor.by} onOk={() => setSharedFor(null)} /> : <FirstHint show={hintOn && !!data && world && !terrainTool.on} touch={coarse} />}
       {/* 底部:时间轴(宽屏是卡片右边那一块底下的胶囊;手机是浮在底部卡片上面的胶囊);新建时还没有历史,不放 */}
       <div className="bottom-row">
         <div className="bottom-tl">{data && world && <CivTimeline civ={civ} hidden={replayOn} dock="inline" />}</div>
