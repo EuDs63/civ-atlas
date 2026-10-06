@@ -809,6 +809,7 @@ await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 6
       `再改改 → 关掉 ${closed}、还在新建 ${stillDraft};确认创建 → ${worldUrl.split('?')[1]}、${theme}、${layer}`,
   );
   if (!empty || !globe || !emptyText.includes('还没有世界') || !emptyText.includes('打造一颗独属于你的星球')) errs.push(`第一次来:我的世界空着时不是"星球 + 一段话 + 新建世界"(${emptyText})`);
+  if (!emptyText.includes('无需登录') || !emptyText.includes('不主张任何权利')) errs.push(`第一次来:「或者打开存档文件」下面没有"无需登录……归你"那行小字(${emptyText})`);
   if (!/[?&]new=1/.test(draftUrl)) errs.push(`第一次来:点「新建世界」没进新建(${draftUrl})`);
   if (!['不能再改', '种子', '世界参数', '地形'].every((w) => dlg.includes(w)) || !new RegExp(`[?&]seed=${dlgSeed}(&|$)`).test(draftUrl)) errs.push(`新建界面:确认框没列出不能再改的三样(${dlg},种子 ${dlgSeed})`);
   if (!closed || !stillDraft) errs.push('新建界面:确认框点「再改改」没有关掉、回到新建');

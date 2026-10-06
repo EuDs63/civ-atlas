@@ -356,6 +356,12 @@
 .mw .mw-or:hover {
   text-decoration: underline;
 }
+/* 按钮下面一行小字:不用登录、做的世界归谁(手机上也是 13px,不跟上面那段话变大) */
+.mw .mw-empty .mw-note {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
 @media (prefers-reduced-motion: reduce) {
   .mw-globe canvas {
     transition: none;
