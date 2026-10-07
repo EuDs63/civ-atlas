@@ -213,13 +213,6 @@
 .studio .st-ask.on .sb-ico {
   color: var(--link);
 }
-.st-ask .sb-row-main small {
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.st-ask-group {
-  margin-top: 10px;
-}
 /* 标题右边的「···」:灰色胶囊 */
 .studio .sb-more > .pm-btn {
   width: 32px;
@@ -235,26 +228,6 @@
 .studio .nw-seed-ctl .nw-btn.tint {
   background: var(--btn);
   color: var(--link);
-}
-/* 改地形工具:四行等距排开,说明和"改了几处"之间不画线;没得撤销时链接是灰的 */
-.studio .tp-tools {
-  gap: 10px;
-  padding: 12px 12px 0;
-}
-.studio .tp-hint {
-  padding: 10px 12px 0;
-  border-bottom: 0;
-  font-size: 13px;
-  line-height: 1.5;
-}
-.studio .tp-count {
-  gap: 14px;
-  padding: 10px 12px 12px;
-  font-size: 13.5px;
-}
-.studio .tp-count .sb-link:disabled {
-  opacity: 1;
-  color: var(--ink-3) !important;
 }
 /* 收起以后左上角的小按钮(和平常页面收起侧栏同一个样子,sidebar.css 的 .side-open) */
 .studio:not(.collapsed) .st-pill,

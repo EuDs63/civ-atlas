@@ -26,7 +26,7 @@ export interface Drainage {
  */
 export function drainage(mesh: Mesh, land: Uint8Array, h: Float32Array, eps: number, out?: Drainage): Drainage {
   const { n, adjStart, adj } = mesh;
-  const geo = geometryOf(mesh);
+  const elen = geometryOf(mesh).edgeLengths();
   const order = out?.order ?? new Int32Array(n);
   const receiver = out?.receiver ?? new Int32Array(n);
   const filled = out?.filled ?? new Float32Array(n);
@@ -37,14 +37,12 @@ export function drainage(mesh: Mesh, land: Uint8Array, h: Float32Array, eps: num
     if (land[i]) continue;
     state[i] = 2;
     filled[i] = Math.min(h[i], 0);
-    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
-      const j = adj[k];
-      if (land[j] && state[j] === 0) {
-        state[j] = 1;
-        filled[j] = Math.max(h[j], eps);
-        heap.push(j, filled[j]);
-      }
-    }
+  }
+  // 挨着海的陆地先入堆(先后见 shoreSeeds)
+  for (const j of shoreSeeds(mesh, land)) {
+    state[j] = 1;
+    filled[j] = Math.max(h[j], eps);
+    heap.push(j, filled[j]);
   }
   let len = 0;
   while (heap.size) {
@@ -70,7 +68,7 @@ export function drainage(mesh: Mesh, land: Uint8Array, h: Float32Array, eps: num
       const j = adj[k];
       const fj = land[j] ? filled[j] : Math.min(filled[j], 0);
       if (fj >= fi && land[j]) continue;
-      const s = (fi - fj) / geo.dist(j, i);
+      const s = (fi - fj) / elen[k];
       if (s > bestS) {
         bestS = s;
         best = j;
@@ -79,6 +77,38 @@ export function drainage(mesh: Mesh, land: Uint8Array, h: Float32Array, eps: num
     receiver[i] = best;
   }
   return { order, orderLen: len, receiver, filled };
+}
+
+/**
+ * 挨着海的陆地块,按"海里的地块按编号、各自的邻居按邻接表的先后"第一次碰到的先后排(注水时就按这个顺序入堆)。
+ * 只和海陆有关:侵蚀时同一份海陆要注水几十次,按 land 记住上一次的结果(先核对海陆一个字节都没变)
+ */
+function shoreSeeds(mesh: Mesh, land: Uint8Array): Int32Array {
+  const c = shoreCache.get(land);
+  if (c && c.mesh === mesh && sameBytes(c.land, land)) return c.seeds;
+  const { n, adjStart, adj } = mesh;
+  const seen = new Uint8Array(n);
+  const seeds: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (land[i]) continue;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (land[j] && !seen[j]) {
+        seen[j] = 1;
+        seeds.push(j);
+      }
+    }
+  }
+  const out = Int32Array.from(seeds);
+  shoreCache.set(land, { mesh, land: land.slice(), seeds: out });
+  return out;
+}
+const shoreCache = new WeakMap<Uint8Array, { mesh: Mesh; land: Uint8Array; seeds: Int32Array }>();
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /** 按 order 逆序把汇水量累加到下游。weight 为每个 cell 自身的产流量。 */

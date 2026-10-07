@@ -25,5 +25,9 @@ describe('我的世界 · 小说法', () => {
     expect(terrainBrief([])).toBe('没有');
     expect(terrainBrief([{ kind: 'volcano' }, { kind: 'range' }])).toBe('2 处：火山 1、山脉 1');
     expect(terrainBrief([{ kind: 'lake' }, { kind: 'lake' }, { kind: 'sink' }])).toBe('3 处：湖 2、沉成海 1');
+    const st = { kind: 'land', r: 8, pts: [1, 1] };
+    expect(terrainBrief([{ kind: 'river' }], { rest: 'sea', strokes: [st, st] })).toBe('画了 3 笔：草图 2 笔、河 1');
+    expect(terrainBrief([], { rest: 'sea', strokes: [] })).toBe('都是海');
+    expect(terrainBrief([{ kind: 'volcano' }], { rest: 'sea', strokes: [] })).toBe('画了 1 笔：火山 1');
   });
 });

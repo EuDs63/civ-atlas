@@ -23,8 +23,8 @@ import type { Civ } from '../../gen/civ/types';
 import type { Raster } from '../../gen/raster';
 import { TITLE_MAX, worldKey } from '../../gen/savefile';
 import type { DraftBase } from '../stageStore';
-import { useEdits } from '../editsStore';
-import { TerrainPanel, setTerrainTool, useTerrainTool } from '../TerrainTools';
+import { getEdits, useEdits } from '../editsStore';
+import { TerrainCaption, TerrainPanel, setTerrainTool, terrainSide, useTerrainTool } from '../TerrainTools';
 import { ParamSlider, SLIDERS, paramsSide } from '../WorldOverviewGenesis';
 import { openAiSettings } from '../AiSettings';
 import { AiSettingsItem, MenuItem, MenuSep, PopMenu } from '../PopMenu';
@@ -543,6 +543,8 @@ export function Studio(p: StudioProps) {
     } else if (flatAsked.current) {
       flatAsked.current = false;
       void sc.exitFlat(flatGeom());
+      // 画了草图:卷回地球仪时提示一句"换一颗"会照同一张草图长
+      if (getEdits().sketch) setTip(true);
     }
   }, [tool.on, glOk]);
 
@@ -629,7 +631,6 @@ export function Studio(p: StudioProps) {
   }, [confirm]);
 
   // ---- 左边的设定 ----
-  const nTerrain = edits.terrain.length;
   const base = p.base;
   const carried = !!base && base.names + base.interventions > 0;
   const commitSeed = () => {
@@ -738,23 +739,22 @@ export function Studio(p: StudioProps) {
     </button>
   );
   const terrainRow = (
-    <button className="sb-row terrain-toggle" data-act="terrain" disabled={!p.ready || busyIntro} onClick={() => setTerrainTool({ on: true })} title="放火山、画山脉、挖湖……">
-      <Icon name="terrain" size={ico} className="sb-ico" />
+    <button className="sb-row terrain-toggle" data-act="terrain" disabled={!p.ready || busyIntro} onClick={() => setTerrainTool({ on: true })} title="涂大陆、山和海，放火山、湖和河">
+      <Icon name="sketch" size={ico} className="sb-ico" />
       <span className="sb-row-main">
-        <b>火山、山脉、湖……</b>
+        <b>编辑地形</b>
       </span>
-      <span className="sb-row-side">{nTerrain ? `改了 ${nTerrain} 处` : '还没改'}</span>
+      <span className="sb-row-side">{terrainSide(edits, '还没改')}</span>
       <Icon name="chevron" size={14} className="sb-chev" />
     </button>
   );
-  const askRow = (sub: boolean) => (
+  const askRow = (
     <button className={`sb-row st-ask${astShown ? ' on' : ''}`} data-act="ask-assistant" disabled={!canAsk} onClick={askAssistant} title="说说想要什么样，助手替你放火山、拉山脉、挖湖">
       <Icon name="bubble" size={ico} className="sb-ico" />
       <span className="sb-row-main">
         <b>让助手改</b>
-        {sub && <small>说想要什么样，它替你一处处放</small>}
       </span>
-      {!sub && <span className="sb-row-side">说一句话就行</span>}
+      <span className="sb-row-side">说一句话就行</span>
       <Icon name="chevron" size={14} className="sb-chev" />
     </button>
   );
@@ -825,10 +825,7 @@ export function Studio(p: StudioProps) {
     </button>
   );
   const settings = tool.on ? (
-    <>
-      <TerrainPanel disabled={p.busy} />
-      {!p.phone && aiOn && <div className="sb-group st-ask-group">{askRow(true)}</div>}
-    </>
+    <TerrainPanel disabled={p.busy} phone={p.phone} />
   ) : (
     <>
       <section className="sb-sec">
@@ -852,7 +849,7 @@ export function Studio(p: StudioProps) {
           </div>
           <div className="sb-group">
             {terrainRow}
-            {aiOn && askRow(false)}
+            {aiOn && askRow}
           </div>
         </section>
       )}
@@ -964,7 +961,7 @@ export function Studio(p: StudioProps) {
           <div className="sb-group" role="radiogroup" aria-label="投影">
             {projRows}
           </div>
-          {tool.on && <p className="st-note">改地形时用平面地图，改完回到原来的投影</p>}
+          {tool.on && <p className="st-note">编辑地形时用平面地图，编辑完回到原来的投影</p>}
           {glOk === false && <p className="st-note">这台设备画不了地球仪，先用平面地图</p>}
         </>
       )}
@@ -1039,8 +1036,9 @@ export function Studio(p: StudioProps) {
         </button>
       </div>
       <div ref={tipRef} className={`st-cap st-tip${tip && !capOn && !tool.on && !out && !(p.phone && (drawer || sheetFull)) ? '' : ' off'}`}>
-        拖动看看这颗星球；不满意就点「换一颗」
+        {edits.sketch ? '拖动看看这颗星球；「换一颗」会照同一张草图长出新的山河' : '拖动看看这颗星球；不满意就点「换一颗」'}
       </div>
+      {tool.on && <TerrainCaption phone={p.phone} />}
       {confirm && (
         <div className="st-scrim" onPointerDown={stop} onClick={() => setConfirm(false)}>
           <div className="st-dlg" role="alertdialog" aria-modal="true" aria-labelledby="st-dlg-title" onClick={stop}>
@@ -1072,7 +1070,7 @@ export function Studio(p: StudioProps) {
                   <b>地形</b>
                 </span>
                 <span className="sb-row-side" data-confirm="terrain">
-                  {nTerrain ? `改了 ${nTerrain} 处` : '没改过'}
+                  {terrainSide(edits, '没改过')}
                 </span>
               </div>
             </div>

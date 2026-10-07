@@ -704,22 +704,148 @@
   width: 100%;
 }
 
-/* ---- 改地形(卡片里的一组):工具、大小、说明、改了几处 / 撤销 / 全部清除;标题右边"完成" ---- */
+/* ---- 编辑地形(新建世界卡片里点开"编辑地形"):工具一组、这支笔的设定一组、整张草图一组;标题右边"完成" ---- */
+.tp {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 .tp .tp-done {
   font-size: 13.5px;
 }
+/* 涂一片的八支笔(四列)、放一处的三样(三列) */
 .tp-tools {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 10px 4px;
+  padding: 10px 8px;
+}
+.tp-sub {
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.tp-tiles {
+  display: grid;
+  gap: 4px;
+}
+.tp-tiles.c4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+.tp-tiles.c3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.tp .tp-tile {
+  min-width: 0;
+  height: 50px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.tp .tp-tile.on {
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  font-weight: 600;
+}
+.tp-tile .icon {
+  color: var(--ink-2);
+  stroke-width: 1.8;
+}
+.tp-tile.on .icon {
+  color: var(--ink);
+}
+/* 每支笔的颜色(和地图上涂出来的同一套) */
+.tp-sw {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+}
+.tp-sw.k-land {
+  background: #7cc860;
+}
+.tp-sw.k-hills {
+  background: #c4cf5a;
+}
+.tp-sw.k-mountain {
+  background: #e0a050;
+}
+.tp-sw.k-plateau {
+  background: #c98c66;
+}
+.tp-sw.k-shelf {
+  background: #74d0e8;
+}
+.tp-sw.k-sea {
+  background: #3f8fe0;
+}
+.tp-sw.k-isles {
+  background:
+    radial-gradient(circle at 30% 35%, #7cc860 0 2.2px, transparent 2.6px),
+    radial-gradient(circle at 70% 30%, #7cc860 0 1.8px, transparent 2.2px),
+    radial-gradient(circle at 55% 72%, #7cc860 0 2.6px, transparent 3px),
+    radial-gradient(circle at 22% 75%, #7cc860 0 1.4px, transparent 1.8px);
+  box-shadow: inset 0 0 0 1px rgba(124, 200, 96, 0.55);
+}
+.tp-sw.k-erase {
+  box-shadow: inset 0 0 0 1.5px var(--ink-2);
+}
+/* 手机:工具排成一行横着滑,放一处前面隔一道竖线 */
+.tp-strip {
+  display: flex;
+  gap: 2px;
+  padding: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tp-strip::-webkit-scrollbar {
+  display: none;
+}
+.tp-strip .tp-tile {
+  flex: none;
+  width: 50px;
+}
+.tp-bar {
+  flex: none;
+  width: 0.5px;
+  margin: 8px 4px;
+  background: var(--line-strong);
+}
+/* 画法 / 大小 / 高低,海岸线 / 没涂的地方:左边一个灰字,右边分段按钮或滑条 */
+.tp-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.tp-lbl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.tp-lbl > b {
+  flex: none;
+  font-weight: 400;
 }
 .tp-seg {
+  flex: 1;
   display: flex;
   gap: 2px;
   padding: 2px;
   border-radius: 9px;
   background: var(--field);
+  color: var(--ink);
 }
 .tp .tp-seg button {
   flex: 1;
@@ -740,32 +866,101 @@
 [data-theme='dark'] .tp .tp-seg button.on {
   background: rgba(255, 255, 255, 0.18);
 }
-.tp-size {
+/* 大小滑条:左边小点、右边大点,最右写半径 */
+.tp-range {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--ink-2);
+  gap: 8px;
 }
-.tp-size > span {
+.tp-dot {
   flex: none;
+  border-radius: 50%;
+  background: var(--ink-2);
 }
-.tp-size .tp-seg {
-  flex: 1;
+.tp-dot.s {
+  width: 5px;
+  height: 5px;
+}
+.tp-dot.l {
+  width: 13px;
+  height: 13px;
+}
+.tp-range em {
+  flex: none;
+  width: 26px;
+  text-align: right;
+  font-style: normal;
+  font-size: 13px;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.tp-range input {
+  --fill: 50%;
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+.tp-range input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--line) var(--fill));
+}
+.tp-range input::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.tp-range input::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.tp-range input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0.5px 2px rgba(0, 0, 0, 0.35);
+}
+.tp-range input::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0.5px 2px rgba(0, 0, 0, 0.35);
+}
+.tp-range input:focus-visible {
+  outline: 0;
+}
+.tp-range input:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    0 0.5px 2px rgba(0, 0, 0, 0.35);
 }
 .tp-hint {
-  padding: 4px 12px 10px;
-  border-bottom: 0.5px solid var(--line);
-  font-size: 12.5px;
+  padding: 0 12px 12px;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--ink-2);
 }
+/* 画了几笔 / 撤销 / 重做 / 全部清除;没得撤销时链接是灰的 */
 .tp-count {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 10px 12px;
-  font-size: 14px;
+  gap: 14px;
+  padding: 10px 12px 12px;
+  border-top: 0.5px solid var(--line);
+  font-size: 13.5px;
 }
 .tp-n {
   flex: 1;
@@ -776,12 +971,27 @@
   font-size: 13.5px;
 }
 .tp-count .sb-link:disabled {
-  opacity: 0.4;
+  color: var(--ink-3) !important;
   text-decoration: none;
   cursor: default;
 }
 .tp-count .sb-link.danger {
   color: var(--err) !important;
+}
+.tp .tp-show {
+  border-top: 0.5px solid var(--line);
+}
+.tp .tp-show .sb-row-main {
+  font-weight: 500;
+}
+/* 手机:「整张草图」那一行点开,下面接着海岸线、没涂的地方、显示草图 */
+.tp-whole.open + .tp-opts {
+  border-top: 0.5px solid var(--line);
+}
+/* 圈起来填满正在画:地图下边一句提示 */
+.studio .tp-cap {
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 /* ==== 新建世界:手机底部的卡片(摆放、收起拉开在 studio.css 的 .st-sheet) ==== */
@@ -816,6 +1026,16 @@
 }
 .nw-sheet .tp .sb-sec-head {
   font-size: 13.5px;
+}
+.st-sheet .tp {
+  gap: 10px;
+}
+.st-sheet .tp-opts {
+  gap: 8px;
+  padding: 9px 12px;
+}
+.st-sheet .tp-hint {
+  padding: 0 12px 10px;
 }
 .mw-phone .mw-empty p {
   font-size: 14px;

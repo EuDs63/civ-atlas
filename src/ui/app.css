@@ -1099,7 +1099,8 @@ body.terrain-pan .stage.terrain-on:active {
   overflow: visible;
   pointer-events: none;
 }
-.terrain-overlay * {
+/* 画出来的记号(不含 defs 里的遮罩、花纹:它们的颜色写在属性上) */
+.terrain-overlay > g * {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1150,7 +1151,112 @@ body.terrain-pan .stage.terrain-on:active {
   stroke-width: 3.5;
   stroke: rgba(20, 16, 12, 0.4);
 }
+/* 河:亮蓝的线 */
+.terrain-overlay .tt-river {
+  stroke: rgba(120, 200, 255, 0.95);
+  stroke-width: 4;
+}
+/* 草图:涂抹 = 半透明的宽带子;圈起来填满 = 半透明的一块,描一圈亮一点的细边 */
+.sk-mark .sk-edge {
+  stroke-width: 1.5;
+}
+.sk-mark .sk-area {
+  fill-rule: evenodd;
+}
+.sk-mark.k-land .sk-band {
+  stroke: rgba(124, 200, 96, 0.4);
+}
+.sk-mark.k-land .sk-area,
+.sk-mark.k-isles .sk-area {
+  fill: rgba(124, 200, 96, 0.3);
+}
+.sk-mark.k-land .sk-edge,
+.sk-mark.k-isles .sk-edge {
+  stroke: rgba(184, 240, 140, 0.95);
+}
+.sk-mark.k-hills .sk-band {
+  stroke: rgba(196, 207, 90, 0.5);
+}
+.sk-mark.k-hills .sk-area {
+  fill: rgba(196, 207, 90, 0.32);
+}
+.sk-mark.k-hills .sk-edge {
+  stroke: rgba(228, 236, 150, 0.95);
+}
+.sk-mark.k-mountain .sk-band {
+  stroke: rgba(224, 160, 80, 0.62);
+}
+.sk-mark.k-mountain .sk-area {
+  fill: rgba(224, 160, 80, 0.4);
+}
+.sk-mark.k-mountain .sk-edge {
+  stroke: rgba(250, 200, 140, 0.95);
+}
+.sk-mark.k-plateau .sk-band {
+  stroke: rgba(201, 140, 102, 0.55);
+}
+.sk-mark.k-plateau .sk-area {
+  fill: rgba(201, 140, 102, 0.38);
+}
+.sk-mark.k-plateau .sk-edge {
+  stroke: rgba(236, 190, 160, 0.95);
+}
+.sk-mark.k-shelf .sk-band {
+  stroke: rgba(116, 208, 232, 0.4);
+}
+.sk-mark.k-shelf .sk-area {
+  fill: rgba(116, 208, 232, 0.3);
+}
+.sk-mark.k-shelf .sk-edge {
+  stroke: rgba(170, 232, 248, 0.95);
+}
+.sk-mark.k-sea .sk-band {
+  stroke: rgba(63, 143, 224, 0.55);
+}
+.sk-mark.k-sea .sk-area {
+  fill: rgba(63, 143, 224, 0.45);
+}
+.sk-mark.k-sea .sk-edge {
+  stroke: rgba(140, 195, 255, 0.95);
+}
+.sk-mark.k-isles .sk-band {
+  stroke: rgba(124, 200, 96, 0.16);
+}
+.terrain-overlay .sk-erasing {
+  stroke: rgba(255, 255, 255, 0.16);
+}
+/* 圈起来填满正在画的那一圈:白色虚线 + 淡淡的这支笔的颜色,终点连回起点是一道点线 */
+.terrain-overlay .sk-lasso-area {
+  fill: rgba(124, 200, 96, 0.22);
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.sk-lasso.k-hills .sk-lasso-area {
+  fill: rgba(196, 207, 90, 0.24);
+}
+.sk-lasso.k-mountain .sk-lasso-area {
+  fill: rgba(224, 160, 80, 0.26);
+}
+.sk-lasso.k-plateau .sk-lasso-area {
+  fill: rgba(201, 140, 102, 0.26);
+}
+.sk-lasso.k-shelf .sk-lasso-area {
+  fill: rgba(116, 208, 232, 0.24);
+}
+.sk-lasso.k-sea .sk-lasso-area {
+  fill: rgba(63, 143, 224, 0.3);
+}
+.sk-lasso.k-erase .sk-lasso-area {
+  fill: rgba(255, 255, 255, 0.12);
+}
+.terrain-overlay .sk-lasso-close {
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 4;
+}
 /* 还在重新生成的那几处(含正在画的线):一闪一闪 */
+.sk-mark.pending,
 .tt-mark.pending {
   animation: tt-pulse 0.9s ease-in-out infinite alternate;
 }

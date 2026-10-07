@@ -22,7 +22,7 @@ import type { Mesh } from './mesh';
 import { blurField } from './mesh';
 import { classifyBiome } from './biomes';
 import { SEA_ICE_MIN, seaIceNodes, seaIcePixels } from './seaice';
-import { sampleTile, smoothstep, subSeed, tileableFbm } from './util';
+import { smoothstep, subSeed, tileableFbm } from './util';
 // 河谷要正好落在画出来的河下面,所以直接用画河的同一套几何(纯计算,不碰页面,worker / Node 都能跑)
 import { riverGeometry } from '../render/common';
 
@@ -308,7 +308,6 @@ export function sphereCover(mesh: Mesh, g: SphereGrid): SphereCover {
   const TAU = 2 * Math.PI;
   const toY = (z: number) => ((Math.PI / 2 - Math.asin(z < -1 ? -1 : z > 1 ? 1 : z)) / Math.PI) * h - 0.5;
   const toX = (l: number) => ((l + Math.PI) / TAU) * w - 0.5;
-  const lon = [0, 0, 0];
   const ext = [0, 0];
   for (let t = 0; t < nt; t++) {
     const a = triangles[3 * t];
@@ -360,18 +359,33 @@ export function sphereCover(mesh: Mesh, g: SphereGrid): SphereCover {
     let x0 = 0;
     let x1 = w - 1;
     if (!north && !south && Math.max(Math.abs(az), Math.abs(bz), Math.abs(cz)) < 0.999) {
-      lon[0] = Math.atan2(ay, ax);
-      lon[1] = Math.atan2(by, bx);
-      lon[2] = Math.atan2(cy, cx);
-      lon.sort((u, v) => u - v);
-      const g1 = lon[1] - lon[0];
-      const g2 = lon[2] - lon[1];
-      const g3 = lon[0] + TAU - lon[2];
+      // 三个顶点的经度从小到大(冒泡,相等的不换位置:和稳定排序一样)
+      let l0 = Math.atan2(ay, ax);
+      let l1 = Math.atan2(by, bx);
+      let l2 = Math.atan2(cy, cx);
+      if (l0 > l1) {
+        const t = l0;
+        l0 = l1;
+        l1 = t;
+      }
+      if (l1 > l2) {
+        const t = l1;
+        l1 = l2;
+        l2 = t;
+      }
+      if (l0 > l1) {
+        const t = l0;
+        l0 = l1;
+        l1 = t;
+      }
+      const g1 = l1 - l0;
+      const g2 = l2 - l1;
+      const g3 = l0 + TAU - l2;
       const gmax = Math.max(g1, g2, g3);
       // 最大的空隙要明显超过半圈才靠得住(否则三角形紧贴极点,经度范围说不清,整圈都扫)
       if (gmax > Math.PI * 1.1) {
-        const lo = g3 === gmax ? lon[0] : g1 === gmax ? lon[1] : lon[2];
-        const hi = g3 === gmax ? lon[2] : g1 === gmax ? lon[0] + TAU : lon[1] + TAU;
+        const lo = g3 === gmax ? l0 : g1 === gmax ? l1 : l2;
+        const hi = g3 === gmax ? l2 : g1 === gmax ? l0 + TAU : l1 + TAU;
         const xa = Math.ceil(toX(lo)) - 1;
         const xb = Math.floor(toX(hi)) + 1;
         if (xb - xa < w) {
@@ -450,26 +464,61 @@ const TRI_S = Math.sin(0.61);
 const TRI_T = 0.45;
 
 /**
- * 三向贴图取样:球面上一点 (X, Y, Z)(世界单位)处,可平铺贴图 tile 在频率 f(每世界单位几个贴图像素)下的值。
- * 三个投影面(YZ、ZX、XY)各取一次,按权重 w0..w2 混合(调用方已按 √Σw² 归一:混合后标准差不变)。
- * o 是这一层的偏移,同一张贴图不同的 o 互不相关。
+ * 当前像素的三向贴图参数 [X, Y, Z, w0, w1, w2],逐像素循环先写进来再调 tri3。
+ * 放在类型化数组里传,而不是作为参数:一个像素要调好几次 tri3,小数作参数每次都要另外装箱,拖慢逐像素循环。
  */
-function tri3(tile: Float32Array, size: number, f: number, o: number, X: number, Y: number, Z: number, w0: number, w1: number, w2: number): number {
+const TRI_AT = new Float64Array(6);
+
+/**
+ * 三向贴图取样:球面上一点 (X, Y, Z)(世界单位,取自 TRI_AT)处,可平铺贴图 tile 在频率 f(每世界单位几个贴图像素)下的值。
+ * 三个投影面(YZ、ZX、XY)各取一次,按权重 w0..w2 混合(调用方已按 √Σw² 归一:混合后标准差不变)。
+ * o 是这一层的偏移,同一张贴图不同的 o 互不相关。size 必须是 2 的幂。
+ */
+function tri3(tile: Float32Array, size: number, f: number, o: number): number {
+  const X = TRI_AT[0];
+  const Y = TRI_AT[1];
+  const Z = TRI_AT[2];
+  const w0 = TRI_AT[3];
+  const w1 = TRI_AT[4];
+  const w2 = TRI_AT[5];
+  const m = size - 1;
   let s = 0;
-  if (w0 > 0) {
-    const u = Y * f;
-    const v = Z * f;
-    s += w0 * sampleTile(tile, size, TRI_C * u - TRI_S * v + o, TRI_S * u + TRI_C * v + 0.37 * o + 17.9);
-  }
-  if (w1 > 0) {
-    const u = Z * f;
-    const v = X * f;
-    s += w1 * sampleTile(tile, size, TRI_C * u - TRI_S * v + 1.31 * o + 131.3, TRI_S * u + TRI_C * v + 0.73 * o + 7.7);
-  }
-  if (w2 > 0) {
-    const u = X * f;
-    const v = Y * f;
-    s += w2 * sampleTile(tile, size, TRI_C * u - TRI_S * v + 0.59 * o + 61.1, TRI_S * u + TRI_C * v + 1.13 * o + 233.9);
+  for (let p = 0; p < 3; p++) {
+    const wp = p === 0 ? w0 : p === 1 ? w1 : w2;
+    if (!(wp > 0)) continue;
+    let su: number;
+    let sv: number;
+    if (p === 0) {
+      const u = Y * f;
+      const v = Z * f;
+      su = TRI_C * u - TRI_S * v + o;
+      sv = TRI_S * u + TRI_C * v + 0.37 * o + 17.9;
+    } else if (p === 1) {
+      const u = Z * f;
+      const v = X * f;
+      su = TRI_C * u - TRI_S * v + 1.31 * o + 131.3;
+      sv = TRI_S * u + TRI_C * v + 0.73 * o + 7.7;
+    } else {
+      const u = X * f;
+      const v = Y * f;
+      su = TRI_C * u - TRI_S * v + 0.59 * o + 61.1;
+      sv = TRI_S * u + TRI_C * v + 1.13 * o + 233.9;
+    }
+    // 在贴图上双线性取值(坐标以贴图像素为单位,自动环绕);直接写在这里,省掉逐次调用
+    const ui = Math.floor(su);
+    const vi = Math.floor(sv);
+    const tx = su - ui;
+    const ty = sv - vi;
+    const x0 = ui & m;
+    const x1 = (ui + 1) & m;
+    const r0 = (vi & m) * size;
+    const r1 = ((vi + 1) & m) * size;
+    const a = tile[r0 + x0];
+    const b = tile[r0 + x1];
+    const c = tile[r1 + x0];
+    const d = tile[r1 + x1];
+    const top = a + (b - a) * tx;
+    s += wp * (top + (c + (d - c) * tx - top) * ty);
   }
   return s;
 }
@@ -666,8 +715,14 @@ function shadeSphere(
       w1 *= nrm;
       w2 *= nrm;
 
+      TRI_AT[0] = X;
+      TRI_AT[1] = Y;
+      TRI_AT[2] = Z;
+      TRI_AT[3] = w0;
+      TRI_AT[4] = w1;
+      TRI_AT[5] = w2;
       const e = base[k];
-      const d = tri3(dTile, DETAIL_SIZE, 1, 0, X, Y, Z, w0, w1, w2);
+      const d = tri3(dTile, DETAIL_SIZE, 1, 0);
       const isLake = lake + 0.12 * d > 0.5;
       let ee = e;
       if (!isLake) {
@@ -676,16 +731,16 @@ function shadeSphere(
         if (cw > 0.01) {
           const rug = P[o + 15] * fx + P[o + 16] * fy + P[o + 17];
           const D = ((1.2 + 3.5 * rug) * scale * smoothstep(0.01, 0.5, cw)) / DETAIL_STD;
-          let wx = tri3(dTile, DETAIL_SIZE, 1, 211.3, X, Y, Z, w0, w1, w2);
-          let wy = tri3(dTile, DETAIL_SIZE, 1, 53.9, X, Y, Z, w0, w1, w2);
+          let wx = tri3(dTile, DETAIL_SIZE, 1, 211.3);
+          let wy = tri3(dTile, DETAIL_SIZE, 1, 53.9);
           if (rug > 0.02) {
-            wx += 1.3 * rug * tri3(dTile, DETAIL_SIZE, 1 / 3, 101.7, X, Y, Z, w0, w1, w2);
-            wy += 1.3 * rug * tri3(dTile, DETAIL_SIZE, 1 / 3, 157.1, X, Y, Z, w0, w1, w2);
+            wx += 1.3 * rug * tri3(dTile, DETAIL_SIZE, 1 / 3, 101.7);
+            wy += 1.3 * rug * tri3(dTile, DETAIL_SIZE, 1 / 3, 157.1);
           }
           eb = sampleWrapped(base, w, h, px + D * wx * stretch, py + D * wy);
         }
         let dd = d;
-        if (amp > 60 && e > 0) dd += 0.5 * smoothstep(60, 250, amp) * tri3(dTile, DETAIL_SIZE, 2.37, 33.1, X, Y, Z, w0, w1, w2);
+        if (amp > 60 && e > 0) dd += 0.5 * smoothstep(60, 250, amp) * tri3(dTile, DETAIL_SIZE, 2.37, 33.1);
         ee = eb + amp * q * dd;
         if (cw === 0 && ee < 2) ee = 2;
         const cv = carve[k];
@@ -694,7 +749,7 @@ function shadeSphere(
       oElev[k] = ee;
       const wtr = isLake ? 2 : ee < 0 ? 1 : 0;
       oWater[k] = wtr;
-      const j = tri3(jTile, JITTER_SIZE, FJ, 3.7, X, Y, Z, w0, w1, w2);
+      const j = tri3(jTile, JITTER_SIZE, FJ, 3.7);
       const t = P[o + 9] * fx + P[o + 10] * fy + P[o + 11] - LAPSE * Math.max(0, wtr === 1 ? 0 : ee) + 1.2 * j;
       oTemp[k] = t;
       const pr = (P[o + 12] * fx + P[o + 13] * fy + P[o + 14]) * (1 + 0.22 * j);

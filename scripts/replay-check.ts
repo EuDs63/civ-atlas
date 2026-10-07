@@ -99,7 +99,7 @@ const studioReady = async (p: Page = page) => {
   await p.waitForTimeout(450);
 };
 /**
- * 进入改地形:只有新建世界时能改(网址 new=1);点左边(手机:拉开底部卡片)的"火山、山脉、湖……",卡片里换成改地形工具(.tp),
+ * 进入编辑地形:只有新建世界时能改(网址 new=1);点左边(手机:拉开底部卡片)的"编辑地形",卡片里换成编辑地形的工具(.tp),
  * 星球摊成平面、换成平常的平面地图铺在中间那块;转到 0° 经线在正中(主图正好铺满那一块)。
  * 已经创建的世界没有这个入口(地形是创建时定下的)
  */
@@ -1157,8 +1157,8 @@ await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 6
 }
 
 // 新建时让助手改(测试用假 AI):左边「地形」里「让助手改」→ 右边的样式和投影换成助手面板;说一句要改的 →
-// 列出改地形的两条(带编号),星球转过去、圈出这两处;勾掉一条,圈跟着少一个;执行 → 按新地形重新生成,左边「地形」写"改了 2 处",
-// 不放提示条,清单收起、助手里只留一行"已执行 2 条"带撤销;撤销 → 回到"还没改"。打开改地形工具时助手收起;换一颗,对话清掉
+// 列出改地形的两条(带编号),星球转过去、圈出这两处;勾掉一条,圈跟着少一个;执行 → 按新地形重新生成,左边「地形」写"画了 2 笔",
+// 不放提示条,清单收起、助手里只留一行"已执行 2 条"带撤销;撤销 → 回到"还没改"。打开编辑地形时助手收起;换一颗,对话清掉
 {
   const actx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
   const ap = await actx.newPage();
@@ -1185,7 +1185,7 @@ await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 6
   const marks1 = await marksAt('1');
   await ap.click('.ast-items .ast-ck >> nth=1');
   await ap.click('[data-act=ast-apply]');
-  await ap.waitForFunction(() => /改了 2 处/.test(document.querySelector('.studio [data-act=terrain] .sb-row-side')?.textContent ?? ''), null, { timeout: 30000 }).catch(() => {});
+  await ap.waitForFunction(() => /画了 2 笔/.test(document.querySelector('.studio [data-act=terrain] .sb-row-side')?.textContent ?? ''), null, { timeout: 30000 }).catch(() => {});
   await ap.waitForFunction(() => !document.querySelector('.toast[data-toast=progress]'), null, { timeout: 30000 }).catch(() => {});
   await ap.waitForTimeout(600);
   const row2 = await row();
@@ -1210,16 +1210,16 @@ await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 6
   console.log(
     `新建时让助手改:面板 ${shown}(左边 ${panel ? Math.round(panel.x) : '-'}、宽 ${panel ? Math.round(panel.width) : '-'}),右边样式投影让开 ${rightGone};「${hint.slice(0, 16)}…」;` +
       `编号 ${nos.join(',')},星球上圈 ${marks2 ? 2 : '?'} → 勾掉一条 ${marks1 ? 1 : '?'};执行 → 左边「${row2}」、「${applied}」、清单收起 ${listGone}、提示条 ${toast}、圈没了 ${marksGone};` +
-      `撤销 → 「${row0}」;开改地形工具助手收起 ${closedByTool};换一颗对话 ${turns} → ${turnsAfter} 轮`,
+      `撤销 → 「${row0}」;开编辑地形助手收起 ${closedByTool};换一颗对话 ${turns} → ${turnsAfter} 轮`,
   );
   if (!shown || !panel || Math.abs(panel.x + panel.width - 1600) > 1 || Math.abs(panel.width - 372) > 1 || !rightGone)
     errs.push(`新建时让助手改:助手面板没有换掉右边的样式和投影(${shown},${JSON.stringify(panel)},${rightGone})`);
   if (!hint.includes('圈出')) errs.push(`新建时让助手改:空的时候的说明不对(${hint})`);
   if (nos.join(',') !== '1,2' || !marks2 || !marks1) errs.push(`新建时让助手改:确认单没编号,或星球上没圈出要改的地方 / 勾掉一条圈没跟着少(${nos},${marks2},${marks1})`);
-  if (row2 !== '改了 2 处' || !applied.includes('已执行 2 条') || !listGone || toast || !marksGone)
-    errs.push(`新建时让助手改:执行后左边没写"改了 2 处" / 助手里没写已执行 / 清单没收起 / 放了提示条(${row2},${applied},${listGone},${toast},${marksGone})`);
+  if (row2 !== '画了 2 笔' || !applied.includes('已执行 2 条') || !listGone || toast || !marksGone)
+    errs.push(`新建时让助手改:执行后左边没写"画了 2 笔" / 助手里没写已执行 / 清单没收起 / 放了提示条(${row2},${applied},${listGone},${toast},${marksGone})`);
   if (row0 !== '还没改') errs.push(`新建时让助手改:撤销以后地形没回去(${row0})`);
-  if (!closedByTool) errs.push('新建时让助手改:打开改地形工具时助手没收起');
+  if (!closedByTool) errs.push('新建时让助手改:打开编辑地形时助手没收起');
   if (!turns || turnsAfter) errs.push(`新建时让助手改:换一颗以后对话没清掉(${turns} → ${turnsAfter})`);
   await actx.close();
 }
@@ -2488,7 +2488,100 @@ for (const style of ['realistic', 'fantasy']) {
   await page.evaluate(() => localStorage.clear());
 }
 
-// 改地形(阶段 4):只在新建世界时能改。新建界面左边点"火山、山脉、湖……" → 卡片里换成改地形工具、星球摊成平面 → 在海里点一下放火山 → 后台按新地形重新生成 →
+// 编辑地形(新建世界时):陆地笔在大洋中间涂一笔 → 重新生成后那里成了陆地,"画了 1 笔";撤销 → 又是海;重做 → 又是陆地;
+// 海 + 圈起来填满圈住那一片(画的时候地图下边有一句提示)→ 又沉成海;河画一条;关掉"在地图上显示草图"地图上不画草图;
+// 全部清除(点两下)→ "还没画",那里回到原来的海
+{
+  const ectx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+  const ep = await ectx.newPage();
+  ep.on('pageerror', (e) => errs.push(`编辑地形:${e.message}`));
+  await ep.goto(`${dev.url}/?new=1&seed=7&play=0`);
+  await ep.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  await terrainOn(ep);
+  const toClient = async (x: number, y: number) => (await ep.evaluate(([a, b]) => (window as any).__wfWorldToClient(a, b), [x, y])) as [number, number];
+  const regen = async (act: () => Promise<unknown>) => {
+    const prev = await ep.evaluate(() => (window as any).__wfTerrain?.id ?? 0);
+    await act();
+    return ep.waitForFunction((p) => ((window as any).__wfTerrain?.id ?? 0) > p, prev, { timeout: 30000 }).then(() => true, () => false);
+  };
+  // 种子 7 大洋中间的一处海(和下面改地形那段同一处)
+  const at = async () => {
+    const [x, y] = await toClient(1205, 577);
+    await ep.mouse.move(x + 1, y);
+    await ep.mouse.move(x, y);
+    await ep.waitForTimeout(200);
+    return (await probe(ep, x, y)).split(' / ')[1] ?? '';
+  };
+  const press = async (pts: [number, number][]) => {
+    const q = await Promise.all(pts.map(([x, y]) => toClient(x, y)));
+    await ep.mouse.move(...q[0]);
+    await ep.mouse.down();
+    for (const [x, y] of q.slice(1)) await ep.mouse.move(x, y, { steps: 6 });
+  };
+  const count = () => ep.locator('.tp .tp-n').innerText().catch(() => '');
+  const sea0 = await at();
+  const painted = await regen(async () => {
+    await press([
+      [1165, 577],
+      [1205, 579],
+      [1245, 577],
+    ]);
+    await ep.mouse.up();
+  });
+  const land = await at();
+  const c1 = await count();
+  const undone = await regen(() => ep.click('.tp [data-act=terrain-undo]'));
+  const sea1 = await at();
+  const redone = await regen(() => ep.click('.tp [data-act=terrain-redo]'));
+  const land2 = await at();
+  await ep.click('.tp [data-tool=sea]');
+  await ep.click('[data-act=terrain-method] [data-v=lasso]');
+  let cap = '';
+  const lassoed = await regen(async () => {
+    await press([
+      [1150, 540],
+      [1260, 540],
+      [1260, 620],
+      [1150, 620],
+    ]);
+    cap = await ep.locator('.tp-cap:not(.off)').innerText().catch(() => '');
+    await ep.mouse.up();
+  });
+  const sea2 = await at();
+  const c2 = await count();
+  await ep.click('.tp [data-tool=river]');
+  const rivered = await regen(async () => {
+    await press([
+      [1300, 300],
+      [1330, 350],
+      [1340, 400],
+    ]);
+    await ep.mouse.up();
+  });
+  const c3 = await count();
+  const marks = await ep.locator('.terrain-overlay .sk-mark, .terrain-overlay .tt-mark').count();
+  const riverLine = await ep.locator('.terrain-overlay .tt-river').count();
+  await ep.click('[data-act=terrain-show]');
+  const marksOff = await ep.locator('.terrain-overlay .sk-mark, .terrain-overlay .tt-mark').count();
+  await ep.click('.tp [data-act=terrain-clear]');
+  const cleared = await regen(() => ep.click('.tp [data-act=terrain-clear]'));
+  const c0 = await count();
+  const sea3 = await at();
+  console.log(
+    `编辑地形:海「${sea0}」→ 涂一笔陆地 ${painted}「${land}」「${c1}」→ 撤销 ${undone}「${sea1}」→ 重做 ${redone}「${land2}」;` +
+      `海 + 圈起来填满 ${lassoed}「${sea2}」「${c2}」(画的时候提示「${cap}」);画河 ${rivered}「${c3}」、地图上 ${marks} 处记号(河 ${riverLine} 条),关掉显示 → ${marksOff};` +
+      `全部清除 ${cleared}「${c0}」「${sea3}」`,
+  );
+  if (!sea0.includes('水深')) errs.push(`编辑地形:测试点原本应该是海(${sea0})`);
+  if (!painted || !land.includes('海拔') || c1 !== '画了 1 笔') errs.push(`编辑地形:海里涂一笔陆地没长出陆地 / 计数不对(${painted},${land},${c1})`);
+  if (!undone || !sea1.includes('水深') || !redone || !land2.includes('海拔')) errs.push(`编辑地形:撤销 / 重做不对(${undone} ${sea1},${redone} ${land2})`);
+  if (!lassoed || !sea2.includes('水深') || c2 !== '画了 2 笔' || !cap.includes('圈里整片变成海')) errs.push(`编辑地形:圈起来填满的海没沉下去 / 计数、提示不对(${lassoed},${sea2},${c2},${cap})`);
+  if (!rivered || c3 !== '画了 3 笔' || riverLine !== 1 || marks < 3 || marksOff !== 0) errs.push(`编辑地形:画河 / 地图上的草图显示不对(${rivered},${c3},${riverLine},${marks},${marksOff})`);
+  if (!cleared || c0 !== '还没画' || !sea3.includes('水深')) errs.push(`编辑地形:全部清除以后没回到原来的样子(${cleared},${c0},${sea3})`);
+  await ectx.close();
+}
+
+// 改地形(阶段 4):只在新建世界时能改。新建界面左边点"编辑地形" → 卡片里换成编辑地形的工具、星球摊成平面 → 选火山,在海里点一下放一座 → 后台按新地形重新生成 →
 // 那里成了陆地(悬停显示海拔);撤销 → 又变回海,再放一次;"完成"收起工具;动过的新建世界存下来了,刷新后自动恢复(直接带着地形修改生成);
 // 创建以后没有改地形的入口,概览"世界设定"页写着改过的地形;分享链接在另一个浏览器里打开,地形修改在(也是直接带着修改生成)
 {
@@ -2522,6 +2615,7 @@ for (const style of ['realistic', 'fantasy']) {
   const urlBefore = page.url();
   const before = await probeSea();
   await terrainOn();
+  await page.click('.tp [data-tool=volcano]');
   const panel = await page.locator('.tp').innerText().catch(() => '');
   const barBox = await page.locator('.tp').boundingBox();
   const sideBox = await page.locator('.st-left').boundingBox();
@@ -2535,10 +2629,10 @@ for (const style of ['realistic', 'fantasy']) {
       `海里点火山 → 重新生成 ${t ? `${t.paintedMs.toFixed(0)} ms(线程里 ${t.workerMs.toFixed(0)} ms)` : '没完成'};` +
       `之前「${before.split(' / ')[1] ?? ''}」→ 之后「${after.split(' / ')[1] ?? ''}」;工具「${count}」;提示条在 ${tBox ? `${Math.round(tBox.x)},${Math.round(tBox.y)}` : '-'}`,
   );
-  if (!['火山', '山脉', '湖', '撤销', '完成'].every((w) => panel.includes(w))) errs.push(`改地形:进入后卡片里没有改地形工具(${panel})`);
+  if (!['陆地', '山地', '群岛', '擦掉', '火山', '湖', '河', '撤销', '重做', '完成'].every((w) => panel.includes(w))) errs.push(`改地形:进入后卡片里没有编辑地形的工具(${panel})`);
   if (!barBox || !sideBox || barBox.x < sideBox.x || barBox.x + barBox.width > sideBox.x + sideBox.width + 1) errs.push('改地形:工具应在左边的新建卡片里');
   if (tBox && sideBox && tBox.x < sideBox.x + sideBox.width) errs.push('改地形:提示条压在侧栏卡片上');
-  if (!count.includes('改了 1 处')) errs.push(`改地形:工具里的计数不对(${count})`);
+  if (!count.includes('画了 1 笔')) errs.push(`改地形:工具里的计数不对(${count})`);
   if (!before.includes('水深')) errs.push(`改地形:测试点原本应该是海(${before})`);
   if (!t) errs.push('改地形:放了火山以后没有重新生成');
   else {
@@ -2551,7 +2645,7 @@ for (const style of ['realistic', 'fantasy']) {
     const u = await regen(() => page.click('.tp [data-act=terrain-undo]'));
     const undone = await probeSea();
     const t2 = await volcano();
-    // "完成":工具收起,左边「地形」那行写着改了几处
+    // "完成":工具收起,左边「地形」那行写着画了几笔
     await page.click('.tp [data-act=terrain-done]');
     await page.waitForTimeout(200);
     const barGone = !(await page.locator('.tp').count());
@@ -2559,7 +2653,7 @@ for (const style of ['realistic', 'fantasy']) {
     console.log(`改地形:撤销 → 「${undone.split(' / ')[1] ?? ''}」;再放一次 ${!!t2};点"完成"工具收起 ${barGone}、卡片上「${row}」`);
     if (!u || !undone.includes('水深')) errs.push(`改地形:撤销后没有变回海(${undone})`);
     if (!barGone) errs.push('改地形:点"完成"后工具没收起');
-    if (!row.includes('改了 1 处')) errs.push(`改地形:收起后左边「地形」那行没写改了几处(${row})`);
+    if (!row.includes('画了 1 笔')) errs.push(`改地形:收起后左边「地形」那行没写画了几笔(${row})`);
     // 自动存:动过的新建世界存下来了(网址换成 w=编号),刷新后还在新建、直接带着地形修改生成(只生成一次),那里还是陆地
     await page.waitForFunction(() => /[?&]w=w/.test(location.search), null, { timeout: 5000 }).catch(() => {});
     const urlStored = page.url();
@@ -3586,31 +3680,31 @@ for (const style of ['realistic', 'fantasy']) {
   console.log(`视窗装饰:${JSON.stringify(decor)}`);
   if (!decor.shown) errs.push('东西相连:手绘风的外框 / 罗盘没有画在视窗上');
 
-  // 6. 改地形(新建世界时):中心转到 180°(接缝在视窗正中),"山脉"按住从接缝左边拖到右边 —— 画的线是连着的一笔(不横穿整张图),能照常重新生成
+  // 6. 编辑地形(新建世界时):中心转到 180°(接缝在视窗正中),"山地"按住从接缝左边涂到右边 —— 涂的一笔是连着的(不横穿整张图),能照常重新生成
   {
     await page.goto(`${dev.url}/?new=1&seed=7&style=fantasy&civ=-labels`);
     await page.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
     await terrainOn();
     await page.evaluate(() => (window as any).__wfSetCenter(180));
     await page.waitForTimeout(250);
-    await page.click('.tp [data-tool=range]');
+    await page.click('.tp [data-tool=mountain]');
     const [cx, cy] = (await page.evaluate(() => (window as any).__wfWorldToClient(0, 420))) as [number, number];
     const prev = await page.evaluate(() => (window as any).__wfTerrain?.id ?? 0);
     await page.mouse.move(cx - 70, cy);
     await page.mouse.down();
     await page.mouse.move(cx + 70, cy + 10, { steps: 14 });
     await page.mouse.up();
-    const d = await page.locator('.terrain-overlay path.tt-line').first().getAttribute('d').catch(() => null);
+    const d = await page.locator('.terrain-overlay .sk-mark path.sk-band').first().getAttribute('d').catch(() => null);
     const xs = (d ?? '').match(/-?[\d.]+/g)?.map(Number).filter((_, i) => i % 2 === 0) ?? [];
     let jump = 0;
     for (let i = 1; i < xs.length; i++) jump = Math.max(jump, Math.abs(xs[i] - xs[i - 1]));
     const regen = await page
       .waitForFunction((p) => ((window as any).__wfTerrain?.id ?? 0) > p, prev, { timeout: 60000 })
       .then(() => page.evaluate(() => (window as any).__wfTerrain), () => null);
-    console.log(`改地形跨接缝:线上 ${xs.length} 个点,x 从 ${xs[0]} 到 ${xs.at(-1)},相邻两点最大跳 ${jump};重新生成 ${regen ? `${regen.paintedMs.toFixed(0)} ms` : '没完成'}`);
-    if (xs.length < 3 || jump > 200) errs.push(`东西相连:跨接缝画的山脉线不是连着的一笔(相邻两点跳 ${jump})`);
-    if (!(Math.min(...xs) < 2048 && Math.max(...xs) > 2048) && !(Math.min(...xs) < 0 && Math.max(...xs) > 0)) errs.push('东西相连:山脉线没有跨过 180° 经线');
-    if (!regen) errs.push('东西相连:跨接缝画了山脉以后没有重新生成');
+    console.log(`编辑地形跨接缝:一笔 ${xs.length} 个点,x 从 ${xs[0]} 到 ${xs.at(-1)},相邻两点最大跳 ${jump};重新生成 ${regen ? `${regen.paintedMs.toFixed(0)} ms` : '没完成'}`);
+    if (xs.length < 3 || jump > 200) errs.push(`东西相连:跨接缝涂的山地不是连着的一笔(相邻两点跳 ${jump})`);
+    if (!(Math.min(...xs) < 2048 && Math.max(...xs) > 2048) && !(Math.min(...xs) < 0 && Math.max(...xs) > 0)) errs.push('东西相连:涂的山地没有跨过 180° 经线');
+    if (!regen) errs.push('东西相连:跨接缝涂了山地以后没有重新生成');
   }
 
   // 7. 导出:中心转到 90°E 导出地图图片(不带地名),图片中部 = 地形图左右转四分之一圈
@@ -4586,7 +4680,7 @@ for (const style of ['realistic', 'fantasy']) {
   await mp.waitForTimeout(900);
   const searchIns = await mp.locator('.inspector').innerText().catch(() => '');
   // 拉到顶的世界卡片里点"我的世界":整屏换成我的世界(改过的这个世界在里面);点"新建世界" → 新建界面,底部是新建世界的卡片;
-  // 拉开卡片点"火山、山脉、湖……" → 卡片里换成改地形工具;点"完成"退回(关掉详情卡片时世界卡片还是搜索时拉到顶的样子)
+  // 拉开卡片点"编辑地形" → 卡片里换成编辑地形的工具;点"完成"退回(关掉详情卡片时世界卡片还是搜索时拉到顶的样子)
   await mp.tap('.inspector .cp-x').catch(() => {});
   await mp.waitForTimeout(400);
   if (!(await mp.locator('.psheet.ps-full').count())) {
@@ -4656,7 +4750,7 @@ for (const style of ['realistic', 'fantasy']) {
   if (!hitName || !searchIns.includes(hitName)) errs.push(`手机:搜索点一条没有打开它(${hitName})`);
   if (!homeFull || !homeBox || homeBox.width !== VW || homeCards !== 1) errs.push(`手机:拉到顶的世界卡片里点"我的世界"没有整屏换成我的世界(${JSON.stringify(homeBox)},${homeCards} 个世界)`);
   if (!nwBox || Math.abs(nwBox.y + nwBox.height - VH) > 1 || nwBox.width !== VW) errs.push(`手机:我的世界里点"新建世界",底部没有新建世界的卡片(${JSON.stringify(nwBox)})`);
-  if (!nwTools || !nwBack) errs.push(`手机:新建卡片里点"改地形"没有换成改地形工具 / 点"完成"没退回(${nwTools},${nwBack})`);
+  if (!nwTools || !nwBack) errs.push(`手机:新建卡片里点"编辑地形"没有换成编辑地形的工具 / 点"完成"没退回(${nwTools},${nwBack})`);
   await mctx.close();
 }
 

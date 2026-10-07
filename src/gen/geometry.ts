@@ -97,6 +97,8 @@ export interface Geometry {
   dist(i: number, j: number): number;
   /** 距离的平方(同上,不开方) */
   dist2(i: number, j: number): number;
+  /** 每条邻接边的长度,和 mesh.adj 一一对应:第 k 项 = dist(i, adj[k])(i 是这条边的起点;按网格只算一次,查表和现算逐位相同) */
+  edgeLengths(): Float64Array;
   /** 地块 i 到世界坐标点 (px, py) 的距离 */
   distTo(i: number, px: number, py: number): number;
   /** 两个世界坐标点的距离 */
@@ -105,6 +107,10 @@ export interface Geometry {
   near2(i: number, c: number, R: number): number;
   /** 以世界坐标点 (px, py) 为中心的粗筛(同上),在范围内返回距离(开过方),否则 −1 */
   nearTo(i: number, px: number, py: number, R: number): number;
+  /** near2(i, c, R) ≥ 0 的全部地块 i,按编号从小到大(按位置分桶找,不用逐个扫全部地块) */
+  cellsNear(c: number, R: number): Int32Array;
+  /** nearTo(i, px, py, R) ≥ 0 的全部地块 i,按编号从小到大(同上) */
+  cellsNearPoint(px: number, py: number, R: number): Int32Array;
 
   // ---- 方向与位移(当地切平面,分量 = 东、南) ----
 
@@ -266,40 +272,83 @@ function sideOnMap(fx: number, fy: number): 'n' | 's' | 'e' | 'w' | null {
 
 /**
  * 球面泊松圆盘(Bridson):任意两点弦长 ≥ r(单位球上),候选点在切平面里取再投回球面。
- * 邻居查找用 3D 网格(格子边长 = r,查周围 27 格),格子很稀疏(只有球壳附近有点),存成定长哈希桶
+ *
+ * 邻居查找:每次从活动点 p 出发试 K 个候选点,候选点离 p 不到 2r,能和它冲突(离它不到 r)的点都离 p 不到 3r。
+ * 所以每轮先把 p 周围 3r 以内的点拷出来(near 列表,这一轮新放下的点也加进去),这一轮的候选点只和它们比 ——
+ * 和"每个候选点都去查网格"比出来的结果一样,只是省了大量查格子。
+ * 网格是 3D 粗格子(边长略大于 3r,查周围 27 格),格子很稀疏(只有球壳附近有点),存成定长哈希桶
  * (桶里串成链表,撞桶只是多比几个点的距离,不影响结果)。
  */
-function poissonSphere(r: number, rng: Rng): number[] {
+function poissonSphere(r: number, rng: Rng): Float64Array {
   const r2 = r * r;
   const expect = (4 * Math.PI * 0.66) / r2;
+  // 拷出来的范围比 3r 稍大一点、格子再大一点:浮点舍入不会漏掉边上的点(多拷几个只是多比几次)
+  const reach2 = (3.01 * r) ** 2;
+  const G = 3.02 * r;
   let TB = 1;
-  while (TB < expect * 4) TB <<= 1;
+  while (TB < expect) TB <<= 1;
   const bucket = (a: number, b: number, c: number) => (Math.imul(a, 73856093) ^ Math.imul(b, 19349663) ^ Math.imul(c, 83492791)) & (TB - 1);
   const head = new Int32Array(TB).fill(-1);
-  const xs: number[] = [];
-  const next: number[] = [];
+  let cap = Math.ceil(expect * 1.2) + 64;
+  let xs = new Float64Array(3 * cap);
+  let next = new Int32Array(cap);
+  let count = 0;
   const put = (x: number, y: number, z: number) => {
-    const id = xs.length / 3;
-    xs.push(x, y, z);
-    const k = bucket(Math.floor((x + 1) / r), Math.floor((y + 1) / r), Math.floor((z + 1) / r));
-    next.push(head[k]);
+    if (count === cap) {
+      cap *= 2;
+      const nx = new Float64Array(3 * cap);
+      nx.set(xs);
+      xs = nx;
+      const nn = new Int32Array(cap);
+      nn.set(next);
+      next = nn;
+    }
+    const id = count++;
+    xs[3 * id] = x;
+    xs[3 * id + 1] = y;
+    xs[3 * id + 2] = z;
+    const k = bucket(Math.floor((x + 1) / G), Math.floor((y + 1) / G), Math.floor((z + 1) / G));
+    next[id] = head[k];
     head[k] = id;
     return id;
   };
-  const far = (x: number, y: number, z: number) => {
-    const gx = Math.floor((x + 1) / r);
-    const gy = Math.floor((y + 1) / r);
-    const gz = Math.floor((z + 1) / r);
+  // 当前活动点附近的点(坐标交错存)
+  let near = new Float64Array(3 * 128);
+  let nearLen = 0;
+  const addNear = (x: number, y: number, z: number) => {
+    if (3 * nearLen === near.length) {
+      const nn = new Float64Array(2 * near.length);
+      nn.set(near);
+      near = nn;
+    }
+    near[3 * nearLen] = x;
+    near[3 * nearLen + 1] = y;
+    near[3 * nearLen + 2] = z;
+    nearLen++;
+  };
+  const gather = (px: number, py: number, pz: number) => {
+    nearLen = 0;
+    const gx = Math.floor((px + 1) / G);
+    const gy = Math.floor((py + 1) / G);
+    const gz = Math.floor((pz + 1) / G);
     for (let a = gx - 1; a <= gx + 1; a++)
       for (let b = gy - 1; b <= gy + 1; b++)
         for (let c = gz - 1; c <= gz + 1; c++) {
           for (let id = head[bucket(a, b, c)]; id >= 0; id = next[id]) {
-            const dx = xs[3 * id] - x;
-            const dy = xs[3 * id + 1] - y;
-            const dz = xs[3 * id + 2] - z;
-            if (dx * dx + dy * dy + dz * dz < r2) return false;
+            const x = xs[3 * id];
+            const y = xs[3 * id + 1];
+            const z = xs[3 * id + 2];
+            if ((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2 <= reach2) addNear(x, y, z);
           }
         }
+  };
+  const far = (x: number, y: number, z: number) => {
+    for (let k = 0; k < nearLen; k++) {
+      const dx = near[3 * k] - x;
+      const dy = near[3 * k + 1] - y;
+      const dz = near[3 * k + 2] - z;
+      if (dx * dx + dy * dy + dz * dz < r2) return false;
+    }
     return true;
   };
   // 第一个点随机放(不放在极点上:极点处"东"没有定义)
@@ -330,6 +379,7 @@ function poissonSphere(r: number, rng: Rng): number[] {
     const vx = py * uz - pz * uy;
     const vy = pz * ux - px * uz;
     const vz = px * uy - py * ux;
+    gather(px, py, pz);
     let placed = false;
     for (let k = 0; k < K; k++) {
       const a = rng() * TAU;
@@ -345,6 +395,7 @@ function poissonSphere(r: number, rng: Rng): number[] {
       z /= ul;
       if (!far(x, y, z)) continue;
       active.push(put(x, y, z));
+      addNear(x, y, z);
       placed = true;
     }
     if (!placed) {
@@ -352,7 +403,7 @@ function poissonSphere(r: number, rng: Rng): number[] {
       active.pop();
     }
   }
-  return xs;
+  return xs.subarray(0, 3 * count);
 }
 
 /**
@@ -418,21 +469,56 @@ function sphereDelaunay(xyz: Float32Array): { triangles: Uint32Array; adjStart: 
   }
   // 邻接(CSR):平面邻居 + 凸包上的点多一个邻居 p0
   const onHull = new Uint8Array(n - 1);
-  for (let h = 0; h < hull.length; h++) onHull[hull[h]] = 1;
+  const hullIndex = new Int32Array(n - 1).fill(-1);
+  for (let h = 0; h < hull.length; h++) {
+    onHull[hull[h]] = 1;
+    hullIndex[hull[h]] = h;
+  }
   const adjStart = new Int32Array(n + 1);
-  const tmp: number[] = [];
+  // 闭合球面三角网的邻接总数是 6n − 12,先按这么多开,不够再加倍
+  let adj = new Int32Array(6 * n);
+  let len = 0;
+  const push = (j: number) => {
+    if (len === adj.length) {
+      const a = new Int32Array(2 * adj.length);
+      a.set(adj);
+      adj = a;
+    }
+    adj[len++] = j;
+  };
+  // 平面上点 li 的邻居:和 del.neighbors(li) 同样的先后(绕着这个点沿半边走一圈;凸包上的点最后补上凸包上的下一个点),
+  // 直接走省掉生成器的开销。所有点共线的退化情况照旧用 del.neighbors
+  const { inedges, halfedges, triangles: dt } = del;
+  const collinear = (del as unknown as { collinear?: unknown }).collinear;
   for (let i = 0; i < n; i++) {
-    adjStart[i] = tmp.length;
+    adjStart[i] = len;
     if (i === p0) {
-      for (let h = 0; h < hull.length; h++) tmp.push(back[hull[h]]);
+      for (let h = 0; h < hull.length; h++) push(back[hull[h]]);
       continue;
     }
     const li = local[i];
-    for (const j of del.neighbors(li)) tmp.push(back[j]);
-    if (onHull[li]) tmp.push(p0);
+    if (collinear) {
+      for (const j of del.neighbors(li)) push(back[j]);
+    } else if (inedges[li] !== -1) {
+      const e0 = inedges[li];
+      let e = e0;
+      do {
+        const q = dt[e];
+        push(back[q]);
+        e = e % 3 === 2 ? e - 2 : e + 1;
+        if (dt[e] !== li) break;
+        e = halfedges[e];
+        if (e === -1) {
+          const h = hull[(hullIndex[li] + 1) % hull.length];
+          if (h !== q) push(back[h]);
+          break;
+        }
+      } while (e !== e0);
+    }
+    if (onHull[li]) push(p0);
   }
-  adjStart[n] = tmp.length;
-  return { triangles, adjStart, adj: Int32Array.from(tmp) };
+  adjStart[n] = len;
+  return { triangles, adjStart, adj: adj.slice(0, len) };
 }
 
 /**
@@ -877,7 +963,7 @@ class SphereGeometry implements Geometry {
   private readonly ptB: PointVec;
   private readonly ptN: PointVec;
   private readonly ptF: PointVec;
-  private finder: ((q: Float64Array, hint: number) => number) | null = null;
+  private finder: ReturnType<typeof sphereFinder> | null = null;
   private readonly qTmp = new Float64Array(3);
 
   constructor(readonly mesh: Mesh) {
@@ -967,6 +1053,15 @@ class SphereGeometry implements Geometry {
     const dz = p[a + 2] - p[b + 2];
     return this.R * this.R * (dx * dx + dy * dy + dz * dz);
   }
+  private edges: Float64Array | null = null;
+  edgeLengths(): Float64Array {
+    if (this.edges) return this.edges;
+    // dist(i, j) 和 dist(j, i) 逐位相同(差取反、平方一样),哪头当起点都行
+    const { n, adjStart, adj } = this.mesh;
+    const out = new Float64Array(adj.length);
+    for (let i = 0; i < n; i++) for (let k = adjStart[i]; k < adjStart[i + 1]; k++) out[k] = this.dist(i, adj[k]);
+    return (this.edges = out);
+  }
   distTo(i: number, px: number, py: number): number {
     const q = this.ptA.set(px, py);
     const p = this.p;
@@ -991,6 +1086,17 @@ class SphereGeometry implements Geometry {
   nearTo(i: number, px: number, py: number, R: number): number {
     const d = this.distTo(i, px, py);
     return d <= R ? d : -1;
+  }
+  cellsNear(c: number, R: number): Int32Array {
+    this.finder ??= sphereFinder(this.mesh, this.p);
+    const p = this.p;
+    return this.finder.within(p[3 * c], p[3 * c + 1], p[3 * c + 2], Math.abs(R) / this.R, (i) => this.near2(i, c, R) >= 0);
+  }
+  cellsNearPoint(px: number, py: number, R: number): Int32Array {
+    this.finder ??= sphereFinder(this.mesh, this.p);
+    // 和 nearTo 里一样换成单位向量
+    const q = this.ptA.set(px, py);
+    return this.finder.within(q[0], q[1], q[2], Math.abs(R) / this.R, (i) => this.nearTo(i, px, py, R) >= 0);
   }
 
   // ---- 方向与位移 ----
@@ -1232,7 +1338,7 @@ class SphereGeometry implements Geometry {
 
   nearest(px: number, py: number, hint: number): number {
     this.finder ??= sphereFinder(this.mesh, this.p);
-    return this.finder(this.ptF.set(px, py), hint);
+    return this.finder.find(this.ptF.set(px, py), hint);
   }
   /** 球面上直接找真正最近的那块(从上一次找到的地块附近开始) */
   locator(): (px: number, py: number) => number {
@@ -1295,7 +1401,7 @@ class SphereGeometry implements Geometry {
     q[0] = sx / l;
     q[1] = sy / l;
     q[2] = sz / l;
-    return new SphereChart(this, this.finder(q, cells[0]));
+    return new SphereChart(this, this.finder.find(q, cells[0]));
   }
   mapChart(px: number, py: number): Chart {
     return new SphereMapChart(this.W, this.H, this.mesh.x, this.mesh.y, px, py);
@@ -1382,8 +1488,11 @@ class SphereGeometry implements Geometry {
 }
 
 /**
- * 球面上按位置找最近的地块:3D 哈希网格分桶(格子边长 = 2 个地块间距),先在所在的格子(没有就周围 27 格)里找一个近的,
- * 再沿 Delaunay 邻居贪心走到真正最近的那个(按弦长;Delaunay 上贪心一定能走到最近点)
+ * 球面上按位置找地块:3D 哈希网格分桶(格子边长 = 2 个地块间距)。
+ *   - find:最近的地块。先在所在的格子(没有就周围 27 格)里找一个近的,
+ *     再沿 Delaunay 邻居贪心走到真正最近的那个(按弦长;Delaunay 上贪心一定能走到最近点)
+ *   - within:单位向量 q 周围弦长 rad 以内的地块里 keep 说要的,按编号从小到大(只查包住这个范围的那些格子;
+ *     范围大到格子比地块还多时直接逐个问)
  */
 function sphereFinder(mesh: Mesh, p: Float32Array) {
   const { n, adjStart, adj } = mesh;
@@ -1400,7 +1509,7 @@ function sphereFinder(mesh: Mesh, p: Float32Array) {
     head[k] = i;
   }
   const d2 = (i: number, q: Float64Array) => (p[3 * i] - q[0]) ** 2 + (p[3 * i + 1] - q[1]) ** 2 + (p[3 * i + 2] - q[2]) ** 2;
-  return (q: Float64Array, hint: number) => {
+  const find = (q: Float64Array, hint: number) => {
     const gx = cellOf(q[0]);
     const gy = cellOf(q[1]);
     const gz = cellOf(q[2]);
@@ -1434,4 +1543,36 @@ function sphereFinder(mesh: Mesh, p: Float32Array) {
       c = nx;
     }
   };
+  const seen = new Uint32Array(n);
+  let stamp = 0;
+  const within = (qx: number, qy: number, qz: number, rad: number, keep: (i: number) => boolean): Int32Array => {
+    const out: number[] = [];
+    // 格子范围放宽一点:浮点舍入不会漏掉正好在边上的地块(多查几个只是多问几次 keep)
+    const e = rad * 1.0001 + 1e-9;
+    const a0 = cellOf(qx - e);
+    const a1 = cellOf(qx + e);
+    const b0 = cellOf(qy - e);
+    const b1 = cellOf(qy + e);
+    const c0 = cellOf(qz - e);
+    const c1 = cellOf(qz + e);
+    if (!((a1 - a0 + 1) * (b1 - b0 + 1) * (c1 - c0 + 1) < n)) {
+      for (let i = 0; i < n; i++) if (keep(i)) out.push(i);
+      return Int32Array.from(out);
+    }
+    // 不同格子可能落进同一个桶:同一次查询里每个地块只问一次
+    if (++stamp === 0xffffffff) {
+      seen.fill(0);
+      stamp = 1;
+    }
+    for (let a = a0; a <= a1; a++)
+      for (let b = b0; b <= b1; b++)
+        for (let c = c0; c <= c1; c++)
+          for (let i = head[key(a, b, c)]; i >= 0; i = next[i]) {
+            if (seen[i] === stamp) continue;
+            seen[i] = stamp;
+            if (keep(i)) out.push(i);
+          }
+    return Int32Array.from(out).sort();
+  };
+  return { find, within };
 }

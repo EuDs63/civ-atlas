@@ -427,7 +427,7 @@ function placeWhere(p: Place): string {
   }
 }
 
-const TERRAIN_NAME: Record<TerrainKind, string> = { volcano: '火山', range: '山脉', lake: '湖', raise: '抬起陆地', sink: '沉成海' };
+const TERRAIN_NAME: Record<TerrainKind, string> = { volcano: '火山', range: '山脉', lake: '湖', raise: '抬起陆地', sink: '沉成海', river: '河' };
 
 const opWhere = (op: TerrainOp) => {
   const n = op.pts.length >> 1;
@@ -703,6 +703,7 @@ const SIZE_LABEL: Record<TerrainKind, readonly [string, string, string]> = {
   range: ['低', '中', '高'],
   raise: ['细', '中', '粗'],
   sink: ['细', '中', '粗'],
+  river: ['小', '中', '大'],
 };
 
 /** AI 偶尔写中文的种类名 */

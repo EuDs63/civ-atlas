@@ -200,6 +200,36 @@ describe('改地形 · 生成', () => {
     for (let i = 0; i < w.mesh.n; i++) expect(Number.isFinite(w.elevation[i])).toBe(true);
   });
 
+  it('河:沿画的线流到海,线上的陆地都成了河道;画在海里的河不生效', () => {
+    const w0 = base7();
+    const l = farthestFrom(w0, true);
+    const [lx, ly] = [w0.mesh.x[l], w0.mesh.y[l]];
+    // 离它最近的海
+    let o = -1;
+    for (let i = 0; i < w0.mesh.n; i++) if (w0.water[i] === 1 && (o < 0 || (w0.mesh.x[i] - lx) ** 2 + (w0.mesh.y[i] - ly) ** 2 < (w0.mesh.x[o] - lx) ** 2 + (w0.mesh.y[o] - ly) ** 2)) o = i;
+    const [ox, oy] = [w0.mesh.x[o], w0.mesh.y[o]];
+    const pts = [lx, ly, (lx + ox) / 2 + 15, (ly + oy) / 2, ox, oy].map(Math.round);
+    const w = generateWorld(SMALL, undefined, [{ kind: 'river', pts, r: 9, s: 1 }]);
+    const onRiver = new Set<number>();
+    for (const r of w.rivers) for (const c of r.cells) onRiver.add(c);
+    // 沿线每隔几步看最近的地块
+    let land = 0;
+    let hit = 0;
+    for (let k = 0; k + 3 < pts.length; k += 2)
+      for (let t = 0; t < 1; t += 0.05) {
+        const [x, y] = [pts[k] + (pts[k + 2] - pts[k]) * t, pts[k + 1] + (pts[k + 3] - pts[k + 1]) * t];
+        const c = near(w, x, y, 14).sort((a, b) => (w.mesh.x[a] - x) ** 2 + (w.mesh.y[a] - y) ** 2 - ((w.mesh.x[b] - x) ** 2 + (w.mesh.y[b] - y) ** 2))[0];
+        if (c === undefined || w.water[c] !== 0) continue;
+        land++;
+        if ([c, ...Array.from(w.mesh.adj.subarray(w.mesh.adjStart[c], w.mesh.adjStart[c + 1]))].some((j) => onRiver.has(j))) hit++;
+      }
+    expect(land).toBeGreaterThan(10);
+    expect(hit / land).toBeGreaterThan(0.85);
+    const sea = farthestFrom(w0, false);
+    const [sx, sy] = [Math.round(w0.mesh.x[sea]), Math.round(w0.mesh.y[sea])];
+    same(w0, generateWorld(SMALL, undefined, [{ kind: 'river', pts: [sx - 20, sy, sx + 20, sy], r: 9, s: 1 }]));
+  });
+
   it('一座大火山不会把全世界别的山压矮', () => {
     const w0 = base7();
     const o = farthestFrom(w0, false);

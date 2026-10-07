@@ -26,6 +26,8 @@
  * - edits.interventions:干预(具体种类见 edits.ts 文件头"干预");这里当成不透明的数组原样存、原样读回
  * - edits.terrain:地形修改(edits.ts 文件头"地形修改");读档时逐处过 cleanTerrainOp,格式不对的跳过。
  *   旧存档没有这个字段 = 没改地形。check 是**改过地形以后**的地形哈希(读档时带着地形修改生成,再核对)
+ * - edits.sketch(可选):地形草图(edits.ts 文件头"地形草图"),`{ "rest": "auto", "strokes": [{ "kind": "land", "r": 32, "pts": [700, 300, 760, 310] }] }`;
+ *   没画时不写这个字段。读档时过 cleanSketch,格式不对的笔画跳过。check 同样是照草图生成以后的地形哈希
  * - edits.marks(可选):作者标记(edits.ts 文件头"作者标记"),`[{ "id": 1, "title": "主角的故乡", "color": "red", "from": 2490, "at": [1852.4, 512] }]`;
  *   没有标记时不写这个字段。读档时过 cleanMarks,格式不对的跳过
  * - edits.characters(可选):作者的人物(characters.ts),`[{ "id": 1, "name": "林小满", "color": "red", "born": 2490, "died": 2561,
@@ -43,6 +45,7 @@
 import { DEFAULT_PARAMS, type World, type WorldParams } from './world';
 import { GENERATOR_CHANGES, GENERATOR_VERSION, MARKS_MAX, MARK_REGIONS_TOTAL, NAME_MAX, aiNameKeys, cleanMark, freeMarkId, type AiNameMark, type AuthorMark, type GeneratorChange, type Intervention, type TerrainOp, type WorldEdits } from './edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from './terrainEdits';
+import { SKETCH_MAX_STROKES, cleanSketch, cleanSketchStroke, type SketchEdit } from './sketch';
 import { decodeFlag } from './civ/flags';
 import { CHARACTERS_MAX, cleanCharacters, type AuthorCharacter } from './characters';
 
@@ -260,12 +263,13 @@ export function worldKey(params: WorldParams): string {
   return PARAM_KEYS.map((k) => `${k}=${params[k] ?? DEFAULT_PARAMS[k]}`).join('&');
 }
 
-/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 作者标记个数 + 改过的旗面数 + 作者的人物个数 */
+/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 草图(画了算一处)+ 作者标记个数 + 改过的旗面数 + 作者的人物个数 */
 export function editCount(edits: WorldEdits): number {
   return (
     Object.keys(edits.names).length +
     edits.interventions.length +
     (edits.terrain?.length ?? 0) +
+    (edits.sketch ? 1 : 0) +
     (edits.marks?.length ?? 0) +
     Object.keys(edits.flags ?? {}).length +
     (edits.characters?.length ?? 0)
@@ -310,6 +314,11 @@ export function makeSave(
   // AI 起的名字:只存现在还用着的
   const ai = aiNameKeys(edits);
   if (ai.length) save.edits.aiNames = Object.fromEntries(ai.map((k) => [k, { ...edits.aiNames![k] }]));
+  // 草图:画了才写
+  if (edits.sketch) {
+    const { rest, coast, strokes } = edits.sketch;
+    save.edits.sketch = { rest, ...(coast !== undefined ? { coast } : {}), strokes: strokes.map((x) => ({ ...x, pts: x.pts.slice() })) };
+  }
   // 作者标记:有才写
   if (edits.marks?.length) save.edits.marks = edits.marks.map(copyMark);
   if (edits.flags && Object.keys(edits.flags).length) save.edits.flags = { ...edits.flags };
@@ -449,6 +458,18 @@ export function parseSave(text: string): ParseResult {
     }
   } else if (E.terrain !== undefined) droppedT++;
   if (droppedT) warnings.push(`有 ${droppedT} 处地形修改格式不对,已跳过`);
+  // 草图:逐笔清理,认不出的跳过;旧存档没有 = 没画
+  let sketch: SketchEdit | null = null;
+  if (E.sketch !== undefined) {
+    const raw = isObj(E.sketch) && Array.isArray(E.sketch.strokes) ? (E.sketch.strokes as unknown[]) : null;
+    if (!raw) warnings.push('草图格式不对,已跳过');
+    else {
+      sketch = cleanSketch(E.sketch);
+      const bad = raw.slice(0, SKETCH_MAX_STROKES).filter((x) => !cleanSketchStroke(x)).length;
+      if (bad) warnings.push(`草图有 ${bad} 笔格式不对,已跳过`);
+      if (raw.length > SKETCH_MAX_STROKES) warnings.push(`草图最多 ${SKETCH_MAX_STROKES} 笔,多出来的 ${raw.length - SKETCH_MAX_STROKES} 笔没有读进来`);
+    }
+  }
   // 作者标记:逐个清理,认不出的跳过;编号重复的换一个新编号;最多留 MARKS_MAX 个、一共圈 MARK_REGIONS_TOTAL 个州;旧存档没有 = 没有标记
   const marks: AuthorMark[] = [];
   let droppedM = 0;
@@ -489,7 +510,7 @@ export function parseSave(text: string): ParseResult {
   if (E.characters !== undefined && !Array.isArray(E.characters)) count.dropped++;
   if (count.dropped) warnings.push(`有 ${count.dropped} 个作者的人物格式不对,已跳过`);
   if (count.over) warnings.push(`作者的人物最多 ${CHARACTERS_MAX} 个,多出来的 ${count.over} 个没有读进来`);
-  const note = versionNote(generator, terrain.length > 0);
+  const note = versionNote(generator, terrain.length > 0 || !!sketch);
   if (note) warnings.splice(noteAt, 0, note);
 
   const save: SaveFile = {
@@ -503,6 +524,7 @@ export function parseSave(text: string): ParseResult {
       ...(Object.keys(aiNames).length ? { aiNames } : {}),
       interventions,
       terrain,
+      ...(sketch ? { sketch } : {}),
       ...(marks.length ? { marks } : {}),
       ...(Object.keys(flags).length ? { flags } : {}),
       ...(characters.length ? { characters } : {}),
@@ -529,7 +551,7 @@ const SAME_WORLD: readonly (GeneratorChange | 'newer' | null)[] = [null, 'names'
  * (版本不同、世界变了的,parseSave 已经说过变了什么,这里不重复)。对得上 = null
  */
 export function checkWarning(save: SaveFile, check: string): string | null {
-  if (!SAME_WORLD.includes(changeSince(save.generator, (save.edits.terrain?.length ?? 0) > 0))) return null;
+  if (!SAME_WORLD.includes(changeSince(save.generator, (save.edits.terrain?.length ?? 0) > 0 || !!save.edits.sketch))) return null;
   if (!save.check || save.check === check) return null;
   return CHECK_WARNING;
 }

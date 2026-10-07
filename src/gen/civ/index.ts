@@ -16,6 +16,7 @@
  * 随机数一律从 subSeed(seed, 'civ-…') 取(见 rand.ts),不用 Math.random。
  */
 import { generateWorld, type Progress, type World, type WorldParams } from '../world';
+import type { Sketch } from '../sketch';
 import type { ChangeLog, Civ, CivParams, Culture, Habitat, Place, Polity, Route, Settlement } from './types';
 import { computeHabitat } from './habitat';
 import { buildRegions, emptyRegions } from './regions';
@@ -66,11 +67,12 @@ function viability(world: World, habitat: Habitat): { land: number; viable: bool
  * 远海放一座小岛也会把全世界的扩张都拨快或拨慢,各处的历史全跟着错开。所以改过地形的世界沿用原来星球的节拍,
  * 只有改动附近(和受它牵连)的历史跟着地形变。
  * 要多生成一遍没改过的地形;worker 按参数缓存,经 CivParams.tempo 传给 generateCiv。
+ * 草图(新建世界时画的大陆和海)算星球的一部分:画过草图的世界,"没改地形的星球"是照草图长出来的那一颗(sketch 传进来)。
  * 没改过的星球长不出文明 = undefined(改过的世界按它自己标定)
  */
-export function planetTempo(params: WorldParams, civ: Partial<CivParams> = {}): number | undefined {
+export function planetTempo(params: WorldParams, civ: Partial<CivParams> = {}, sketch?: Sketch | null): number | undefined {
   const p: CivParams = { ...DEFAULT_CIV_PARAMS, ...civ };
-  const world = generateWorld(params);
+  const world = generateWorld(params, undefined, undefined, sketch);
   const habitat = computeHabitat(world);
   if (!viability(world, habitat).viable) return undefined;
   const regions = buildRegions(world, habitat, { regionArea: p.regionArea });
@@ -98,7 +100,7 @@ export function generateCiv(world: World, params: Partial<CivParams> = {}, progr
   const sim = new CivSim(R);
   const birthSpan = p.birthSpan ?? BIRTH_SPAN;
   // 改过地形:扩张节拍沿用没改地形时的同一颗星球(planetTempo);没改 = 按这个世界自己标定
-  const tempo = viable && world.terrain?.length ? (p.tempo === undefined ? planetTempo(world.params, p) : (p.tempo ?? undefined)) : undefined;
+  const tempo = viable && world.terrain?.length ? (p.tempo === undefined ? planetTempo(world.params, p, world.sketch) : (p.tempo ?? undefined)) : undefined;
   const model = viable ? planCultures(world, habitat, regions, { cultures: p.cultures, pace: p.pace, birthSpan, tempo }) : null;
   const pm = model ? planPolities(world, model, { polities: p.polities, pace: p.pace }) : null;
   // 阶段 4 干预(interventions.ts):事件最先预约(同一刻里先于别的一切事件,干预之前的历史一字不差)

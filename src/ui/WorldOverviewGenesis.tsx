@@ -36,14 +36,20 @@ export function paramsSide(p: WorldParams): string {
   return `陆地 ${Math.round(p.landFraction * 100)}%，${p.plates} 个板块`;
 }
 
-const KIND_NAME: Record<TerrainKind, string> = { volcano: '火山', range: '山脉', lake: '湖', raise: '抬起陆地', sink: '沉成海' };
+const KIND_NAME: Record<TerrainKind, string> = { volcano: '火山', range: '山脉', lake: '湖', raise: '抬起陆地', sink: '沉成海', river: '河' };
 
-/** 改过的地形:"2 处：火山 1、山脉 1";没改 = "没有" */
-export function terrainBrief(ops: readonly { kind: TerrainKind }[]): string {
-  if (!ops.length) return '没有';
+/**
+ * 改过的地形:"2 处：火山 1、山脉 1";画过草图的和编辑地形里一个说法:"画了 12 笔：草图 11 笔、河 1"
+ * (一笔没涂、没涂的地方都是海:"都是海");没改 = "没有"
+ */
+export function terrainBrief(ops: readonly { kind: TerrainKind }[], sketch?: { rest: string; strokes: readonly unknown[] }): string {
   const n = new Map<TerrainKind, number>();
   for (const o of ops) n.set(o.kind, (n.get(o.kind) ?? 0) + 1);
-  return `${ops.length} 处：${[...n].map(([k, c]) => `${KIND_NAME[k]} ${c}`).join('、')}`;
+  const parts = [...n].map(([k, c]) => `${KIND_NAME[k]} ${c}`);
+  if (!sketch) return ops.length ? `${ops.length} 处：${parts.join('、')}` : '没有';
+  const k = sketch.strokes.length;
+  if (!k && !ops.length) return '都是海';
+  return `画了 ${k + ops.length} 笔：${[...(k ? [`草图 ${k} 笔`] : []), ...parts].join('、')}`;
 }
 
 /** 一项世界参数的滑条:拖动时只改数字,松手(或键盘改完)才算数 */
@@ -112,7 +118,7 @@ export function SettingsPage(p: SettingsProps) {
           ))}
           <div className="ov-kv-row" data-param="terrain">
             <span>改过的地形</span>
-            <b>{terrainBrief(edits.terrain)}</b>
+            <b>{terrainBrief(edits.terrain, edits.sketch)}</b>
           </div>
         </div>
       </section>

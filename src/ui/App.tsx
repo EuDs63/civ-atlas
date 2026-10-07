@@ -105,6 +105,7 @@ import {
   type WorldEdits,
 } from '../gen/edits';
 import { sameTerrain } from '../gen/terrainEdits';
+import { sameSketch, type SketchEdit } from '../gen/sketch';
 import { clearEditHistory, clearEdits, getEdits, removeIntervention, setEditGate, setEdits, undoTerrainOp, useEdits } from './editsStore';
 import { redoLastEdit, undoLastEdit } from './undo';
 import { useShortcuts } from './useShortcuts';
@@ -217,6 +218,7 @@ import {
   terrainDown,
   terrainMove,
   terrainUp,
+  terrainCancel,
   useTerrainTool,
   type TerrainStatus,
 } from './TerrainTools';
@@ -605,14 +607,17 @@ export function App() {
   // ---- 阶段 4 改地形:世界 = 参数 + 地形修改 ----
   /** 最近一次请求的世界带着哪些地形修改(回放、重推时带给线程) */
   const genTerrain = useRef<readonly TerrainOp[]>(EMPTY_EDITS.terrain);
+  /** 最近一次请求的世界照着哪张草图(没画 = undefined;回放、重推时带给线程) */
+  const genSketch = useRef<SketchEdit | undefined>(undefined);
   /** 换了新世界、还没套上它的修改(自动恢复 / 读档)之前:这时的修改不属于这个世界,不按它重新生成 */
   const fresh = useRef(false);
   /** 正在进行的"按新地形重新生成"(编号 = 那次生成的请求编号);t0 = 发出去的时刻 */
-  const regenRef = useRef<{ id: number; t0: number; terrain: readonly TerrainOp[]; workerMs?: number; arrived?: number } | null>(null);
+  const regenRef = useRef<{ id: number; t0: number; terrain: readonly TerrainOp[]; sketch?: SketchEdit; workerMs?: number; arrived?: number } | null>(null);
   /** 正在进行的"按新地形重新生成"是一次 AI 改写 / 撤销改写(生成完说"已按你说的改写",带撤销) */
   const regenNote = useRef<RewriteNote | null>(null);
   /** 地图上现在这个世界带着的地形修改(覆盖层据此标出还在生成的那几处) */
   const [shownTerrain, setShownTerrain] = useState<readonly TerrainOp[]>(EMPTY_EDITS.terrain);
+  const [shownSketch, setShownSketch] = useState<SketchEdit | undefined>(undefined);
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus>({ busy: false });
   const terrainTool = useTerrainTool();
   // 手机:改地形、回放世界形成都要看地图 —— 拉到顶的世界卡片先收起来(两样都是从卡片里的"地形"那一组点开的)
@@ -731,7 +736,7 @@ export function App() {
               reject(e);
             },
           });
-          send({ type: 'trial', id: reqId.current, tid, params: p, terrain: [...genTerrain.current], interventions: [...interventions] });
+          send({ type: 'trial', id: reqId.current, tid, params: p, terrain: [...genTerrain.current], sketch: genSketch.current, interventions: [...interventions] });
         }),
     );
     return () => setTrialRunner(null);
@@ -865,15 +870,17 @@ export function App() {
       setProgress({ stage: '准备', pct: 0, seed: p.seed });
       // 手机:新世界、打开存档都要看地图 —— 拉到顶的世界卡片先收起来
       setWorldSheet('peek');
-      // 改过地形的世界直接带着地形修改生成,不用先生成原样再重新生成一遍
+      // 改过地形、画过草图的世界直接带着它们生成,不用先生成原样再重新生成一遍
       const terrain = t.edits.terrain;
       genTerrain.current = terrain;
+      genSketch.current = t.edits.sketch;
       fresh.current = true;
       regenRef.current = null;
       setTerrainStatus({ busy: false });
       setShownTerrain(terrain);
+      setShownSketch(t.edits.sketch);
       setTerrainTool({ on: false });
-      send({ type: 'generate', id, params: p, scale: 1, terrain: [...terrain] });
+      send({ type: 'generate', id, params: p, scale: 1, terrain: [...terrain], sketch: t.edits.sketch });
       // 换世界:改名、干预、选中都属于旧世界,一起作废(先停掉旧世界的自动存,清空不算"改回默认";新世界先按"没有干预"生成)
       detachWorld();
       civEdits.current = EMPTY_EDITS.interventions;
@@ -922,19 +929,21 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- 改地形(阶段 4):地形修改一变,就在后台带着新地形重新生成世界(连同当时的干预重推文明;
+  // ---- 改地形(阶段 4):地形修改、草图一变,就在后台带着新地形重新生成世界(连同当时的干预重推文明;
   // 州、历史整个重来,改名和干预按稳定键尽量套上)。写在干预的前面:同时变了的话,干预跟着这次生成一起推 ----
   useEffect(() => {
     const t = edits.terrain;
-    if (!data || !genParams.current || fresh.current || sameTerrain(t, genTerrain.current)) return;
+    const sk = edits.sketch;
+    if (!data || !genParams.current || fresh.current || (sameTerrain(t, genTerrain.current) && sameSketch(sk, genSketch.current))) return;
     const id = ++reqId.current;
     const interventions = getEdits().interventions;
     genTerrain.current = t;
+    genSketch.current = sk;
     civEdits.current = interventions;
     resimSeq.current++;
     resimInfo.current = null;
     setResim(null);
-    regenRef.current = { id, t0: performance.now(), terrain: t };
+    regenRef.current = { id, t0: performance.now(), terrain: t, sketch: sk };
     regenNote.current = takeRewriteNote(getEdits());
     setTerrainStatus((s) => ({ ...s, busy: true }));
     setProgress({ stage: '准备', pct: 0, regen: true });
@@ -946,14 +955,14 @@ export function App() {
     clearChroniclePick();
     if (getChronicle().polity !== null) setChronicle({ polity: null });
     if (getPeople().polity !== null) setPeople({ polity: null });
-    send({ type: 'generate', id, params: genParams.current, scale: 1, terrain: [...t], interventions: [...interventions] });
-  }, [edits.terrain, data, send]);
+    send({ type: 'generate', id, params: genParams.current, scale: 1, terrain: [...t], sketch: sk, interventions: [...interventions] });
+  }, [edits.terrain, edits.sketch, data, send]);
 
   // ---- 干预(阶段 4):干预列表一变,就在后台带着新的干预从第 0 年重推文明(地形不动) ----
   useEffect(() => {
     const list = edits.interventions;
     if (!data || !genParams.current || sameInterventions(list, civEdits.current)) return;
-    if (!sameTerrain(getEdits().terrain, genTerrain.current)) return; // 等改地形那次生成一起推
+    if (!sameTerrain(getEdits().terrain, genTerrain.current) || !sameSketch(getEdits().sketch, genSketch.current)) return; // 等改地形那次生成一起推
     // 从哪一年起变:新加的 / 删掉的干预里最早的那一年(重推完时间轴停在这里)
     const before = civEdits.current;
     const ks = (l: readonly Intervention[]) => l.map((v) => JSON.stringify(v));
@@ -970,7 +979,7 @@ export function App() {
     const note = takeRewriteNote(getEdits()) ?? undefined;
     resimInfo.current = { seq, year, t0: performance.now(), added, removed, left: list.length, quiet, note };
     setResim({ year });
-    send({ type: 'resim', id: reqId.current, seq, params: genParams.current, terrain: [...genTerrain.current], interventions: list });
+    send({ type: 'resim', id: reqId.current, seq, params: genParams.current, terrain: [...genTerrain.current], sketch: genSketch.current, interventions: list });
   }, [edits.interventions, data, send]);
   // 重推的文明画到地图上以后,记下"从下命令到地图更新"用了多久(冒烟检查用)
   useEffect(() => {
@@ -1002,8 +1011,9 @@ export function App() {
     rg.arrived = performance.now() - rg.t0;
     lastReady.current = { world, civ: rc };
     setShownTerrain(rg.terrain);
+    setShownSketch(rg.sketch);
     const e = getEdits();
-    if (sameTerrain(e.terrain, rg.terrain)) updateCheck(worldCheck(world));
+    if (sameTerrain(e.terrain, rg.terrain) && sameSketch(e.sketch, rg.sketch)) updateCheck(worldCheck(world));
     const lostNames = Object.keys(e.names).filter((k) => !resolveKey(rc, k)).length;
     // 干预:和世界概览"我的干预"页一个口径(这份历史带着哪些干预推的、哪几条没生效,见 chronicle.ts 的 interventionOutcome)
     const lostInterventions = (rc.interventions ?? []).filter((_, i) => !interventionOutcome(rc, i).ok).length;
@@ -1102,7 +1112,7 @@ export function App() {
     if (t.view !== undefined) applyView(t.view ?? undefined);
     // 旧格式的键(r + 州号:GENERATOR_VERSION 2 以前的存档、链接)就地换成按地块的 c 格式,按这一刻的世界解析;
     // 换过的话自动存会写回去(套上的修改和存下的不是同一个对象就会重写)
-    const sameT = sameTerrain(t.edits.terrain, genTerrain.current);
+    const sameT = sameTerrain(t.edits.terrain, genTerrain.current) && sameSketch(t.edits.sketch, genSketch.current);
     const edits = sameT ? upgradeLegacyKeys(t.edits, rc.regions.seat) : t.edits;
     restoredIv.current = edits.interventions;
     // 同一张图换一份修改(打开同种子的另一份存档、分享链接)也算换了世界:正在填的标记、选中的标记作废
@@ -1121,7 +1131,7 @@ export function App() {
     if (!save || !t.from) return;
     const more: string[] = [...(t.warnings ?? [])];
     if (t.from === 'stored' || t.from === 'restore') {
-      const note = versionNote(save.generator, (save.edits.terrain?.length ?? 0) > 0);
+      const note = versionNote(save.generator, (save.edits.terrain?.length ?? 0) > 0 || !!save.edits.sketch);
       if (note) more.push(note);
     }
     // 地形校验只在"生成时带的地形修改就是存档里的"时才核对
@@ -1174,9 +1184,9 @@ export function App() {
     }, 450);
     return () => clearTimeout(t);
   }, [projection, mapCenter, graticule]);
-  /** 现在这张图(或正在生成的)就是这组参数 + 地形修改 */
-  const sameGen = (p: WorldParams, terrain: readonly TerrainOp[]) =>
-    !!genParams.current && worldKey(genParams.current) === worldKey(p) && sameTerrain(terrain, genTerrain.current);
+  /** 现在这张图(或正在生成的)就是这组参数 + 草图 + 地形修改 */
+  const sameGen = (p: WorldParams, terrain: readonly TerrainOp[], sketch: SketchEdit | undefined) =>
+    !!genParams.current && worldKey(genParams.current) === worldKey(p) && sameTerrain(terrain, genTerrain.current) && sameSketch(sketch, genSketch.current);
   /**
    * 换到哪一步:新建 / 世界 / 我的世界。进新建时政区、民族换成地形(还没有历史),
    * 离开新建时换回来;选中、概览、改地形属于上一步的,一起收起
@@ -1215,7 +1225,7 @@ export function App() {
     enterStage(t.kind === 'draft' ? 'draft' : 'world', t.kind === 'draft' ? (t.base ?? null) : null);
     if (t.kind === 'draft') setDraftTitle(t.title ?? '');
     setParams(t.params);
-    if (sameGen(t.params, t.edits.terrain)) {
+    if (sameGen(t.params, t.edits.terrain, t.edits.sketch)) {
       if (fresh.current) {
         targetRef.current = t;
         writeWorldUrl(t);
@@ -1321,15 +1331,18 @@ export function App() {
     const attached = cur?.id === t.id;
     return { title: attached ? cur.title : t.title, pristine: attached ? cur.pristine : t.pristine, edits: attached ? getEdits() : t.edits };
   };
-  /** 新建中换种子:另一颗星球,改过的地形作废;没起名、参数也是默认的 = 又算没动过(不存) */
+  /** 新建中换种子:另一颗星球,草图留着(连同放的火山湖河);没画草图时放的那几处作废;没起名、参数也是默认的、没画草图 = 又算没动过(不存) */
   const draftSeed = (seed: number) => {
     const t = draftNow();
     if (!t || t.base) return;
     const st = draftState(t);
-    // 换一颗:改过的地形不带过去,助手的对话(说的是原来那颗)也清掉
+    // 换一颗:草图带过去,照它长出新的山河;陆地海洋是照草图长的,放的火山湖河也还对得上,一起带过去。
+    // 没画草图 = 整颗星球都换了,放的那几处是照原来的地形放的,不带过去。助手的对话(说的是原来那颗)也清掉
     newConversation();
-    const plain = !st.title && worldKey({ ...t.params, seed: 0 }) === worldKey({ ...DEFAULT_PARAMS, seed: 0 });
-    generate({ ...t, params: { ...t.params, seed }, edits: EMPTY_EDITS, saved: undefined, title: st.title, pristine: st.pristine || plain, view: undefined, from: undefined, save: undefined });
+    const sketch = st.edits.sketch;
+    const plain = !st.title && !sketch && worldKey({ ...t.params, seed: 0 }) === worldKey({ ...DEFAULT_PARAMS, seed: 0 });
+    const edits = sketch ? { ...EMPTY_EDITS, sketch, terrain: st.edits.terrain } : EMPTY_EDITS;
+    generate({ ...t, params: { ...t.params, seed }, edits, saved: undefined, title: st.title, pristine: st.pristine || plain, view: undefined, from: undefined, save: undefined });
   };
   /** 新建中调参数:改过的地形留着(按新参数重新生成) */
   const draftParams = (p: WorldParams) => {
@@ -1584,7 +1597,7 @@ export function App() {
     prepareCivReplay(); // 文明层先退回第 0 年,等地质放完再接着放文明
     setReplayOn(true);
     if (replay) setReplay({ ...replay, idx: 0 });
-    else send({ type: 'history', id: reqId.current, params: genParams.current, terrain: [...genTerrain.current] });
+    else send({ type: 'history', id: reqId.current, params: genParams.current, terrain: [...genTerrain.current], sketch: genSketch.current });
   };
   /** 弯边投影:回放帧先放在离屏的等距圆柱原图上,再按投影铺到屏幕上 */
   const overlayProj = useRef(new ProjLayer());
@@ -2183,6 +2196,8 @@ export function App() {
   const pinch = useRef<{ a: Pt; b: Pt; raf: number } | null>(null);
   /** 改地形正用手指画线(这时第二根手指不捏合) */
   const terrainStroke = useRef(false);
+  /** 正在画的那一笔是哪根手指 / 哪个指针按下的:别的手指的移动、松开不算进这一笔 */
+  const terrainPointer = useRef<number | null>(null);
   /** 这一下手指按下的位置、时刻(松手时判断是不是"点一下");中途多了一根手指就不算 */
   const tapStart = useRef<(Tap & { id: number; multi: boolean }) | null>(null);
   /** 上一下"点一下"(和这一下够近就是双击) */
@@ -2293,9 +2308,13 @@ export function App() {
     stopFly();
     if (getGlobeOn()) return; // 地球仪自己管拖动
     const touch = e.pointerType === 'touch';
-    // 第二根手指:开始捏合(改地形正在画线时不管)
+    // 第二根手指:开始捏合(编辑地形刚按下第一根手指就跟上第二根 = 想捏合,那一笔不算;已经画了一阵的不管)
     if (touch && touches.current.size >= 2) {
-      if (terrainStroke.current) return;
+      if (terrainStroke.current) {
+        if (!terrainCancel()) return;
+        terrainStroke.current = false;
+        terrainPointer.current = null;
+      }
       if (touches.current.size === 2) startPinch();
       return;
     }
@@ -2303,6 +2322,7 @@ export function App() {
     if (!dismissing(e.nativeEvent) && terrainDown(worldAt(e.clientX, e.clientY), e.button)) {
       moved.current = true;
       terrainStroke.current = touch;
+      terrainPointer.current = e.pointerId;
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
@@ -2535,7 +2555,7 @@ export function App() {
       return;
     }
     const rect = el.getBoundingClientRect();
-    terrainMove(worldAt(e.clientX, e.clientY));
+    if (terrainPointer.current === null || e.pointerId === terrainPointer.current) terrainMove(worldAt(e.clientX, e.clientY));
     let label: ReturnType<typeof pickLabelAt> = null;
     let mh: ReturnType<typeof markHoverAt> = null;
     if (drag.current) {
@@ -2581,6 +2601,9 @@ export function App() {
     }
     // 捏合以后剩下的那根手指:别的手指松开时不结束它的拖动
     if (e.pointerType === 'touch' && drag.current?.touch && touches.current.size > 0) return;
+    // 正在画的那一笔:只认按下它的那根手指松开
+    if (terrainPointer.current !== null && e.pointerId !== terrainPointer.current) return;
+    terrainPointer.current = null;
     terrainUp();
     terrainStroke.current = false;
     drag.current = null;
@@ -3157,7 +3180,7 @@ export function App() {
             )}
             <canvas ref={overlayRef} className={`overlay ${replayOn && replay ? 'show' : ''}`} />
             <canvas ref={overlayCopyRef} className={`overlay wrap-copy ${replayOn && replay ? 'show' : ''}`} />
-            {data && !curved && <TerrainOverlay width={data.world.width} height={data.world.height} shown={shownTerrain} wrap={wrapW} />}
+            {data && !curved && <TerrainOverlay width={data.world.width} height={data.world.height} shown={shownTerrain} shownSketch={shownSketch} wrap={wrapW} />}
           </div>
         </div>
         {/* 文字层(CivLayer 放进来);回放世界形成时藏起来(回放画面盖住文明层,字也不露出来) */}

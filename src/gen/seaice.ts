@@ -21,7 +21,7 @@ import { blurField } from './mesh';
 import type { World } from './world';
 import type { Raster } from './raster';
 import { classifyBiome } from './biomes';
-import { clamp, fbm3, noise3, smoothstep, subSeed } from './util';
+import { clamp, fbm3, noise3, orderByKey, smoothstep, subSeed } from './util';
 import { geometryOf } from './geometry';
 
 /** 有效冬季温度高于这个值:开阔水面;低于 PACK:整片冰盖(°C,按年均温尺度) */
@@ -45,9 +45,7 @@ export function computeSeaIce(
   // 风带绕一整圈:和算降水时一样,在每条风带最大的那片大洋中间切开
   const cuts = geo.windCuts(water);
   for (let i = 0; i < n; i++) key[i] = geo.downwind(i, windX[i], windY[i], cuts);
-  const order = new Int32Array(n);
-  for (let i = 0; i < n; i++) order[i] = i;
-  order.sort((a, b) => key[a] - key[b]);
+  const order = orderByKey(key);
   const chill = new Float32Array(n);
   for (let sweep = 0; sweep < 2; sweep++) {
     for (let a = 0; a < n; a++) {

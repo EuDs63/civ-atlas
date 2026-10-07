@@ -5,6 +5,7 @@
  * 分合统计(分裂、合并、复国、主动迁都),王朝更替(东方改朝换代 / 西幻王室更迭),信仰(大教、教派、宗教大事),
  * 以及 36k 默认精细度下的生成总时长。
  * 改地形(阶段 4):几组极端的地形修改(最大最强的火山 / 山脉铺满全图、两极的湖、跨 180° 经线的笔画、整片沉成海 / 抬成陆地)。
+ * 草图:一片陆地也没画的"都是海"(整颗星球是海)、满图涂成山地、跨 180° 经线和两极的大杂烩(再叠上地形修改)。
  */
 import { generateWorld, DEFAULT_PARAMS } from '../src/gen/world';
 import { rasterize } from '../src/gen/raster';
@@ -27,6 +28,7 @@ import { faithAt, faithFromScratch } from '../src/gen/civ/religion';
 import { civLabelItems, civMapLayer, labelViewExtras } from '../src/render/civ/labels';
 import { placeMap } from '../src/render/labels/draw';
 import type { TerrainOp } from '../src/gen/edits';
+import { sketchGrid, type SketchEdit, type SketchKind } from '../src/gen/sketch';
 
 /** 极端的地形修改:大杂烩(最大最强的火山、横贯全图的山脉、角上 / 海里的湖、画笔)、整片沉成海、整片抬成陆地 */
 const rows = (kind: 'sink' | 'raise'): TerrainOp[] => [0, 200, 400, 600, 800, 1000].map((y) => ({ kind, pts: [0, y, 1024, y + 30, 2048, y], r: 160, s: 2 }));
@@ -46,13 +48,45 @@ const MIX: TerrainOp[] = [
   { kind: 'raise', pts: [-40, 700, 60, 720], r: 50, s: 1 },
 ];
 
+/** 极端的草图:满图一行行涂同一种笔(半径最大) */
+const fill = (kind: SketchKind, rest: SketchEdit['rest'] = 'auto'): SketchEdit => ({
+  rest,
+  strokes: Array.from({ length: 5 }, (_, k) => ({ kind, r: 128, pts: [-100, k * 230, 1024, k * 230 + 40, 2148, k * 230] })),
+});
+const SKETCH_MIX: SketchEdit = {
+  rest: 'sea',
+  strokes: [
+    { kind: 'land', r: 128, pts: [1900, 400, 2150, 450, 2300, 500] },
+    { kind: 'mountain', r: 4, pts: [1950, 420, 2100, 470] },
+    { kind: 'land', r: 100, pts: [0, 0, 2048, 0] },
+    { kind: 'mountain', r: 60, pts: [500, 1024] },
+    { kind: 'land', r: 4, pts: [1000, 512] },
+    { kind: 'sea', r: 30, pts: [2000, 440, 2100, 460] },
+    { kind: 'erase', r: 50, pts: [1024, 0] },
+    { kind: 'isles', r: 160, pts: [600, 600, 900, 650] },
+    { kind: 'shelf', r: 90, pts: [700, 300] },
+    { kind: 'hills', r: 2, pts: [1900, 420] },
+    { kind: 'plateau', r: 160, pts: [1950, 460, 2200, 480] },
+    { kind: 'mountain', r: 30, pts: [2000, 470, 2050, 480], h: 2 },
+    { kind: 'sea', r: 10, pts: [1950, 420, 2100, 420, 2100, 520, 1950, 520], fill: 1 },
+    { kind: 'land', r: 2, pts: [0, 1024, 2048, 1024, 1024, 0], fill: 1 },
+  ],
+};
+
 const cases = [
   {}, { landFraction: 0.12 }, { landFraction: 0.6 }, { plates: 5 }, { plates: 30 }, { plates: 60 },
   { cells: 80000 }, { cells: 12000 }, { temperature: -12 }, { temperature: 12 }, { rainfall: 0.4 }, { mountains: 2 }, { mountains: 0.2 },
   { terrain: MIX }, { terrain: rows('sink') }, { terrain: rows('raise') },
-] as ({ terrain?: TerrainOp[] } & Partial<typeof DEFAULT_PARAMS>)[];
-/** 打印用:改地形的只写"改地形 · 几处" */
-const caseName = (c: (typeof cases)[number]) => (c.terrain ? `{"改地形":"${c.terrain[0].kind === 'sink' && c.terrain.length === 6 ? '整片沉成海' : c.terrain[0].kind === 'raise' ? '整片抬成陆地' : '大杂烩'} ${c.terrain.length} 处"}` : JSON.stringify(c));
+  { sketch: { rest: 'sea', strokes: [] } }, { sketch: fill('mountain') }, { sketch: fill('land', 'sea') }, { sketch: fill('isles', 'sea') }, { sketch: fill('plateau') },
+  { sketch: { ...SKETCH_MIX, coast: 0 }, terrain: MIX }, { sketch: SKETCH_MIX, terrain: [...MIX, { kind: 'river', pts: [1950, 420, 2150, 470, 2300, 500], r: 9, s: 1 }] },
+] as ({ terrain?: TerrainOp[]; sketch?: SketchEdit } & Partial<typeof DEFAULT_PARAMS>)[];
+/** 打印用:改地形的只写"改地形 · 几处",草图只写"草图 · 几笔" */
+const caseName = (c: (typeof cases)[number]) =>
+  c.sketch
+    ? `{"草图":"${c.sketch.rest === 'sea' ? '都是海' : '交给程序'} ${c.sketch.strokes.length} 笔"${c.terrain ? `,"改地形":"${c.terrain.length} 处"` : ''}}`
+    : c.terrain
+      ? `{"改地形":"${c.terrain[0].kind === 'sink' && c.terrain.length === 6 ? '整片沉成海' : c.terrain[0].kind === 'raise' ? '整片抬成陆地' : '大杂烩'} ${c.terrain.length} 处"}`
+      : JSON.stringify(c);
 let worstHabReg = 0;
 let worstRoutes = 0;
 let worstTotal = 0;
@@ -61,11 +95,12 @@ let worstFrame = 0;
 let worstLabels = 0;
 for (const c of cases) {
   for (const seed of [3, 99]) {
-    const { terrain, ...pc } = c;
-    // 改过地形的世界要原来星球的扩张节拍:和 worker 一样事先记下(新建时先生成的就是没改的星球),不算进耗时
-    const tempo = terrain ? (planetTempo({ ...DEFAULT_PARAMS, ...pc, seed }) ?? null) : undefined;
+    const { terrain, sketch, ...pc } = c;
+    const grid = sketchGrid(sketch);
+    // 改过地形的世界要原来星球(参数 + 草图)的扩张节拍:和 worker 一样事先记下(新建时先生成的就是没改的星球),不算进耗时
+    const tempo = terrain ? (planetTempo({ ...DEFAULT_PARAMS, ...pc, seed }, undefined, grid) ?? null) : undefined;
     const t0 = performance.now();
-    const w = generateWorld({ ...DEFAULT_PARAMS, ...pc, seed }, undefined, terrain);
+    const w = generateWorld({ ...DEFAULT_PARAMS, ...pc, seed }, undefined, terrain, grid);
     const t1 = performance.now();
     const r = rasterize(w, 1);
     const t2 = performance.now();

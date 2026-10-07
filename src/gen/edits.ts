@@ -89,11 +89,26 @@
  * | `lake`    | 湖         | 一个点 [x, y]      | 湖的半径         | 深浅;点在海里不生效              |
  * | `raise`   | 抬起陆地   | 折线(画笔走过的路) | 画笔半径         | 抬起的新陆地的高低                |
  * | `sink`    | 沉成海     | 折线(画笔走过的路) | 画笔半径         | 沉下去的海的深浅                  |
+ * | `river`   | 河         | 折线(从源头画到河口,反着画也行) | 河谷半宽 | 河谷的深浅;这一路一定画成河,流到海、湖或别的河为止 |
  *
  * 世界坐标 = 主图(等距圆柱)原图的像素坐标(宽 2048、高 1024,左上角为原点;和精细度无关),取整存:
  * x 是经度(0 = 180°W,1024 = 0°,2048 = 180°E,绕一圈回到原处),y 是纬度(0 = 北极,512 = 赤道,1024 = 南极)。
  * 折线的第一个点 x 在 [0, 2048) 里,之后每个点按离上一个点近的那边写(跨 180° 经线的一笔 x 可以超出 [0, 2048),是连着的一笔)。
  * 读进来的列表先过 terrainEdits.ts 的 cleanTerrainOps(种类不认识、坐标不是数的丢掉;x 按上面的规则规整,y、大小、强度夹回范围内)。
+ *
+ * ## 地形草图
+ *
+ * WorldEdits.sketch(可选,没有 = 没画):新建世界时「编辑地形」涂的草图 —— 程序照着它在板块上长出大陆、山脉(sketch.ts、
+ * tectonics.ts 的 4b 步),是"星球"的一部分:和地形修改一样从头重新生成,但扩张节拍按照草图长出来的这颗星球标定
+ * (地形修改再套在它上面时,planetTempo 也照草图生成)。没有草图时生成结果和不画一模一样(逐字节)。
+ *
+ * | 字段      | 意思                                                                                         |
+ * |-----------|----------------------------------------------------------------------------------------------|
+ * | rest      | 没涂的地方:`auto` = 照旧由程序定,`sea` = 都是海                                              |
+ * | coast     | 海岸线:0 = 贴着画的走,1 = 曲折,像真实的海岸(不给 = 0.6 适中)                               |
+ * | strokes   | 笔画,按先后:{ kind, r, pts, h?, fill? } —— kind 是 `land` 陆地 / `hills` 丘陵 / `mountain` 山地 / `plateau` 高原 / `shelf` 浅海 / `sea` 海 / `isles` 群岛 / `erase` 擦掉(涂回没涂),r 是笔的半径,pts 是经过的点(和"地形修改"的折线同一套世界坐标和规则;一个点 = 点了一下),h 是山地的高低(0 低 / 2 高,不给 = 中),fill = 1 是圈起来填满(首尾连起来,圈里整片涂上) |
+ *
+ * 读进来的先过 sketch.ts 的 cleanSketch(笔画格式不对的丢掉,最多 SKETCH_MAX_STROKES 笔;一笔也没有、没涂的又交给程序 = 没画)。
  *
  * ## 作者标记
  *
@@ -143,6 +158,7 @@ import type { Civ, Culture, Faith, Place, Polity, Settlement } from './civ/types
 import type { AuthorCharacter } from './characters';
 import { polityRootAt } from './civ/growth';
 import { TERRAIN_H, TERRAIN_W } from './terrainEdits';
+import type { SketchEdit } from './sketch';
 
 /** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对);加一时在 GENERATOR_CHANGES 里补一条 */
 export const GENERATOR_VERSION = 9;
@@ -185,7 +201,7 @@ export type Intervention =
   | { kind: 'halt'; a: string; from: number; until?: number };
 
 /** 地形修改的种类(见文件头"地形修改"的表) */
-export type TerrainKind = 'volcano' | 'range' | 'lake' | 'raise' | 'sink';
+export type TerrainKind = 'volcano' | 'range' | 'lake' | 'raise' | 'sink' | 'river';
 
 /** 一处地形修改(字段见文件头"地形修改"的表;坐标、大小都是世界坐标) */
 export interface TerrainOp {
@@ -207,6 +223,8 @@ export interface WorldEdits {
   interventions: Intervention[];
   /** 地形修改(按先后;见文件头"地形修改") */
   terrain: TerrainOp[];
+  /** 地形草图(见文件头"地形草图");没有 = 没画 */
+  sketch?: SketchEdit;
   /** 作者标记(按添加的先后;见文件头"作者标记");没有 = 一个也没有 */
   marks?: AuthorMark[];
   /** 改过的国旗:稳定键 → 旗的写法(见文件头"改旗");没有 = 一面也没改 */

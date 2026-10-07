@@ -63,9 +63,14 @@ export const TERRAIN_PRESETS: Record<TerrainKind, [r: number, s: number][]> = {
     [24, 1],
     [40, 1],
   ],
+  river: [
+    [6, 0.7],
+    [9, 1],
+    [14, 1.3],
+  ],
 };
 
-const KINDS: readonly TerrainKind[] = ['volcano', 'range', 'lake', 'raise', 'sink'];
+const KINDS: readonly TerrainKind[] = ['volcano', 'range', 'lake', 'raise', 'sink', 'river'];
 /** 只有一个点的种类 */
 export const isPointKind = (k: TerrainKind) => k === 'volcano' || k === 'lake';
 
@@ -74,12 +79,12 @@ export const isPointKind = (k: TerrainKind) => k === 'volcano' || k === 'lake';
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 /** 经度(世界 x)取整、取模到 [0, TERRAIN_W) */
-const wrapLon = (x: number) => {
+export const wrapLon = (x: number) => {
   const v = Math.round(x - TERRAIN_W * Math.floor(x / TERRAIN_W));
   return v >= TERRAIN_W ? v - TERRAIN_W : v;
 };
 /** 经度(世界 x)取整,挪到离 ref 最近的那一圈(差不超过半圈) */
-const nearLon = (x: number, ref: number) => Math.round(x - TERRAIN_W * Math.round((x - ref) / TERRAIN_W));
+export const nearLon = (x: number, ref: number) => Math.round(x - TERRAIN_W * Math.round((x - ref) / TERRAIN_W));
 
 /**
  * 清理一处地形修改:种类不认识、坐标 / 大小 / 强度不是有限数、点不够的 = null;
@@ -161,7 +166,7 @@ const RAISE_U = 0.07;
  * 返回"改过的地块"(1 = 这里的地形被改过;换算成米时不参与最高峰取样)。没有这几种修改 = null(什么都没动)
  */
 export function applyTerrainTectonics(mesh: Mesh, tect: Tectonics, ops: readonly TerrainOp[], seed: number): Uint8Array | null {
-  const shapes = ops.filter((o) => o.kind !== 'lake');
+  const shapes = ops.filter((o) => o.kind !== 'lake' && o.kind !== 'river');
   if (!shapes.length) return null;
   const { n } = mesh;
   const geo = geometryOf(mesh);
@@ -326,6 +331,79 @@ export function carveLakes(mesh: Mesh, land: Uint8Array, elevation: Float32Array
     }
   }
   return mask;
+}
+
+// ---------------------------------------------------------------------------
+// 湖之后:河
+
+/** 河谷:河道比两岸最低处还低多少米(× 强度),一路往下游每个地块至少再低多少米 */
+const RIVER_CUT = 12;
+const RIVER_DROP = 0.4;
+
+/**
+ * 沿作者画的河挖一道河谷(原地改 elevation):把线经过的地块串成一条链,低的那头当河口(有一头在海里的,那头是河口);
+ * 从源头往下游,每个地块挖到比它两岸(不在链上的邻居)最低处还低、也比上游那块低 —— 排水时水就顺着这条链流。
+ * 链走到海、湖就停(河口)。海拔不低于 1 米(不挖到海平面以下积成一串湖)。
+ * 返回"一定画成河"的地块(1 = 这里是作者画的河道,流量不够也画);没有河 = null
+ */
+export function carveRivers(mesh: Mesh, water: Uint8Array, elevation: Float32Array, ops: readonly TerrainOp[]): Uint8Array | null {
+  const rivers = ops.filter((o) => o.kind === 'river');
+  if (!rivers.length) return null;
+  const { n, adjStart, adj } = mesh;
+  const geo = geometryOf(mesh);
+  const at = geo.locator();
+  const forced = new Uint8Array(n);
+  const onChain = new Uint8Array(n);
+  for (const op of rivers) {
+    // 线上密密地取点,每个点落在哪块,连成链(相邻的重复去掉)
+    const sh = geo.polyline(op.pts, 0);
+    const step = Math.max(0.5, mesh.spacing / 3);
+    const chain: number[] = [];
+    const m = op.pts.length >> 1;
+    for (let k = 0; k < Math.max(1, m - 1); k++) {
+      const ax = op.pts[2 * k];
+      const ay = op.pts[2 * k + 1];
+      const bx = m > 1 ? op.pts[2 * k + 2] : ax;
+      const by = m > 1 ? op.pts[2 * k + 3] : ay;
+      const len = m > 1 ? sh.cum[k + 1] - sh.cum[k] : 0;
+      const steps = Math.max(1, Math.ceil(len / step));
+      for (let t = 0; t <= steps; t++) {
+        const c = at(ax + ((bx - ax) * t) / steps, ay + ((by - ay) * t) / steps);
+        if (chain[chain.length - 1] !== c) chain.push(c);
+      }
+    }
+    // 哪头是源头:有一头在水里的,那头是河口;否则高的那头是源头
+    const head = chain[0];
+    const tail = chain[chain.length - 1];
+    const wetHead = water[head] !== 0;
+    const wetTail = water[tail] !== 0;
+    if ((wetHead && !wetTail) || (!wetHead && !wetTail && elevation[head] < elevation[tail])) chain.reverse();
+    // 源头那头在水里的部分去掉,走到水就停
+    let s0 = 0;
+    while (s0 < chain.length && water[chain[s0]] !== 0) s0++;
+    let s1 = s0;
+    while (s1 < chain.length && water[chain[s1]] === 0) s1++;
+    const run = chain.slice(s0, s1);
+    if (run.length < 2) continue;
+    for (const c of run) onChain[c] = 1;
+    let prev = Infinity;
+    for (const c of run) {
+      let low = Infinity;
+      for (let k = adjStart[c]; k < adjStart[c + 1]; k++) {
+        const j = adj[k];
+        if (onChain[j]) continue;
+        low = Math.min(low, water[j] === 0 ? elevation[j] : 0);
+      }
+      let e = Math.min(elevation[c], low - RIVER_CUT * op.s, prev - RIVER_DROP);
+      if (!Number.isFinite(e)) e = elevation[c];
+      e = Math.max(1, e);
+      elevation[c] = e;
+      prev = e;
+      forced[c] = 1;
+    }
+    for (const c of run) onChain[c] = 0;
+  }
+  return forced;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,16 +1,17 @@
 /**
- * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改、作者标记、改旗、作者的人物。
+ * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改、草图、作者标记、改旗、作者的人物。
  * 和 civView.ts 一样的小 store(get / set / use)。换世界(种子 / 参数变了)时 App 调 clearEdits 清空。
  *
  * 这里只管内存里的这一份;存进浏览器 / 存成文件在 saveStore.ts(经 subscribeEdits 订阅,修改一变就自动存),
  * 读档时 App 先按存档的参数生成,再 setEdits(存档里的修改)。
  *
  * 撤销 / 重做(⌘Z / ⇧⌘Z,见 undo.ts):改名、改旗、干预、作者标记、作者的人物、AI 改写每次都记一步(改之前、改之后两份),只记这次打开网页以后、这个世界上的;
- * 读档、换世界(setEdits / clearEdits)、创建世界(clearEditHistory)清空。地形修改不记:只在新建世界时能改,改地形工具有自己的"撤销一笔"。
+ * 读档、换世界(setEdits / clearEdits)、创建世界(clearEditHistory)清空。地形修改、草图不记:只在新建世界时能改,工具有自己的"撤销一笔"。
  */
 import { useSyncExternalStore } from 'react';
 import { EMPTY_EDITS, MARKS_MAX, MARK_REGIONS_TOTAL, cleanIntervention, cleanMark, markRegionTotal, sameMark, markAiName, nextMarkId, type AuthorMark, type Intervention, type TerrainOp, type WorldEdits } from '../gen/edits';
 import { TERRAIN_MAX_OPS, cleanTerrainOp } from '../gen/terrainEdits';
+import { SKETCH_MAX_STROKES, cleanSketch, cleanSketchStroke, sketchCoast, type SketchEdit, type SketchStroke } from '../gen/sketch';
 import { CHARACTERS_MAX, cleanCharacter, nextCharacterId, sameCharacter, type AuthorCharacter } from '../gen/characters';
 import { showToast } from './toastStore';
 
@@ -28,7 +29,14 @@ export function getEdits(): WorldEdits {
 export function setEdits(next: WorldEdits) {
   past = [];
   future = [];
+  era++;
   put(next);
+}
+
+/** 整个换掉过几次(换了世界、读档):记着"这一笔是什么时候加的"的地方据此作废旧记录 */
+let era = 0;
+export function editsEra(): number {
+  return era;
 }
 
 function put(next: WorldEdits) {
@@ -111,6 +119,8 @@ export function revertEdits(now: WorldEdits, from: WorldEdits, to: WorldEdits): 
   if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain && marks === now.marks && flags === now.flags && characters === now.characters)
     return now;
   const out: WorldEdits = { names, interventions, terrain };
+  // 草图不记撤销步(见文件头),照现在的留着
+  if (now.sketch) out.sketch = now.sketch;
   if (aiNames && Object.keys(aiNames).length) out.aiNames = aiNames;
   if (marks?.length) out.marks = marks;
   if (flags && Object.keys(flags).length) out.flags = flags;
@@ -316,6 +326,52 @@ export function undoTerrainOp() {
 export function clearTerrain() {
   if (!state.terrain.length) return;
   put({ ...state, terrain: EMPTY_EDITS.terrain });
+}
+
+// ---- 草图(新建世界时「编辑地形」涂的;格式见 gen/edits.ts 文件头"地形草图") ----
+
+/** 把草图换成 next(清理过;一笔没有、没涂的又交给程序 = 去掉这个字段)。App 看到草图变了就在后台照新的草图重新生成 */
+export function putSketch(next: SketchEdit | null) {
+  const c = next ? cleanSketch(next) : null;
+  const { sketch: _, ...rest } = state;
+  void _;
+  put(c ? { ...rest, sketch: c } : rest);
+}
+
+/** 草图:加一笔(清理过的;不合格的、已满 SKETCH_MAX_STROKES 笔的不加)。还没有草图时新开一张,海岸线用 coast(不给 = 默认)。返回是否加上了 */
+export function addSketchStroke(stroke: SketchStroke, coast?: number): boolean {
+  const c = cleanSketchStroke(stroke);
+  const now = state.sketch;
+  if (!c || (now?.strokes.length ?? 0) >= SKETCH_MAX_STROKES) return false;
+  const base: SketchEdit = now ?? (coast === undefined ? { rest: 'auto', strokes: [] } : { rest: 'auto', coast, strokes: [] });
+  putSketch({ ...base, strokes: [...base.strokes, c] });
+  return true;
+}
+
+/** 草图:撤销最后一笔 */
+export function undoSketchStroke() {
+  const now = state.sketch;
+  if (!now?.strokes.length) return;
+  putSketch({ ...now, strokes: now.strokes.slice(0, -1) });
+}
+
+/** 草图:全部清除(连同"没涂的地方都是海",回到程序原本的星球) */
+export function clearSketch() {
+  if (state.sketch) putSketch(null);
+}
+
+/** 草图:没涂的地方交给程序('auto')还是都是海('sea') */
+export function setSketchRest(rest: SketchEdit['rest']) {
+  const now = state.sketch;
+  if ((now?.rest ?? 'auto') === rest) return;
+  putSketch({ ...(now ?? { strokes: [] }), rest });
+}
+
+/** 草图:海岸线贴着画(0)、适中(SKETCH_COAST)还是曲折(1) */
+export function setSketchCoast(coast: number) {
+  const now = state.sketch;
+  if (sketchCoast(now) === coast) return;
+  putSketch({ ...(now ?? { rest: 'auto', strokes: [] }), coast });
 }
 
 // ---- 作者标记 ----
