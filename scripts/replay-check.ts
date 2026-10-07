@@ -4793,6 +4793,23 @@ for (const style of ['realistic', 'fantasy']) {
   const built: string[] = [];
   try {
     await build({ logLevel: 'error', build: { outDir, emptyOutDir: true } });
+    // 每个 JS 文件开头都有署名(版本和 package.json 一致、仓库网址和 links.ts 一致);主程序还带构建时的提交号
+    const { execSync } = await import('node:child_process');
+    let commit = '';
+    try {
+      commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch {
+      commit = process.env.GITHUB_SHA?.slice(0, 7) ?? '';
+    }
+    const jsFiles = fs.readdirSync(path.join(outDir, 'assets')).filter((f) => f.endsWith('.js'));
+    for (const f of jsFiles) {
+      const head = fs.readFileSync(path.join(outDir, 'assets', f), 'utf8').slice(0, 1000);
+      const sig = /\/\*! 文明与地图 [^*]*\*\//.exec(head)?.[0] ?? '';
+      const main = f.startsWith('index-');
+      const want = `/*! 文明与地图 v${pkgVer}${main && commit ? ` (${commit})` : ''} | Copyright (C) 2026 guaner-334 | AGPL-3.0-only | ${SOURCE_URL} */`;
+      if (sig !== want) errs.push(`署名:构建出的 ${f} 开头的署名不对(${sig || '没有'},应为 ${want})`);
+    }
+    built.push(`署名 ${jsFiles.length} 个 JS 文件`);
     const srv = await preview({ logLevel: 'error', build: { outDir }, preview: { host: '127.0.0.1', port: 0, open: false } });
     const base = (srv.resolvedUrls?.local[0] ?? '').replace(/\/$/, '');
     try {
