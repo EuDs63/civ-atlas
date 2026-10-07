@@ -64,7 +64,8 @@ jobs:
     needs: changed
     if: ${{ !cancelled() && (github.event_name != 'schedule' || needs.changed.outputs.any == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 冒烟本身在 GitHub 的机器上要二十多分钟(加上装依赖、浏览器),留足余量
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

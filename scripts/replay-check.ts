@@ -467,7 +467,8 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (!(k1 > k0 * 1.3 && Math.abs(k2 - k0) < 0.01)) errs.push(`快捷键:+ − 没有缩放(${k0} → ${k1} → ${k2})`);
   if (l2 !== '民族' || l1 !== '政区') errs.push(`快捷键:1 2 没有换图层(${l2}、${l1})`);
   if (!searchFocused || typed !== '2' || lTyped !== '政区') errs.push(`快捷键:/ 没有跳进搜索框,或在框里打字换了图层(${searchFocused}、「${typed}」、${lTyped})`);
-  if (!['时间', '地图', '世界', '播放 / 暂停', '撤销 / 重做', 'Ctrl+S'].every((w) => help.includes(w)) || playUnderHelp || !helpClosed)
+  // 修饰键苹果电脑上写成 ⌘(⌘S、⌘\),别的系统写成 Ctrl+(见 src/ui/shortcuts.ts 的 keyLabel)
+  if (!['时间', '地图', '世界', '播放 / 暂停', '撤销 / 重做'].every((w) => help.includes(w)) || !/Ctrl\+S|⌘S/.test(help) || playUnderHelp || !helpClosed)
     errs.push(`快捷键:? 一览不对,或开着时空格还在播放 / Esc 收不起(${help.slice(0, 60)};${playUnderHelp};${helpClosed})`);
   if (!saveMenu || savePrevented !== true) errs.push(`快捷键:Ctrl+S 没有打开存档菜单 / 没拦下浏览器的存网页(${saveMenu}、${savePrevented})`);
   if (!/民族\s*2/.test(tip)) errs.push(`快捷键:"民族"按钮的提示框没写键(${tip})`);
@@ -475,7 +476,7 @@ const toastText = (p: Page, id: string, timeout = 3000) =>
   if (!city) errs.push('快捷键:没找到能点的城');
   else if (named.join() !== 'true,false,true,true' || undo !== '已撤销改名' || redo !== '已重做改名')
     errs.push(`快捷键:改名后 Ctrl+Z / Ctrl+Shift+Z 不对(${named.join('/')};${undo};${redo})`);
-  if (!/收起侧栏\s*Ctrl\+\\/.test(tipSide)) errs.push(`快捷键:收起按钮的提示框没写键(${tipSide})`);
+  if (!/收起侧栏\s*(Ctrl\+|⌘)\\/.test(tipSide)) errs.push(`快捷键:收起按钮的提示框没写键(${tipSide})`);
   if (!fold1 || fold2) errs.push(`快捷键:Ctrl+\\ 没有收起 / 展开左边的卡片(${fold1}、${fold2})`);
   if (fold3 || !searchAfterFold) errs.push(`快捷键:卡片收起着按 / ,应先展开再跳进搜索框(${fold3}、${searchAfterFold})`);
   await page.evaluate(() => localStorage.clear());
@@ -4429,15 +4430,32 @@ for (const style of ['realistic', 'fantasy']) {
   let tiles = 0;
   let capsuleHidden = false;
   let ws1: Rect = null;
+  let gripTaps = 0;
+  let gripClicks = 0;
   if (wRow) {
     await swipe([[wRow.x + 60, wRow.y + wRow.height / 2]], [[wRow.x + 60, wRow.y + wRow.height / 2 - 420]]);
     await mp.waitForTimeout(500);
     wsFull = await box('.psheet.ps-full');
     tiles = await mp.locator('.ps-tiles > *').count();
     capsuleHidden = !(await mp.locator('.bottom-row').isVisible());
-    await mp.tap('.psheet .sheet-grip');
+    // 机器很忙时,浏览器偶尔会把模拟的一下轻点吞掉(按下、抬起都到了,却不出 click):没收到 click 就再点一次(最多三次);
+    // 收到了 click 卡片却没收起,才是拖动条的毛病
+    await mp.evaluate(() =>
+      window.addEventListener('click', (e) => (e.target as Element).closest?.('.psheet .sheet-grip') && ((window as any).__gripClicks = ((window as any).__gripClicks ?? 0) + 1), true),
+    );
+    const peeked = () => mp.locator('.psheet.ps-peek').waitFor({ timeout: 3000 }).then(() => true, () => false);
+    do {
+      gripTaps++;
+      await mp.tap('.psheet .sheet-grip');
+    } while (!(await peeked()) && !(await mp.evaluate(() => (window as any).__gripClicks)) && gripTaps < 3);
     await mp.waitForTimeout(500);
-    ws1 = await box('.psheet.ps-peek');
+    ws1 = await mp.locator('.psheet.ps-peek').boundingBox({ timeout: 1000 }).catch(() => null);
+    gripClicks = await mp.evaluate(() => (window as any).__gripClicks ?? 0);
+    // 没收起:用脚本收起,下面捏合、拖动照样查得了(不然手指都落在拉到顶的卡片上)
+    if (!ws1 && (await mp.locator('.psheet.ps-full').count())) {
+      await mp.locator('.psheet .sheet-grip').dispatchEvent('click');
+      await mp.waitForTimeout(500);
+    }
   }
   // 双指捏合:两指从中间往两边分开 → 放大;中点下的地方还在中点下
   const k0 = (await mp.evaluate(() => (window as any).__wfView)).k;
@@ -4594,7 +4612,7 @@ for (const style of ['realistic', 'fantasy']) {
   const nwBack = !(await mp.locator('.tp').count()) && (await mp.locator('.st-sheet [data-act=create-world]').isVisible().catch(() => false));
   console.log(
     `手机布局:胶囊 ${JSON.stringify(row)},轨道 ${JSON.stringify(track)};世界卡片 ${JSON.stringify(ws0)}「${sub}」;右上 ${btnActs} ${JSON.stringify(btns)};提示「${hint0}」;+ − ${zoomBtns} 个;` +
-      `上拖 → 拉到顶 ${JSON.stringify(wsFull)}、大按钮 ${tiles} 个、胶囊藏起 ${capsuleHidden};点拖动条 → 收起 ${JSON.stringify(ws1)};` +
+      `上拖 → 拉到顶 ${JSON.stringify(wsFull)}、大按钮 ${tiles} 个、胶囊藏起 ${capsuleHidden};点拖动条${gripTaps > 1 ? `(点了 ${gripTaps} 次)` : ''} → 收起 ${JSON.stringify(ws1)};` +
       `捏合 k ${k0.toFixed(2)} → ${k1.toFixed(2)}(中点下 ${mid0?.map((v: number) => v.toFixed(0))} → ${mid1?.map((v: number) => v.toFixed(0))});单指拖动 ${panned};点两下回正 k ${kReset.toFixed(2)};` +
       `点「${pol?.text}」→ 详情卡片 ${JSON.stringify(sheet0)}、胶囊 ${JSON.stringify(row1)}、国都圆环 ${JSON.stringify(ring)}、悬停卡片 ${hover};上拖 → 拉到顶 ${full} ${JSON.stringify(sheet1)}、胶囊藏起 ${fullCapsuleHidden};` +
       `干预页 ${cmds} 条;结盟提示「${pickToast}」、卡片藏起 ${hiddenWhilePicking};点「${tgtText}」→「${doneToast}」;撤销 →「${undoToast}」;` +
@@ -4609,7 +4627,7 @@ for (const style of ['realistic', 'fantasy']) {
   if (btnActs !== 'layers,mark,globe,assistant' || !btns || Math.abs(btns.x + btns.width - (VW - 12)) > 1 || btns.y > 20 || btns.height < 160)
     errs.push(`手机:右上不是竖排的图层、标记、地球、助手四个按钮(${btnActs} ${JSON.stringify(btns)})`);
   if (!wsFull || Math.abs(wsFull.y - 0.08 * VH) > 8 || tiles !== 4 || !capsuleHidden) errs.push(`手机:往上拖世界卡片没有拉到顶(${JSON.stringify(wsFull)},大按钮 ${tiles},胶囊藏起 ${capsuleHidden})`);
-  if (!ws1 || Math.abs(ws1.y - (VH - PEEK)) > 2) errs.push(`手机:点拖动条没有收起世界卡片(${JSON.stringify(ws1)})`);
+  if (!ws1 || Math.abs(ws1.y - (VH - PEEK)) > 2) errs.push(`手机:点拖动条没有收起世界卡片(${JSON.stringify(ws1)},点了 ${gripTaps} 次、收到 click ${gripClicks} 次)`);
   if (!hint0.includes('双指缩放') || hint1 !== 0) errs.push(`手机:操作提示不对 / 捏合后没消失(${hint0})`);
   if (zoomBtns) errs.push('手机:右下还有地球仪 / 缩放按钮');
   if (!(k1 > k0 * 1.6)) errs.push(`手机:双指捏合后地图比例没变(${k0} → ${k1})`);
@@ -4666,24 +4684,38 @@ for (const style of ['realistic', 'fantasy']) {
         view: `${v.k.toFixed(3)},${Math.round(v.x)},${Math.round(v.y)}`,
       };
     });
+  // 卡片滑走 / 滑回、时间轴挪位都有过渡动画,机器慢时开始得晚:等卡片到了该在的地方、动画都放完再读
+  // (最多等 5 秒;没到位照样往下走,由下面的检查报出来)
+  const settled = (shown: boolean) =>
+    sp
+      .waitForFunction(
+        (want) => {
+          const side = document.querySelector('aside.sidebar:not(.nw-card)');
+          if (!side || document.getAnimations().some((a) => a instanceof CSSTransition)) return false;
+          return (side.getBoundingClientRect().right > 0 && getComputedStyle(side).visibility === 'visible') === want;
+        },
+        shown,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
   const s0 = await state();
   await sp.click('[data-act=side-collapse]');
-  await sp.waitForTimeout(500);
+  await settled(false);
   const s1 = await state();
   // 收起时选中一个国家(和地图上点一样走 setSelection)
   await sp.evaluate(() => (window as any).__wfSelect('polity', 1));
-  await sp.waitForTimeout(800);
+  await settled(true);
   const s2 = await state();
   const ins = await sp.locator('.sidebar .inspector').count();
   await sp.keyboard.press('Escape');
-  await sp.waitForTimeout(500);
+  await settled(false);
   const s3 = await state();
   await sp.reload();
   await sp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
-  await sp.waitForTimeout(500);
+  await settled(false);
   const s4 = await state();
   await sp.click('[data-act=side-expand]');
-  await sp.waitForTimeout(500);
+  await settled(true);
   const s5 = await state();
   // 收起着进新建世界:新建界面左边的设定照常展开着;在新建里收起 → 滑走、左上角留小按钮;点小按钮展开
   await sp.click('[data-act=side-collapse]');
