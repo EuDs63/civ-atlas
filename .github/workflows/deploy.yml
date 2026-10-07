@@ -1,0 +1,76 @@
+name: 发布网站
+
+# 什么时候跑:
+# - main 上有代码改动(PR 合并进来)就构建并发布到 https://atlas.gerdor.top;只改文档(*.md)的不发
+# - 需要时可以在 Actions 页面手动跑一次(比如重发当前的 main)
+#
+# 要在仓库 Settings → Environments → site 里配好(只允许 main 用):
+# - DEPLOY_SSH_KEY:发布专用的 SSH 私钥。服务器上这把钥匙只能往网站目录传文件,不能登录、不能执行别的命令
+# - DEPLOY_KNOWN_HOSTS:服务器的 SSH 主机指纹(known_hosts 的一行),只连这台机器
+# - DEPLOY_DEST:rsync 的目标,形如 user@host:
+# - DEPLOY_PORT:服务器的 SSH 端口(可不配,默认 22);不是 22 时 DEPLOY_KNOWN_HOSTS 那一行要写成 [host]:端口 的形式
+# 以上是 Secrets。另有一个 Variable(不是密钥,构建后本来就写在网页里):
+# - VITE_AI_SERVER:账号服务器地址。不配 = 构建出的网站没有登录、云同步、短链接(见 src/account/server.ts)
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+# 同一时间只发一份;后合并的排队等前一份传完,不打断正在传的
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: 构建并发布
+    # 别人 fork 的仓库里不跑(也没有这些密钥)
+    if: github.repository == 'guaner-334/civ-atlas'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: site
+      url: https://atlas.gerdor.top
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 生产构建
+        env:
+          VITE_AI_SERVER: ${{ vars.VITE_AI_SERVER }}
+        run: pnpm build
+      - name: 准备 SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_DEST: ${{ secrets.DEPLOY_DEST }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ] || [ -z "$DEPLOY_DEST" ]; then
+            echo "没配发布用的密钥(见本文件开头),不发布" >&2
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      # 先传带哈希的文件(旧的不删,开着旧页面的人还能加载到),最后才换页面本身,避免有人拿到半新半旧的网页。
+      # 到服务器的 SSH 偶尔握手超时:每一步失败了重试几次(rsync 重跑是安全的)
+      - name: 上传
+        env:
+          DEPLOY_DEST: ${{ secrets.DEPLOY_DEST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          export RSYNC_RSH="ssh -p ${DEPLOY_PORT:-22} -i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=10"
+          retry() { local n; for n in 1 2 3 4; do "$@" && return 0; echo "第 $n 次失败,10 秒后重试" >&2; sleep 10; done; return 1; }
+          retry rsync -rltz --chmod=D755,F644 --exclude='/*.html' dist/ "$DEPLOY_DEST"
+          retry rsync -ltz --chmod=F644 dist/*.html "$DEPLOY_DEST"
+          echo "已发布 ${GITHUB_SHA::7} → https://atlas.gerdor.top" >> "$GITHUB_STEP_SUMMARY"

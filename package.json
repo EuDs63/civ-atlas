@@ -3,7 +3,7 @@
   "private": true,
   "license": "AGPL-3.0-only",
   "repository": "https://github.com/guaner-334/civ-atlas",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
