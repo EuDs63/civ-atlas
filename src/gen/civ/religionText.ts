@@ -109,8 +109,9 @@ export function faithEntries(civ: Civ): ChronicleEntry[] {
 
 const fullCache = new WeakMap<Civ, ChronicleEntry[]>();
 
-/** 史事 + 宗教大事(编年史、时间轴、最近大事、卡片里的大事用这一份;不含君主继位)。按 civ 缓存 */
+/** 史事 + 宗教大事(编年史、时间轴、最近大事、卡片里的大事用这一份;不含君主继位)。按 civ 缓存;地图在更早一段时按整段历史(Civ.history)算 */
 export function fullChronicle(civ: Civ): ChronicleEntry[] {
+  if (civ.history) return fullChronicle(civ.history);
   const hit = fullCache.get(civ);
   if (hit) return hit;
   const out = mergeChronicle(buildChronicle(civ), faithEntries(civ));

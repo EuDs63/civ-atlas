@@ -21,7 +21,7 @@
  */
 import type { Mesh } from './mesh';
 import type { Tectonics } from './tectonics';
-import type { TerrainKind, TerrainOp } from './edits';
+import type { TerrainKind, TerrainOp, Upheaval } from './edits';
 import { clamp, smoothstep, subSeed } from './util';
 import { geometryOf, type Geometry } from './geometry';
 
@@ -117,18 +117,72 @@ export function cleanTerrainOp(x: unknown): TerrainOp | null {
   return same ? (x as TerrainOp) : { kind, pts, r, s };
 }
 
-/** 清理一份地形修改列表(规则同 cleanTerrainOp;不合格的丢掉,最多 TERRAIN_MAX_OPS 处)。全都合格时返回原数组 */
-export function cleanTerrainOps(list: unknown): TerrainOp[] {
+/** 清理一份地形修改列表(规则同 cleanTerrainOp;不合格的丢掉,最多 max 处,默认 TERRAIN_MAX_OPS)。全都合格时返回原数组 */
+export function cleanTerrainOps(list: unknown, max = TERRAIN_MAX_OPS): TerrainOp[] {
   if (!Array.isArray(list)) return [];
   const out: TerrainOp[] = [];
-  let same = list.length <= TERRAIN_MAX_OPS;
+  let same = list.length <= max;
   for (const x of list as unknown[]) {
-    if (out.length >= TERRAIN_MAX_OPS) break;
+    if (out.length >= max) break;
     const v = cleanTerrainOp(x);
     if (v) out.push(v);
     if (v !== x) same = false;
   }
   return same ? (list as TerrainOp[]) : out;
+}
+
+// ---------------------------------------------------------------------------
+// 地形大事(格式见 edits.ts 文件头"地形大事")
+
+/** 地形大事用的三种修改:火山喷发、地震抬升、海水漫进来 */
+export const UPHEAVAL_KINDS: readonly TerrainKind[] = ['volcano', 'raise', 'sink'];
+/** 一个世界最多几件地形大事(每件要多生成一遍地形) */
+export const UPHEAVALS_MAX = 5;
+/** 一件地形大事最多几笔 */
+export const UPHEAVAL_OPS_MAX = 20;
+/** 地形大事的年份范围(推演到第 3000 年;第 0 年就有的,用改地形) */
+export const UPHEAVAL_YEARS: readonly [number, number] = [1, 2999];
+
+/** 清理一件地形大事:不是对象、年份不是有限数 = null;年份取整夹回 UPHEAVAL_YEARS;修改逐笔过 cleanTerrainOp,种类不在 UPHEAVAL_KINDS 里的丢掉;一笔不剩 = null。本来就合格的原样返回 */
+export function cleanUpheaval(x: unknown): Upheaval | null {
+  if (!x || typeof x !== 'object') return null;
+  const o = x as Record<string, unknown>;
+  const y0 = num(o.year);
+  if (y0 === null || !Array.isArray(o.ops)) return null;
+  const year = clamp(Math.floor(y0), UPHEAVAL_YEARS[0], UPHEAVAL_YEARS[1]);
+  const raw = o.ops as unknown[];
+  const ops: TerrainOp[] = [];
+  let same = year === o.year && Object.keys(o).length === 2 && raw.length <= UPHEAVAL_OPS_MAX;
+  for (const v of raw) {
+    if (ops.length >= UPHEAVAL_OPS_MAX) break;
+    const c = cleanTerrainOp(v);
+    if (c && UPHEAVAL_KINDS.includes(c.kind)) ops.push(c);
+    if (c !== v || (c && !UPHEAVAL_KINDS.includes(c.kind))) same = false;
+  }
+  if (!ops.length) return null;
+  return same ? (x as Upheaval) : { year, ops };
+}
+
+/** 清理一份地形大事列表(规则同 cleanUpheaval;不合格的丢掉,最多 UPHEAVALS_MAX 件)。全都合格时返回原数组 */
+export function cleanUpheavals(list: unknown): Upheaval[] {
+  if (!Array.isArray(list)) return [];
+  const out: Upheaval[] = [];
+  let same = list.length <= UPHEAVALS_MAX;
+  for (const x of list as unknown[]) {
+    if (out.length >= UPHEAVALS_MAX) break;
+    const v = cleanUpheaval(x);
+    if (v) out.push(v);
+    if (v !== x) same = false;
+  }
+  return same ? (list as Upheaval[]) : out;
+}
+
+/** 两份地形大事是不是一样(逐件比年份和修改) */
+export function sameUpheavals(a: readonly Upheaval[] | undefined, b: readonly Upheaval[] | undefined): boolean {
+  if (a === b) return true;
+  const x = a ?? [];
+  const y = b ?? [];
+  return x.length === y.length && x.every((u, i) => u.year === y[i].year && sameTerrain(u.ops, y[i].ops));
 }
 
 /** 两份地形修改是不是一样(逐处逐字段比) */

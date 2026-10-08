@@ -213,7 +213,7 @@ export type RestoreDirection = (p: Polity, fallen: Polity) => string | null;
  * 最后起历朝(按锚点地块编号小的先挑,见 dynastyNamer)。
  * places:城(位置锚、西幻的王朝名借王室根据地的城名)、州名(可不给)。
  */
-export function namePolities(seed: number, polities: Polity[], cultures: Culture[], places: DynastyPlaces, dir?: RestoreDirection): void {
+export function namePolities(seed: number, polities: Polity[], cultures: Culture[], places: DynastyPlaces, dir?: RestoreDirection, pinned?: ReadonlySet<string>): void {
   const namer = namerCache(subSeed(seed, 'civ-names-polity'));
   const S = places.settlements;
   const at = anchorsOf(polities, (p) => S[p.capital]?.cell ?? -1);
@@ -236,7 +236,8 @@ export function namePolities(seed: number, polities: Polity[], cultures: Culture
   for (const p of polities) {
     if (p.name || p.restores !== undefined) continue;
     const cu = cultures[p.culture];
-    if (cu && cu.name && !seen.has(cu.id)) {
+    // 地形大事钉住的国名(pinned)里已经有族名了:那个国家就是这一族最早立的国,后来的另起国名
+    if (cu && cu.name && !seen.has(cu.id) && !pinned?.has(cu.name)) {
       seen.add(cu.id);
       p.name = cu.name;
       claim(p.name);
@@ -409,18 +410,20 @@ function dynastyNamer(seed: number, { settlements, regionNames }: DynastyPlaces,
  * 阶段 3 城市兴衰:在被毁的城故址上重建的城(Settlement.rebuilds)放在最后起 —— 同族重建沿用旧名
  * (和旧城同名,是故城重建),换了民族另起新名;原有的城名不因为有没有重建而变
  */
-export function nameSettlements(seed: number, settlements: Settlement[], cultures: Culture[]): void {
+export function nameSettlements(seed: number, settlements: Settlement[], cultures: Culture[], pinned?: ReadonlyMap<number, string>): void {
   const namer = namerCache(subSeed(seed, 'civ-names-city'));
   const at = anchorsOf(settlements, (s) => s.cell);
-  const taken = new Set<string>();
+  // 地形大事:钉住的城名(见 types.ts 的 NamePins)先占上
+  const taken = new Set<string>(pinned?.values() ?? []);
   const fresh = (s: Settlement) => {
     s.name = firstFree(namer(cultures[s.culture]?.style || 'kingdom').keyed('city', at[s.id].cell, at[s.id].n), taken).zh;
     taken.add(s.name);
   };
-  const originals = settlements.filter((s) => s.rebuilds === undefined).map((s) => s.id);
+  if (pinned) for (const [id, x] of pinned) if (settlements[id]) settlements[id].name = x;
+  const originals = settlements.filter((s) => s.rebuilds === undefined && !pinned?.has(s.id)).map((s) => s.id);
   for (const id of byAnchor(at, originals)) fresh(settlements[id]);
   for (const s of settlements) {
-    if (s.rebuilds === undefined) continue;
+    if (s.rebuilds === undefined || pinned?.has(s.id)) continue;
     const old = settlements[s.rebuilds];
     if (old && old.culture === s.culture && old.name) s.name = old.name;
     else fresh(s);

@@ -155,18 +155,38 @@ interface SeaFields {
 /** SeaFields.dist 的精度:每格分成多少份 */
 export const DIST_Q = 4096;
 
-/** 当前这张地图的像素层(只留一份,换了世界就释放) */
-let base: { raster: Raster; canvas: AnyCanvas; patch: InkPatch; sea: SeaFields } | null = null;
+interface Base {
+  raster: Raster;
+  canvas: AnyCanvas;
+  patch: InkPatch;
+  sea: SeaFields;
+}
+/** 当前这张地图的像素层(fantasyBase 刚给出的那一份) */
+let base: Base | null = null;
+/**
+ * 同一个世界最近铺过的几张(地形大事前后各一张主图,来回拖时间轴不用重铺;最近的在前)。
+ * 换了世界(主图的地块索引不是同一份)就都释放
+ */
+let bases: Base[] = [];
+const BASES_KEEP = 2;
 
 /** 像素层:纸、水彩、海、海冰、海岸墨线、湖岸(不含符号、河流、图框) */
 export function fantasyBase(world: World, r: Raster): AnyCanvas {
   if (base?.raster === r) return base.canvas;
-  if (base) base.canvas.width = base.canvas.height = 0;
+  const hit = bases.find((b) => b.raster === r);
+  if (hit) {
+    base = hit;
+    bases = [hit, ...bases.filter((b) => b !== hit)];
+    return hit.canvas;
+  }
+  const keep = bases.filter((b) => b.raster.cell === r.cell).slice(0, BASES_KEEP - 1);
+  for (const b of bases) if (!keep.includes(b)) b.canvas.width = b.canvas.height = 0;
   const cv = makeCanvas(r.w, r.h);
   const patch: InkPatch = { coast: new PixelPatch(), lake: new PixelPatch(), sea: new PixelPatch(), iceW: new PixelPatch(), iceI: new PixelPatch() };
   const sea: SeaFields = { dist: new Uint16Array(r.w * r.h), fade: new Uint8Array(r.w * r.h) };
   paintBase(cv.getContext('2d') as CanvasRenderingContext2D, world, r, patch, sea);
   base = { raster: r, canvas: cv, patch, sea };
+  bases = [base, ...keep];
   return cv;
 }
 

@@ -1,11 +1,12 @@
 /**
  * 时间轴的轨道:1px 基线、每 100 年一格刻度(500、1000 年加长)、0 / 1000 / 2000 / 3000 年的字、
- * 事件菱形(颜色按事件类型)、干预的红线加"令"字、进度和播放头(按父元素的 CSS 变量 --p 画)。
+ * 事件菱形(颜色按事件类型)、干预的红线加"令"字、地形大事的红线加"变"字、进度和播放头(按父元素的 CSS 变量 --p 画)。
  * 怎么排、太密怎么合并见 timelineLayout.ts。
  *
- * - 拖动 / 点空处:时间轴跳到那一年(暂停)。点菱形或"令":和在编年史里点那一条一样(civView.ts 的 pickChronicleEntry:
+ * - 拖动 / 点空处:时间轴跳到那一年(暂停)。点菱形或"令""变":和在编年史里点那一条一样(civView.ts 的 pickChronicleEntry:
  *   跳到那一年、地图上闪出事发地、必要时平移地图)。
  * - 悬停菱形出提示(类型、年份、纪事);挤在一起合并成的菱形,提示里列出每一件,点哪一行就跳到哪一件。
+ *   单独一件地形大事的"变":提示是两行(第一行"1600 年 · 地形大事",第二行纪事)。
  *   手机上点一下同时弹出提示,约三秒后收起。
  * - 键盘:← → 前后 10 年(按住 Shift 100 年),Home / End 到头 / 到尾。
  * - 只在换世界 / 换筛选 / 轨道宽度变了时重排。
@@ -67,8 +68,10 @@ export const TimelineMarks = memo(function TimelineMarks({ entries, end, dock, y
     const stage = (track.closest('.stage') ?? document.body).getBoundingClientRect();
     const L = track.getBoundingClientRect();
     const r = el.getBoundingClientRect();
-    const left = Math.max(stage.left + 8, Math.min(stage.right - 8 - r.width, L.left + tip.x - r.width / 2));
-    const top = dock === 'top' ? bar.bottom + 6 : bar.top - 6 - r.height;
+    // 地形大事的小提示贴着「变」字:从它左边一点起,紧挨在它上面(顶部时在下面)
+    const mark = el.classList.contains('up-tip') ? track.querySelector('.up-mark.on')?.getBoundingClientRect() : undefined;
+    const left = Math.max(stage.left + 8, Math.min(stage.right - 8 - r.width, mark ? mark.left - 20 : L.left + tip.x - r.width / 2));
+    const top = mark ? (dock === 'top' ? mark.bottom + 10 : mark.top - 10 - r.height) : dock === 'top' ? bar.bottom + 6 : bar.top - 6 - r.height;
     el.style.left = `${left - L.left}px`;
     el.style.top = `${top - L.top}px`;
     el.style.visibility = 'visible';
@@ -184,6 +187,17 @@ export const TimelineMarks = memo(function TimelineMarks({ entries, end, dock, y
             <b>令</b>
           </i>
         ))}
+        {layout.shifts.map((d) => (
+          <i
+            key={`s${d.lead.id}`}
+            className={`tb-order up-mark${hot === d.lead ? ' on' : ''}${d.x > width - 18 ? ' end' : ''}`}
+            data-year={Math.floor(d.lead.year)}
+            data-n={d.items.length}
+            style={{ left: d.x }}
+          >
+            <b>变</b>
+          </i>
+        ))}
       </>
     ),
     [layout, hot, width],
@@ -212,7 +226,22 @@ export const TimelineMarks = memo(function TimelineMarks({ entries, end, dock, y
       <i className="tb-prog" />
       {marks}
       <i className="tb-head" />
-      {tip && (
+      {tip && tip.items.length === 1 && tip.lead.kind === 'upheaval' ? (
+        <div
+          ref={tipRef}
+          className="up-tip"
+          style={{ visibility: 'hidden' }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerEnter={keep}
+          onPointerLeave={() => !tip.pinned && hideSoon(220)}
+          onClick={() => pickChronicleEntry(tip.lead)}
+        >
+          <b>
+            {evYears(tip.lead)} · {evLabel(tip.lead)}
+          </b>
+          <small>{evText(tip.lead)}</small>
+        </div>
+      ) : tip && (
         <div
           ref={tipRef}
           className="tb-tip"

@@ -23,7 +23,7 @@
 import { Biome } from '../biomes';
 import type { World } from '../world';
 import { MinHeap } from '../util';
-import { AdjKind, Layer, type Checkpoint, type Civ, type CivParams, type Culture, type CultureKind, type Habitat, type Regions } from './types';
+import { AdjKind, Layer, type Checkpoint, type Civ, type CivParams, type Culture, type CultureKind, type Habitat, type NamePins, type Regions } from './types';
 import { BIOME_COST, MAJOR_RIVER } from './habitat';
 import { fpow, keyed, subSeed } from './rand';
 import { refCellArea, refSpacing } from './geo';
@@ -809,12 +809,23 @@ function assignColors(cultures: Culture[], nb: Set<number>[], base: number, seat
  * 配色、语感要和接壤的民族错开:阶段 3 有了同化与迁徙,接壤关系会变、有的民族会消亡,
  * 所以"接壤"取结束时和各检查点(每百年一份)的并集 —— 回放到哪一年,相邻的民族颜色都错得开
  */
-export function finishCultures(world: World, m: CultureModel, owner: Int16Array, history: readonly Checkpoint[] = []): void {
+export function finishCultures(world: World, m: CultureModel, owner: Int16Array, history: readonly Checkpoint[] = [], pins?: NamePins): void {
   const seed = world.params.seed;
   const reg = m.terrain.regions;
-  const nb = cultureNeighbors(reg, owner, m.cultures.length);
-  for (const cp of history) cultureNeighbors(reg, cp.culture, m.cultures.length).forEach((set, i) => set.forEach((o) => nb[i].add(o)));
-  assignColors(m.cultures, nb, subSeed(seed, 'civ-culture-color'), reg.seat);
-  assignStyles(m.cultures, nb, m.terrain, subSeed(seed, 'civ-culture-style'));
+  const pinned = pins?.cultures;
+  if (pinned) {
+    // 地形大事:民族的配色、语感照没有大事时的那份历史(见 NamePins)
+    m.cultures.forEach((cu, i) => {
+      cu.color = [...pinned[i].color] as [number, number, number];
+      cu.style = pinned[i].style;
+    });
+  } else {
+    const nb = cultureNeighbors(reg, owner, m.cultures.length);
+    for (const cp of history) cultureNeighbors(reg, cp.culture, m.cultures.length).forEach((set, i) => set.forEach((o) => nb[i].add(o)));
+    assignColors(m.cultures, nb, subSeed(seed, 'civ-culture-color'), reg.seat);
+    assignStyles(m.cultures, nb, m.terrain, subSeed(seed, 'civ-culture-style'));
+  }
   reg.name = nameCultures(seed, m.cultures, owner, reg.seat);
+  if (pinned) m.cultures.forEach((cu, i) => (cu.name = pinned[i].name));
+  if (pins) pins.regionNames.forEach((x, r) => x !== undefined && r < reg.count && (reg.name![r] = x));
 }

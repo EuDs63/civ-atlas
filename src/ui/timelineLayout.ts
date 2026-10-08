@@ -9,7 +9,7 @@
  *   称帝(升格、称帝、降格、合并)/ 同化(同化、迁徙、民族消亡)/ 宗教(创教、立国教、传入、教派分立、圣城易主)/ 干预(主色)。
  *   卡片上的类型名按一字标签细分("攻占""迁都"……)。
  * - 刻度:每条纪事一个小菱形(战争画在开战那年);挨得太近(DIAMOND_GAP 像素以内)合并成一个,
- *   颜色取其中分量最重的那一件,悬停列出每一件。干预单独一种"令"标记,不和菱形合并。
+ *   颜色取其中分量最重的那一件,悬停列出每一件。干预单独一种"令"标记、地形大事一种"变"标记,不和菱形合并。
  */
 import type { ChronicleEntry } from '../gen/civ/chronicle';
 import type { Civ } from '../gen/civ/types';
@@ -45,6 +45,7 @@ const KIND_TYPE: Readonly<Record<string, EvType>> = {
   vanish: 'assim',
   faith: 'faith',
   intervene: 'order',
+  upheaval: 'order',
 };
 
 /** 这条纪事归哪一类(不认识的种类算"改朝":蓝色,和普通链接一样不抢眼) */
@@ -89,6 +90,7 @@ const TAG_LABEL: Readonly<Record<string, string>> = {
 export function evLabel(e: Pick<ChronicleEntry, 'tag' | 'kind' | 'text'>): string {
   if (e.kind === 'rank' && e.text.includes('称帝')) return '称帝';
   if (e.kind === 'intervene') return '干预';
+  if (e.kind === 'upheaval') return '地形大事';
   return TAG_LABEL[e.tag] ?? '纪事';
 }
 
@@ -126,6 +128,7 @@ const KIND_WEIGHT: Readonly<Record<string, number>> = {
   sack: 1,
   faith: 2,
   intervene: 9,
+  upheaval: 9,
 };
 
 /** 一条纪事的分量(先看重要度,再看种类) */
@@ -199,13 +202,16 @@ export interface DiamondLayout {
   marks: Diamond[];
   /** 干预的"令"标记:挨得太近的并成一个,不和菱形合并 */
   orders: Diamond[];
+  /** 地形大事的"变"标记(和"令"一个样子,各自合并) */
+  shifts: Diamond[];
 }
 
 /** 排刻度:entries 按年份排好(buildChronicle / filterChronicle 的顺序);width = 刻度行的像素宽 */
 export function layoutDiamonds(entries: readonly ChronicleEntry[], end: number, width: number): DiamondLayout {
   const marks: Diamond[] = [];
   const orders: Diamond[] = [];
-  if (!(end > 0) || !(width > 0)) return { marks, orders };
+  const shifts: Diamond[] = [];
+  if (!(end > 0) || !(width > 0)) return { marks, orders, shifts };
   const at = (y: number) => (Math.min(end, Math.max(0, y)) / end) * width;
   let cur: { sum: number; items: ChronicleEntry[]; lead: ChronicleEntry } | null = null;
   const flush = () => {
@@ -214,10 +220,11 @@ export function layoutDiamonds(entries: readonly ChronicleEntry[], end: number, 
   };
   for (const e of entries) {
     const x = at(e.year);
-    if (e.kind === 'intervene') {
-      const last = orders[orders.length - 1];
+    if (e.kind === 'intervene' || e.kind === 'upheaval') {
+      const list = e.kind === 'intervene' ? orders : shifts;
+      const last = list[list.length - 1];
       if (last && x - last.x < ORDER_GAP) last.items.push(e);
-      else orders.push({ x, lead: e, items: [e] });
+      else list.push({ x, lead: e, items: [e] });
       continue;
     }
     // 和正在攒的这一团的中心(平均位置)挨得太近就并进去:各团中心之间至少隔 DIAMOND_GAP
@@ -231,17 +238,22 @@ export function layoutDiamonds(entries: readonly ChronicleEntry[], end: number, 
     }
   }
   flush();
-  return { marks, orders };
+  return { marks, orders, shifts };
 }
 
-/** 指针在刻度行的 x 处:先认"令"标记,再认最近的菱形;radius = 离多远以内算指到了(像素) */
+/**
+ * 指针在刻度行的 x 处:先认"令""变"标记(哪个近认哪个;一样近 = 同一年,"变"画在上面,认"变"),再认最近的菱形;
+ * radius = 离多远以内算指到了(像素)
+ */
 export function hitDiamonds(layout: DiamondLayout, x: number, radius = 6): Diamond | null {
   const near = (list: Diamond[]) => {
     let best: Diamond | null = null;
     for (const d of list) if (Math.abs(d.x - x) <= radius && (!best || Math.abs(d.x - x) < Math.abs(best.x - x))) best = d;
     return best;
   };
-  return near(layout.orders) ?? near(layout.marks);
+  const o = near(layout.orders);
+  const s = near(layout.shifts);
+  return (o && s ? (Math.abs(o.x - x) < Math.abs(s.x - x) ? o : s) : (s ?? o)) ?? near(layout.marks);
 }
 
 // ---------------------------------------------------------------------------

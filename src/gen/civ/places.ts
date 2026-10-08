@@ -1049,3 +1049,59 @@ function axisPath(ctx: Ctx, dist: Float32Array, a: number, ax: Axis, r: number, 
   const [l, rr] = chord(ctx, mc, dist, mx, my, false, margin, maxHalf);
   return pathOf(mc, [mx - l, my, mx + (rr - l) / 2, my, mx + rr, my]);
 }
+
+/**
+ * 地形大事之后重新找出来的地名(next),沿用大事之前同一处地方的名字(prev):同一类、锚点离得够近的算同一处
+ * (海、湖、岛、荒漠按大小,山、河按标注路径挨得多近),从最近的一对起配;配上的照用原名(连同语感、拉丁原形),
+ * 新冒出来的(新岛、新海湾)保留新起的名字,和原有的重名就在后面找一个没用过的。配上的稳定键沿用原来那一处的(Place.keyCell)。就地改 next。
+ */
+export function keepPlaceNames(world: World, prev: readonly Place[], next: Place[]): void {
+  const geo = geometryOf(world.mesh);
+  const { x, y } = world.mesh;
+  const anchor = (p: Place): [number, number] => {
+    if (p.cell !== undefined && p.cell >= 0) return [x[p.cell], y[p.cell]];
+    const n = p.path.length >> 1;
+    const m = n >> 1;
+    return [p.path[2 * m], p.path[2 * m + 1]];
+  };
+  const W = world.mesh.width;
+  const dist = (a: [number, number], b: [number, number]) => {
+    let dx = Math.abs(a[0] - b[0]);
+    if (dx > W / 2) dx = W - dx;
+    return Math.hypot(dx, a[1] - b[1]);
+  };
+  void geo;
+  const pairs: { d: number; i: number; j: number }[] = [];
+  next.forEach((q, j) => {
+    prev.forEach((p, i) => {
+      if (p.kind !== q.kind) return;
+      const d = dist(anchor(p), anchor(q));
+      const lim = q.kind === 'mountains' || q.kind === 'river' ? 40 : Math.max(20, 1.2 * Math.max(p.size ?? 0, q.size ?? 0));
+      if (d <= lim) pairs.push({ d, i, j });
+    });
+  });
+  pairs.sort((a, b) => a.d - b.d || a.i - b.i || a.j - b.j);
+  const usedP = new Set<number>();
+  const usedN = new Set<number>();
+  for (const { i, j } of pairs) {
+    if (usedP.has(i) || usedN.has(j)) continue;
+    usedP.add(i);
+    usedN.add(j);
+    const p = prev[i];
+    const q = next[j];
+    q.name = p.name;
+    q.culture = p.culture;
+    if (p.latin !== undefined) q.latin = p.latin;
+    else delete q.latin;
+    const kc = p.keyCell ?? p.cell;
+    if (kc !== undefined) q.keyCell = kc;
+  }
+  const taken = new Set(next.filter((_, j) => usedN.has(j)).map((q) => q.name));
+  next.forEach((q, j) => {
+    if (usedN.has(j)) return;
+    let name = q.name;
+    for (let k = 2; taken.has(name); k++) name = `${q.name}${k}`;
+    q.name = name;
+    taken.add(name);
+  });
+}

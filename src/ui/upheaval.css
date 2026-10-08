@@ -1,0 +1,213 @@
+/* 地形大事的卡片(UpheavalPanel.tsx;外框、年份、按钮沿用 countryPanel.css 的 .cp-*)和地图上那一层 */
+.up-head-ic {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-top: 2px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--btn);
+  color: var(--ink);
+}
+.cp-from .cp-from-row .cp-step {
+  flex: none;
+}
+/* 发生什么:三种大事一排、大小、一句怎么放 */
+.up-kinds {
+  margin: 0 14px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: 10px;
+  background: var(--btn);
+  flex: none;
+}
+.up-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--field);
+}
+.up-tile {
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: 13px var(--font-sans);
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.up-tile .icon {
+  color: var(--ink-2);
+}
+.up-tile.on {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  font-weight: 600;
+}
+.up-tile.on .icon {
+  color: var(--ink);
+}
+[data-theme='dark'] .up-tile.on {
+  background: rgba(255, 255, 255, 0.18);
+}
+.up-lbl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.up-lbl > b {
+  flex: none;
+  font-weight: 400;
+}
+/* 会怎么样:图例、几行后果、一句说明、放了几座 / 涂了几笔 */
+.up-sum {
+  margin: 0 14px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 10px;
+  background: var(--btn);
+  flex: none;
+}
+.up-sum .cp-form-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.up-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.up-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.up-sw {
+  width: 14px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.up-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.up-rows .k {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.up-rows .v b {
+  font-weight: 600;
+}
+.up-count {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.up-count span:first-child {
+  flex: 1;
+  color: var(--ink);
+}
+.up-count .lk {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.up-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  font-weight: 400;
+}
+/* 涂了却没有一块会变:橙色提醒 */
+.cp-note.up-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warn);
+}
+.up-warn .icon {
+  flex: none;
+  margin-top: 3px;
+}
+/* 手机:年份并进"发生什么"那一块 */
+.up-yr {
+  gap: 8px;
+}
+.up-yr .cp-k {
+  flex: none;
+  margin-right: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.up-yr .cp-year {
+  font-size: 18px;
+}
+
+/* 地图上那一层:世界坐标的 SVG,铺满地图框 */
+.up-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.up-pin {
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
+}
+.stage.up-on,
+.stage.up-on:active {
+  cursor: crosshair;
+}
+
+/* 时间轴上地形大事那一年的「变」字(和干预的「令」字同一个样子) */
+.tb-order.up-mark b {
+  padding: 0 3px;
+}
+.up-tip {
+  position: absolute;
+  z-index: 30;
+  padding: 8px 10px;
+  max-width: 300px;
+  border-radius: 10px;
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-panel);
+  font: 13px/1.5 var(--font-sans);
+  color: var(--ink);
+}
+.up-tip small {
+  display: block;
+  color: var(--ink-2);
+  font-size: 12px;
+}

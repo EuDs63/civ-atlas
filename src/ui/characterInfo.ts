@@ -16,7 +16,7 @@ import { polityName } from '../gen/civ/growth';
 import { rulerAt } from '../gen/civ/peopleInfo';
 import { personName, personRoleShort } from '../gen/civ/peopleText';
 import { ownersAt } from '../gen/civ/timeline';
-import { polityKey, regionKey, regionOfKey, resolveKey, settlementKey } from '../gen/edits';
+import { keyCells, polityKey, regionKey, regionOfKey, resolveKey, settlementKey } from '../gen/edits';
 import { characterAge, lifeInOrder, lifeStops, personKey, resolvePersonKey, sameWhere, stopAt, type AuthorCharacter, type Where } from '../gen/characters';
 import { MARK_HEX } from '../render/marks';
 import type { TrailInput } from '../render/trail';
@@ -106,7 +106,7 @@ export function placeOf(civ: Civ, world: World, raster: Raster | null, w: Where,
     return { kind: 'point', at: [w[0], w[1]], city: spot.city, region: spot.region, name: spotText(civ, spot) };
   }
   if (w.startsWith('region:')) {
-    const r = regionOfKey(w, civ.regions.of);
+    const r = regionOfKey(w, keyCells(civ.regions));
     if (!(r >= 0 && r < civ.regions.count)) return { kind: 'region', at: null, name: MISSING, missing: true };
     return { kind: 'region', at: regionCenter(world, civ, r), region: r, name: regionLabel(civ, r) };
   }

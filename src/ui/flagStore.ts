@@ -70,9 +70,15 @@ export function useFlagPreview(): FlagPreview | null {
   );
 }
 
-/** 算旗:作者改过的 + 正在预览的那一面 */
-export function makeFlagView(world: World, civ: Civ, flags: Readonly<Record<string, string>> | undefined, p: FlagPreview | null): FlagView {
+/** 算旗:作者改过的 + 正在预览的那一面。geo = 按哪份地形配(有地形大事时是第一件以前的那一份;不给 = world、civ) */
+export function makeFlagView(
+  world: World,
+  civ: Civ,
+  flags: Readonly<Record<string, string>> | undefined,
+  p: FlagPreview | null,
+  geo?: { world: World; civ: Civ },
+): FlagView {
   const ov = flagOverrides(flags);
   if (p) ov[p.key] = p.spec;
-  return { world, civ, book: flagBook(world, civ, ov) };
+  return { world, civ, book: flagBook(geo?.world ?? world, geo?.civ ?? civ, ov) };
 }

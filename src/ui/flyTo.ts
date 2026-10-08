@@ -9,7 +9,7 @@ import type { World } from '../gen/world';
 import type { Civ } from '../gen/civ/types';
 import { capitalAt } from '../gen/civ/growth';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
-import { faithKey, placeKeyOf, polityKey, regionKey, regionOfKey, settlementKey, type AuthorMark } from '../gen/edits';
+import { faithKey, keyCells, placeKeyOf, polityKey, regionKey, regionOfKey, settlementKey, type AuthorMark } from '../gen/edits';
 import { personKey, resolvePersonKey } from '../gen/characters';
 import { projectWorld, projectWorldNear, type MapProj } from '../render/projection';
 import { clampCurved, clampSphere, stageToWorld, type MapView, type StageBox } from './mapWrap';
@@ -168,7 +168,7 @@ export function markFocus(world: World, civ: Civ, m: Pick<AuthorMark, 'at' | 're
   const R = civ.regions;
   const ids: number[] = [];
   for (const k of m.regions ?? []) {
-    const r = regionOfKey(k, R.of);
+    const r = regionOfKey(k, keyCells(R));
     if (r >= 0 && r < R.count) ids.push(r);
   }
   if (!ids.length) return null;

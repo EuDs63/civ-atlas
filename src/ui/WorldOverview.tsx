@@ -85,7 +85,8 @@ export function WorldOverview(p: WorldOverviewProps) {
   }, [open]);
 
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
-  const nIv = edits.interventions.length;
+  // 干预和地形大事一起数(同一页列在一起)
+  const nIv = edits.interventions.length + (edits.upheavals?.length ?? 0);
   return (
     <div className="ov-root" hidden={!open}>
       <div className="ov-scrim" onClick={closeOverview} />
@@ -152,7 +153,7 @@ function OverviewPage(p: WorldOverviewProps & { tab: OverviewTab }) {
     case 'marks':
       return <MarksPage civ={p.civ} data={p.data} />;
     case 'interventions':
-      return <InterventionsPage civ={p.civ} busy={p.resimBusy} />;
+      return <InterventionsPage civ={p.civ} world={p.data?.world ?? null} busy={p.resimBusy} />;
     case 'genesis':
       return (
         <SettingsPage
@@ -172,7 +173,7 @@ function OverviewPage(p: WorldOverviewProps & { tab: OverviewTab }) {
   }
 }
 
-/** 头部左边:世界名、种子 · 当前年份 · 干预数;汇总数字(跟着时间轴当前年份) */
+/** 头部左边:世界名、种子 · 当前年份 · 干预数(连地形大事);汇总数字(跟着时间轴当前年份) */
 function OverviewSummary({ civ, seed }: { civ: Civ | null; seed: number | null }) {
   useSavesVersion();
   const edits = useEdits();
@@ -180,7 +181,7 @@ function OverviewSummary({ civ, seed }: { civ: Civ | null; seed: number | null }
   const cur = currentWorld();
   const title = cur?.title;
   const [naming, setNaming] = useState(false);
-  const n = edits.interventions.length;
+  const n = edits.interventions.length + (edits.upheavals?.length ?? 0);
   const stats = useMemo(() => {
     if (!civ || !civ.viable) return null;
     let alive = 0;

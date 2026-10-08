@@ -29,6 +29,8 @@
  * - edits.sketch(可选):地形草图(edits.ts 文件头"地形草图"),`{ "rest": "auto", "strokes": [{ "kind": "land", "r": 32, "pts": [700, 300, 760, 310] }] }`,
  *   导入过图片的多一个 `"image": { "name": "地图.jpg", "cells": "<认出来的格子图>" }`;
  *   没画时不写这个字段。读档时过 cleanSketch,格式不对的笔画、图片跳过。check 同样是照草图生成以后的地形哈希
+ * - edits.upheavals(可选):地形大事(edits.ts 文件头"地形大事"),`[{ "year": 1600, "ops": [{ "kind": "sink", "pts": [1856, 574, 1936, 584], "r": 40, "s": 1.1 }] }]`;
+ *   没有时不写这个字段。读档时过 cleanUpheaval,格式不对的跳过。check 只核对原来的地形(大事之后的地形由它和大事一起定)
  * - edits.marks(可选):作者标记(edits.ts 文件头"作者标记"),`[{ "id": 1, "title": "主角的故乡", "color": "red", "from": 2490, "at": [1852.4, 512] }]`;
  *   没有标记时不写这个字段。读档时过 cleanMarks,格式不对的跳过
  * - edits.characters(可选):作者的人物(characters.ts),`[{ "id": 1, "name": "林小满", "color": "red", "born": 2490, "died": 2561,
@@ -44,8 +46,8 @@
  * 纯计算,不碰 DOM(Node 里可测)。
  */
 import { DEFAULT_PARAMS, type World, type WorldParams } from './world';
-import { GENERATOR_CHANGES, GENERATOR_VERSION, MARKS_MAX, MARK_REGIONS_TOTAL, NAME_MAX, aiNameKeys, cleanMark, freeMarkId, type AiNameMark, type AuthorMark, type GeneratorChange, type Intervention, type TerrainOp, type WorldEdits } from './edits';
-import { TERRAIN_MAX_OPS, cleanTerrainOp } from './terrainEdits';
+import { GENERATOR_CHANGES, GENERATOR_VERSION, MARKS_MAX, MARK_REGIONS_TOTAL, NAME_MAX, aiNameKeys, cleanMark, freeMarkId, type AiNameMark, type AuthorMark, type GeneratorChange, type Intervention, type TerrainOp, type Upheaval, type WorldEdits } from './edits';
+import { TERRAIN_MAX_OPS, UPHEAVALS_MAX, UPHEAVAL_KINDS, UPHEAVAL_OPS_MAX, cleanTerrainOp, cleanUpheaval } from './terrainEdits';
 import { SKETCH_MAX_STROKES, cleanSketch, cleanSketchStroke, type SketchEdit } from './sketch';
 import { decodeFlag } from './civ/flags';
 import { CHARACTERS_MAX, cleanCharacters, type AuthorCharacter } from './characters';
@@ -264,13 +266,14 @@ export function worldKey(params: WorldParams): string {
   return PARAM_KEYS.map((k) => `${k}=${params[k] ?? DEFAULT_PARAMS[k]}`).join('&');
 }
 
-/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 草图(画了算一处)+ 作者标记个数 + 改过的旗面数 + 作者的人物个数 */
+/** 改了几处:改名条数 + 干预条数 + 地形修改处数 + 草图(画了算一处)+ 地形大事件数 + 作者标记个数 + 改过的旗面数 + 作者的人物个数 */
 export function editCount(edits: WorldEdits): number {
   return (
     Object.keys(edits.names).length +
     edits.interventions.length +
     (edits.terrain?.length ?? 0) +
     (edits.sketch ? 1 : 0) +
+    (edits.upheavals?.length ?? 0) +
     (edits.marks?.length ?? 0) +
     Object.keys(edits.flags ?? {}).length +
     (edits.characters?.length ?? 0)
@@ -325,6 +328,8 @@ export function makeSave(
       ...(image ? { image: { ...image } } : {}),
     };
   }
+  // 地形大事:有才写
+  if (edits.upheavals?.length) save.edits.upheavals = edits.upheavals.map((u) => ({ year: u.year, ops: u.ops.map((x) => ({ ...x, pts: x.pts.slice() })) }));
   // 作者标记:有才写
   if (edits.marks?.length) save.edits.marks = edits.marks.map(copyMark);
   if (edits.flags && Object.keys(edits.flags).length) save.edits.flags = { ...edits.flags };
@@ -477,6 +482,34 @@ export function parseSave(text: string): ParseResult {
       if ((E.sketch as Record<string, unknown>).image !== undefined && !sketch?.image) warnings.push('草图里导入的图片格式不对,已跳过');
     }
   }
+  // 地形大事:逐件清理,认不出的跳过;最多 UPHEAVALS_MAX 件、每件 UPHEAVAL_OPS_MAX 笔;旧存档没有 = 没有
+  const upheavals: Upheaval[] = [];
+  let droppedU = 0;
+  let overU = 0;
+  let droppedUOps = 0;
+  let overUOps = 0;
+  if (Array.isArray(E.upheavals)) {
+    for (const x of E.upheavals) {
+      const v = cleanUpheaval(x);
+      if (!v) droppedU++;
+      else if (upheavals.length >= UPHEAVALS_MAX) overU++;
+      else {
+        upheavals.push(v);
+        // 读进来了、但丢了几笔的:格式不对的、超过笔数上限的
+        const raw = (x as { ops: unknown[] }).ops;
+        const bad = raw.filter((o) => {
+          const c = cleanTerrainOp(o);
+          return !c || !UPHEAVAL_KINDS.includes(c.kind);
+        }).length;
+        droppedUOps += bad;
+        overUOps += raw.length - bad - v.ops.length;
+      }
+    }
+  } else if (E.upheavals !== undefined) droppedU++;
+  if (droppedU) warnings.push(`有 ${droppedU} 件地形大事格式不对,已跳过`);
+  if (overU) warnings.push(`地形大事最多 ${UPHEAVALS_MAX} 件,多出来的 ${overU} 件没有读进来`);
+  if (droppedUOps) warnings.push(`地形大事里有 ${droppedUOps} 笔格式不对,已跳过`);
+  if (overUOps) warnings.push(`地形大事每件最多 ${UPHEAVAL_OPS_MAX} 笔,多出来的 ${overUOps} 笔没有读进来`);
   // 作者标记:逐个清理,认不出的跳过;编号重复的换一个新编号;最多留 MARKS_MAX 个、一共圈 MARK_REGIONS_TOTAL 个州;旧存档没有 = 没有标记
   const marks: AuthorMark[] = [];
   let droppedM = 0;
@@ -532,6 +565,7 @@ export function parseSave(text: string): ParseResult {
       interventions,
       terrain,
       ...(sketch ? { sketch } : {}),
+      ...(upheavals.length ? { upheavals } : {}),
       ...(marks.length ? { marks } : {}),
       ...(Object.keys(flags).length ? { flags } : {}),
       ...(characters.length ? { characters } : {}),

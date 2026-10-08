@@ -32,7 +32,7 @@ import { Biome } from '../biomes';
 import type { World } from '../world';
 import { MinHeap } from '../util';
 import { geometryOf } from '../geometry';
-import { AdjKind, Layer, type Civ, type Culture, type Polity, type PolityLineage, type Regions, type Settlement, type Year } from './types';
+import { AdjKind, Layer, type Civ, type Culture, type NamePins, type Polity, type PolityLineage, type Regions, type Settlement, type Year } from './types';
 import { BIOME_COST } from './habitat';
 import { anchorTag, fexp, fpow, keyed, subSeed } from './rand';
 import { quantize, Ev, type CivSim } from './sim';
@@ -989,10 +989,17 @@ const PARENT_COLOR_W = 0.6;
  * 配色:按编号依次挑,和接壤国家色差越大越好(和原国更要错开);同一时期的国家尽量不重复
  * (早已灭亡的国家的颜色可以再用:阶段 3 分分合合,先后立过的国家比色板里的颜色多)
  */
-function assignPolityColors(polities: Polity[], nb: Set<number>[], base: number, tags: readonly number[]) {
+function assignPolityColors(polities: Polity[], nb: Set<number>[], base: number, tags: readonly number[], pins?: NamePins['polities']) {
   const used = new Uint8Array(POLITY_PALETTE.length);
   const paletteOf: number[] = [];
   for (const p of polities) {
+    // 地形大事:钉住的配色照用(见 NamePins)
+    const pc = pins?.get(p.id)?.color;
+    if (pc) {
+      paletteOf.push(Math.max(0, POLITY_PALETTE.findIndex((c) => c[0] === pc[0] && c[1] === pc[1] && c[2] === pc[2])));
+      p.color = [...pc] as [number, number, number];
+      continue;
+    }
     // 立国时还在世的国家用过的颜色(编号在前的国家立国不晚于它)
     used.fill(0);
     for (let q = 0; q < p.id; q++) {
@@ -1018,15 +1025,23 @@ function assignPolityColors(polities: Polity[], nb: Set<number>[], base: number,
 }
 
 /** 推演结束后:配色、国名词根、城名 */
-export function finishPolities(world: World, m: PolityModel, owner: Int16Array): void {
+export function finishPolities(world: World, m: PolityModel, owner: Int16Array, pins?: NamePins): void {
   const seed = world.params.seed;
   // 配色看"历史上接壤过的国家"(推演中逐次记下的,见 met)+ 结束时的邻国:灭亡、易手之后,回放到哪一年邻国颜色都错得开
   const nb = cultureNeighbors(m.terrain.regions, owner, m.polities.length);
   m.met.forEach((set, i) => set.forEach((o) => nb[i].add(o)));
-  assignPolityColors(m.polities, nb, subSeed(seed, 'civ-polity-color'), m.ptag);
+  assignPolityColors(m.polities, nb, subSeed(seed, 'civ-polity-color'), m.ptag, pins?.polities);
   // 城名先起:西幻的王朝名借王室根据地的城名(阶段 3 王朝更替)。城名、国名各用各的种子,先后不影响结果
-  nameSettlements(seed, m.settlements, m.cultures);
-  namePolities(seed, m.polities, m.cultures, { settlements: m.settlements, regionNames: m.terrain.regions.name }, restoreDirection(world, m));
+  nameSettlements(seed, m.settlements, m.cultures, pins?.settlements);
+  // 地形大事:钉住的国名先占上(和干预"立国"时作者起的国名一样不另起),朝名起完再照钉住的改回去
+  if (pins) for (const [id, v] of pins.polities) if (v.name && m.polities[id]) m.polities[id].name = v.name;
+  const pinned = pins ? new Set([...pins.polities.values()].map((v) => v.name ?? '')) : undefined;
+  namePolities(seed, m.polities, m.cultures, { settlements: m.settlements, regionNames: m.terrain.regions.name }, restoreDirection(world, m), pinned);
+  if (pins)
+    for (const [id, v] of pins.polities) {
+      const ds = m.polities[id]?.dynasties;
+      if (ds) v.dynasties.forEach((x, i) => x !== undefined && ds[i] && (ds[i].name = x));
+    }
 }
 
 /** 复国的新国都离故国最后的国都超过这么多个州的间距,国名按方向加前缀("南昌"),否则算在故地复国("后昌") */

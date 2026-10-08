@@ -17,7 +17,7 @@ import { AdjKind, type Civ, type Polity } from '../gen/civ/types';
 import { polityAlive, polityName } from '../gen/civ/growth';
 import { regionLabel } from '../gen/civ/display';
 import { ownersAt, type Owners } from '../gen/civ/timeline';
-import { cleanIntervention, polityKey, regionKey, regionOfKey, resolveKey, type Intervention } from '../gen/edits';
+import { cleanIntervention, keyCells, polityKey, regionKey, regionOfKey, resolveKey, type Intervention } from '../gen/edits';
 import { removeIntervention } from './editsStore';
 
 // ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ const keyName = (civ: Civ, key: string, year: number): string => {
 };
 
 const regionKeyName = (civ: Civ, key: string): string => {
-  const r = regionOfKey(key, civ.regions.of);
+  const r = regionOfKey(key, keyCells(civ.regions));
   return r >= 0 && r < civ.regions.count ? regionLabel(civ, r) : '(没有的州)';
 };
 

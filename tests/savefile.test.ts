@@ -712,6 +712,10 @@ describe('浏览器存储(saveStore)', () => {
       busy = false;
       await wait();
       expect(saveStore.loadWorld(id)?.thumb).toBe('data:image/jpeg;base64,T2');
+      // 加了一件地形大事(结束那一年的地形跟着变):同样重截
+      setEdits({ ...getEdits(), upheavals: [{ year: 1600, ops: [{ kind: 'volcano', pts: [100, 100], r: 28, s: 1 }] }] });
+      await wait();
+      expect(saveStore.loadWorld(id)?.thumb).toBe('data:image/jpeg;base64,T3');
     } finally {
       saveStore.setThumbMaker(null);
     }

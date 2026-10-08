@@ -20,7 +20,7 @@ import { mulberry32, subSeed, clamp, keyed, smoothstep } from './util';
 import { geometryOf, sphereSpacing } from './geometry';
 import type { TerrainOp } from './edits';
 import { computeCurrents, type Currents } from './currents';
-import { applyTerrainTectonics, carveLakes, carveRivers, cleanTerrainOps, volcanoPeaks } from './terrainEdits';
+import { TERRAIN_MAX_OPS, UPHEAVALS_MAX, UPHEAVAL_OPS_MAX, applyTerrainTectonics, carveLakes, carveRivers, cleanTerrainOps, volcanoPeaks } from './terrainEdits';
 import { sketchUsed, type Sketch } from './sketch';
 
 /**
@@ -108,7 +108,8 @@ export type Progress = (stage: string, pct: number) => void;
 /** terrain:作者的地形修改(WorldEdits.terrain,按先后;不给 / 空 = 不改);sketch:草图涂成的格子图(不给 / null = 没画) */
 export function generateWorld(params: WorldParams, progress: Progress = () => {}, terrain?: readonly TerrainOp[], sketch?: Sketch | null): World {
   const p = { ...DEFAULT_PARAMS, ...params };
-  const ops = cleanTerrainOps(terrain ?? []);
+  // 地形修改 + 地形大事(upheaval.ts 生成大事以后的世界时接在后面)
+  const ops = cleanTerrainOps(terrain ?? [], TERRAIN_MAX_OPS + UPHEAVALS_MAX * UPHEAVAL_OPS_MAX);
   const W = MAP_W;
   const H = MAP_H;
   const climateP: ClimateParams = {

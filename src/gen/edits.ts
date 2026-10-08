@@ -96,6 +96,21 @@
  * 折线的第一个点 x 在 [0, 2048) 里,之后每个点按离上一个点近的那边写(跨 180° 经线的一笔 x 可以超出 [0, 2048),是连着的一笔)。
  * 读进来的列表先过 terrainEdits.ts 的 cleanTerrainOps(种类不认识、坐标不是数的丢掉;x 按上面的规则规整,y、大小、强度夹回范围内)。
  *
+ * ## 地形大事
+ *
+ * WorldEdits.upheavals(可选,没有 = 一件也没有):世界建好以后,作者选一年让它发生的地形变化(火山喷发、地震抬升、海水漫进来)。
+ * 和"地形修改"不同,地形修改是星球本来的样子(从第 0 年起就那样),地形大事是半路发生的:**那一年以前的历史和没有它时逐字节一致**,
+ * 之后按新地形接着推(gen/civ/upheaval.ts)。第 k 件大事之后的地形 = 原来的地形修改 + 前 k 件大事的修改,从头生成(和改地形一样)。
+ * 没有地形大事时生成结果和不加这一项一模一样(逐字节)。
+ *
+ * | 字段 | 意思                                                                                                 |
+ * |------|------------------------------------------------------------------------------------------------------|
+ * | year | 哪一年(整数,UPHEAVAL_YEARS 之间);那一年的年初发生,同一刻里先于别的一切事件(比干预还早)           |
+ * | ops  | 这件大事里的地形修改(格式同上面"地形修改",按先后;只用 `volcano` 火山喷发、`raise` 地震抬升、`sink` 海水漫进来) |
+ *
+ * 同一年的几件按列表先后合成一件。读进来的列表先过 terrainEdits.ts 的 cleanUpheavals(年份不是数、一笔也不剩的丢掉;
+ * 年份取整夹回范围内;最多 UPHEAVALS_MAX 件,每件最多 UPHEAVAL_OPS_MAX 笔)。
+ *
  * ## 地形草图
  *
  * WorldEdits.sketch(可选,没有 = 没画):新建世界时「编辑地形」涂的草图 —— 程序照着它在板块上长出大陆、山脉(sketch.ts、
@@ -155,7 +170,7 @@
  *   9:君主有了世系(谁是谁的父亲,civ/lineage.ts),补上没即位的宗室;疆域、兴亡、君主和将领都和 8 一样,
  *      只是继位时年纪对不上的"其弟 / 其兄"改成了"其侄 / 叔父"这类(每个世界几十句)。
  */
-import type { Civ, Culture, Faith, Place, Polity, Settlement } from './civ/types';
+import type { Civ, Culture, Faith, Place, Polity, Regions, Settlement } from './civ/types';
 import type { AuthorCharacter } from './characters';
 import { polityRootAt } from './civ/growth';
 import { TERRAIN_H, TERRAIN_W } from './terrainEdits';
@@ -215,6 +230,14 @@ export interface TerrainOp {
   s: number;
 }
 
+/** 一件地形大事(字段见文件头"地形大事") */
+export interface Upheaval {
+  /** 哪一年 */
+  year: number;
+  /** 这件大事里的地形修改(按先后) */
+  ops: TerrainOp[];
+}
+
 export interface WorldEdits {
   /** 改名:稳定键 → 新名字 */
   names: Record<string, string>;
@@ -226,6 +249,8 @@ export interface WorldEdits {
   terrain: TerrainOp[];
   /** 地形草图(见文件头"地形草图");没有 = 没画 */
   sketch?: SketchEdit;
+  /** 地形大事(按添加的先后;见文件头"地形大事");没有 = 一件也没有 */
+  upheavals?: Upheaval[];
   /** 作者标记(按添加的先后;见文件头"作者标记");没有 = 一个也没有 */
   marks?: AuthorMark[];
   /** 改过的国旗:稳定键 → 旗的写法(见文件头"改旗");没有 = 一面也没改 */
@@ -317,7 +342,7 @@ function keyIndex(civ: Civ): KeyIndex {
   let ix = indexCache.get(civ);
   if (ix) return ix;
   const S = civ.settlements;
-  const seat = civ.regions.seat;
+  const seat = keySeats(civ.regions);
   /** 州 → 键里的位置锚:治所地块(`c4567`);没有这州(不该发生)按州号 */
   const at = (r: number) => (r >= 0 && r < seat.length ? `c${seat[r]}` : `r${r}`);
   const byRegion = new Map<string, number>();
@@ -333,7 +358,10 @@ function keyIndex(civ: Civ): KeyIndex {
   const settlement = build('settlement', S, (s) => s.region, (a, b) => a.founded - b.founded);
   const culture = build('culture', civ.cultures, (c) => c.hearth, (a, b) => a.born - b.born);
   const faith = build('faith', civ.religion?.faiths ?? [], (f) => faithRegion(civ, f), (a, b) => (a.founded ?? -1) - (b.founded ?? -1));
-  const placeAt = (p: Place, i: number) => `place:${p.kind}@${p.cell !== undefined ? `c${p.cell}` : `i${i}`}`;
+  const placeAt = (p: Place, i: number) => {
+    const c = p.keyCell ?? p.cell;
+    return `place:${p.kind}@${c !== undefined ? `c${c}` : `i${i}`}`;
+  };
   const pn = counted(civ.places, placeAt, () => 0);
   const place = civ.places.map((p, i) => `${placeAt(p, i)}#${pn[i]}`);
   const places = new Map<string, number>();
@@ -356,7 +384,8 @@ export function settlementKey(civ: Civ, id: number): string {
  * 或者没有锚点地块的,要用 placeKeyOf(civ, 下标) 才能分清;这里按"第 0 个"算
  */
 export function placeKey(place: Place): string {
-  return `place:${place.kind}@${place.cell !== undefined ? `c${place.cell}` : 'i0'}#0`;
+  const c = place.keyCell ?? place.cell;
+  return `place:${place.kind}@${c !== undefined ? `c${c}` : 'i0'}#0`;
 }
 
 /** 地理实体的键(按 civ.places 的下标;能分清同种类同锚点的几个) */
@@ -385,9 +414,16 @@ export function dynastyKey(civ: Civ, polity: number, index: number): string {
 
 /** 州的键:`region:c{治所地块}`(改地形、州重新划分以后,指"现在包含这块地的那一州") */
 export function regionKey(civ: Civ, region: number): string {
-  const seat = civ.regions.seat;
+  const seat = keySeats(civ.regions);
   return region >= 0 && region < seat.length ? `region:c${seat[region]}` : `region:r${region}`;
 }
+
+/**
+ * 稳定键按哪份"地块 → 州"、"州 → 治所"定位:平常就是州的划分本身;地形大事以后用每块地、每州最早的样子
+ * (Regions.keyOf / keySeat:沉进海里的地方、换过的治所照样指回同一州,大事前后各段的键一样)
+ */
+export const keyCells = (r: Pick<Regions, 'of' | 'keyOf'>): ArrayLike<number> => r.keyOf ?? r.of;
+export const keySeats = (r: Pick<Regions, 'seat' | 'keySeat'>): ArrayLike<number> => r.keySeat ?? r.seat;
 
 /** 州的位置锚:`r123`(旧格式,州号)/ `c4567`(地块)→ 现在的州号;地块在水上、超出范围 = −1(州号不查州数) */
 function regionOfRef(ref: string, of: ArrayLike<number>): number {
@@ -425,7 +461,7 @@ export function resolveKey(civ: Civ, key: string): ResolvedKey | null {
   if (typeof key !== 'string') return null;
   const ix = keyIndex(civ);
   if (key.startsWith('region:')) {
-    const id = regionOfKey(key, civ.regions.of);
+    const id = regionOfKey(key, keyCells(civ.regions));
     return id >= 0 && id < civ.regions.count ? { kind: 'region', id } : null;
   }
   if (key.startsWith('place:')) {
@@ -440,7 +476,7 @@ export function resolveKey(civ: Civ, key: string): ResolvedKey | null {
     if (!p || p.kind !== 'polity' || !Number.isInteger(index) || index < 0 || !civ.polities[p.id].dynasties?.[index]) return null;
     return { kind: 'dynasty', id: p.id, index };
   }
-  const k = keyByRegion(key, civ.regions.of);
+  const k = keyByRegion(key, keyCells(civ.regions));
   const id = k === null ? undefined : ix.byRegion.get(k);
   return id !== undefined ? { kind: key.slice(0, key.indexOf(':')) as CountedKind, id } : null;
 }

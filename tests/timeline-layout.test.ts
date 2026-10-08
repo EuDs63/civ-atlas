@@ -113,8 +113,8 @@ describe('刻度排布', () => {
   });
 
   it('宽度 / 结束年份无效:什么都不画', () => {
-    expect(layoutDiamonds([entry(10, 'found')], 3000, 0)).toEqual({ marks: [], orders: [] });
-    expect(layoutDiamonds([entry(10, 'found')], 0, 300)).toEqual({ marks: [], orders: [] });
+    expect(layoutDiamonds([entry(10, 'found')], 3000, 0)).toEqual({ marks: [], orders: [], shifts: [] });
+    expect(layoutDiamonds([entry(10, 'found')], 0, 300)).toEqual({ marks: [], orders: [], shifts: [] });
   });
 
   it('干预单独画成"令":不和菱形合并,挨近的几条并成一个;指到时优先认它', () => {
@@ -128,6 +128,20 @@ describe('刻度排布', () => {
     expect(hitDiamonds(L, 100.2)?.lead.kind).toBe('intervene');
     expect(hitDiamonds(L, 88)?.lead.kind).toBe('found');
     expect(hitDiamonds(L, 150)).toBeNull();
+  });
+
+  it('地形大事单独画成"变":不和"令"、菱形合并;指到时认得出', () => {
+    const es = [entry(1600, 'upheaval'), entry(1602, 'intervene'), entry(1601, 'found')];
+    es.sort((a, b) => a.year - b.year);
+    const L = layoutDiamonds(es, 3000, 300);
+    expect(L.shifts.map((d) => d.lead.kind)).toEqual(['upheaval']);
+    expect(L.orders.map((d) => d.lead.kind)).toEqual(['intervene']);
+    expect(L.marks.flatMap((d) => d.items).map((e) => e.kind)).toEqual(['found']);
+    expect(hitDiamonds(L, 160.2, 0.1)?.lead.kind).toBe('intervene');
+    expect(hitDiamonds(L, 160, 0.1)?.lead.kind).toBe('upheaval');
+    // 同一年的"令"和"变"叠在一处:"变"画在上面,认"变"
+    const same = layoutDiamonds([entry(1600, 'intervene'), entry(1600, 'upheaval')], 3000, 300);
+    expect(hitDiamonds(same, 160)?.lead.kind).toBe('upheaval');
   });
 });
 

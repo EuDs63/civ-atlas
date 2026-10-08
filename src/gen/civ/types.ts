@@ -57,6 +57,13 @@ export interface Regions {
   adjBorder: Float32Array;
   /** 州名(按占据它的民族的语感起名;没人住的州为空串,界面上显示"第 N 州") */
   name?: string[];
+  /**
+   * 地形大事以后(regions.ts 的 reshapeRegions)才有:稳定键(gen/edits.ts 文件头"稳定键")按它定位,大事前后指同一个州。
+   * keyOf:地块 → 州,这块地最早属于的那一州(后来沉进海里的也算);keySeat:州 → 治所地块,这州最早时的治所。
+   * 没有 = 和 of、seat 一样
+   */
+  keyOf?: Int32Array;
+  keySeat?: Int32Array;
 }
 
 /** 地区邻接边的类型 */
@@ -197,6 +204,11 @@ export interface Place {
   size?: number;
   /** 锚点地块(以后悬停、按民族换语感用) */
   cell?: number;
+  /**
+   * 地形大事以后还是同一处的(keepPlaceNames 认出来的):稳定键按第一件大事以前那一处的锚点地块算,
+   * 锚点跟着地形挪了也是同一个键(改的名在大事前后都认得)。没有这一项 = 按 cell
+   */
+  keyCell?: number;
   /** 西幻风地名的拉丁原形(如 "Aldor Mountains");湖、岛、荒漠借用的是别的名字的原形,仅供参考 */
   latin?: string;
   /**
@@ -216,8 +228,8 @@ export interface Place {
  * | war       | 宣战       | 攻方         | 守方                    | −1              | **援盟**(阶段 4 干预的结盟):应哪国之约参战 —— 守方刚向这个盟国宣战;不是援盟 = −1 | 战争编号 |
  * | conquer   | 攻占一州   | 攻方         | 原主(−1 = 部落地带)   | 州              | 州里的城(没有 = −1) | 战争编号(不在战争里 = −1) |
  * | peace     | 议和 / 战争结束 | 攻方    | 守方                    | **割让的州数** n(议和时划清边界,两国互割飞地:紧挨在这条 peace 前面的 n 条 conquer 就是割让的,不是打下来的;没割让 = −1) | −1 | 战争编号 |
- * | fall      | 灭亡       | 灭亡的国家   | 灭它的国家(−1 = 自己瓦解 / 并入见 merge) | 最后失去的州 | −1 | 战争编号 / −1 |
- * | capital   | 迁都(国都失守 / 主动迁都) | 国家 | −1          | 新国都所在州    | 新国都     | 战争编号(被迫迁都,战争里国都失守)/ −1(主动迁都) |
+ * | fall      | 灭亡       | 灭亡的国家   | 灭它的国家(−1 = 自己瓦解 / 并入见 merge;−2 = 亡于天灾:国土在地形大事里全沉入海中、或国都毁了无处可迁) | 最后失去的州 | −1 | 战争编号 / −1 |
+ * | capital   | 迁都(国都失守 / 主动迁都) | 国家 | −1(−2 = 地形大事里国都沉了、毁了,迁都) | 新国都所在州 | 新国都 | 战争编号(被迫迁都,战争里国都失守)/ −1(主动迁都) |
  * | split     | 分裂 / 独立 / 复国 | 新国家 | 原来的国家(复国:从哪国手里起兵;复的是哪国见新国家的 Polity.restores) | 起事的州 | 新国都 | −1 |
  * | merge     | 合并       | 并入的一方(继续存在) | 被并掉的国家(它的 ended = 这一年,不另记 fall) | −1 | −1 | −1 |
  * | dynasty   | 改朝换代 / 王室更迭 | 国家(同一个国家编号;新朝见 Polity.dynasties 的最后一条) | −1 | 新朝的根据地(兴起的州) | 新国都(新朝定都根据地时 ≠ 原国都,Polity.capitals 同一刻加一条,不另记 capital) | −1 |
@@ -229,6 +241,8 @@ export interface Place {
  * | rebuild   | 重建 | 当时的国家(−1 = 部落地带) | −1 | 州 | 新城(被毁的旧城见新城的 Settlement.rebuilds) | −1 |
  * | decline   | 旧都衰落 | 它原是哪国的国都 | −1 | 州 | 旧都(失去国都之位的年份见 Settlement.capitalSpans) | −1 |
  * | intervene | 干预(阶段 4,interventions.ts):一条干预在这一刻生效(种类、字段见 Civ.interventions 里的那一条;各种类 a / b / region / settlement 的含义见下面) | 国家 A | 见下 | 见下 | 见下 | **干预的下标**(Civ.interventions 里第几条,借用这一列) |
+ * | upheaval  | 地形大事(upheaval.ts):这一刻地形变了(经过见 Civ.upheavals 里的那一件) | **第几件大事**(Civ.upheavals 的下标) | −1 | 受灾最重的州 | −1 | −1 |
+ * | sunk      | 城在地形大事里没了(它的 ended = 这一年;沉入海的不再重建) | 当时的国家(−1 = 部落地带) | 1 = 城址沉入海中,0 = 毁于火山 | 州 | 那座城 | **第几件大事**(借用这一列) |
  * | battle    | 战役:攻方这一仗没打下来(守方守住了;打下来的记 conquer) | 攻方(守方反攻失败时是原守方) | 守方 | 攻打的州 | 州里的城(有城 = 攻城,没有 = 野战;−1) | 战争编号 |
  *
  * 洗劫、毁城和那一次攻占同一刻,记在那条 conquer **前面**(conquer、被迫迁都、灭亡照旧紧挨着,编年史里排回攻占后面)。
@@ -249,6 +263,8 @@ export interface Place {
  *   国家 A 的键指不到(新历史里没有这国 / 那一刻还没立国)就不记(立国除外:立国一定记)。
  * battle(人物与战役,wars.ts 的战役):每一仗都算过胜负,打下来的记 conquer,没打下来的(攻方败退、守方反攻没夺回)记一条 battle;
  *   攻方从哪种边打过去记在 Annal.via。不改归属,只是让编年史写得出"某某之战"。
+ * upheaval 之后紧跟着(同一刻)记这件大事的后果:sunk(没了的城,国都在前)、迁都(capital,war = −1)、亡国(fall,b = −2),
+ * 编年史并进 upheaval 那一条。
  * 阶段 3 以后再有新种类(瘟疫……)在末尾往下加。
  */
 export type AnnalKind =
@@ -270,7 +286,9 @@ export type AnnalKind =
   | 'rebuild'
   | 'decline'
   | 'intervene'
-  | 'battle';
+  | 'battle'
+  | 'upheaval'
+  | 'sunk';
 
 /**
  * 一条史事(阶段 3):推演里各事件处理函数用 CivSim.record 往 Civ.annals 里记,编年史(界面上的事件列表)只读它。
@@ -366,6 +384,58 @@ export interface Civ {
    * 推演结束后按历史"贴"上去,国界、兴亡、战争、人物一个都不变。没有文明 = 不给
    */
   religion?: Religion;
+  /**
+   * 地形大事(upheaval.ts;gen/edits.ts 文件头"地形大事"):按年份排,同一年的合成一件。下标 = 史事 upheaval 的 a。
+   * 没有 = 不给。regions、places、routes 是最后一件大事以后的;更早的各段见 eras
+   */
+  upheavals?: UpheavalFact[];
+  /**
+   * 地形大事以前的各段(和 upheavals 一一对应):第 i 段到 upheavals[i].year 为止(不含),那段时间的宜居度、州、地名、道路。
+   * 州的编号各段一样(后面的段只多出新冒出来的州);归属数组(culture、polity、检查点、日志)按最后一段的州数。没有地形大事 = 不给
+   */
+  eras?: CivEra[];
+  /**
+   * 只有地图上画的是更早一段时才有(ui/eras.ts):整段历史那一份(最后一段的州、地名,套好改名)。
+   * 编年史这类按整段历史算的用它(后面才冒出来的州也认得),地图用这一份本身
+   */
+  history?: Civ;
+}
+
+/** 地形大事以前的一段:到 until 年为止(不含) */
+export interface CivEra {
+  until: Year;
+  habitat: Habitat;
+  regions: Regions;
+  places: Place[];
+  routes: Route[];
+}
+
+/** 一件地形大事在这份历史里的经过(地块、州按大事前后比出来;国家是那一刻、变化之前的主人) */
+export interface UpheavalFact {
+  year: Year;
+  /** 有哪几种修改(火山喷发 volcano、地震抬升 raise、海水漫进来 sink;按第一次出现的先后) */
+  kinds: ('volcano' | 'raise' | 'sink')[];
+  /** 合进这一件的是作者列表(WorldEdits.upheavals)里的哪几件(下标) */
+  items: number[];
+  /** 变成水 / 变成陆地的地块数 */
+  sunk: number;
+  risen: number;
+  /** 受灾最重的州(火山 = 火山所在的州)和受灾最重的国家:那州当时的主人;那州无主 = 沉没、沉掉一块、长出新陆地的州最多的国家(火山不算;都无主 = −1) */
+  region: number;
+  polity: number;
+  /** 一块陆地也不剩的州、当时各自的国家(−1 = 无主) */
+  drowned: number[];
+  drownedBy: number[];
+  /** 沉掉一块、还剩陆地的州 */
+  shrunk: number[];
+  /** 新陆地:并进的老州、新划出来的州(编号接在大事前的州后面) */
+  grown: number[];
+  added: number[];
+  /** 隆起的新陆地连起了大事前分开的两块陆地:两边挨着新陆地的州、当时各自的国家;没有 = 不给 */
+  joined?: [number, number];
+  joinedBy?: [number, number];
+  /** 早先毁了的城(遗址)、城址这回成了海、湖的(城的编号;没有 = 不给) */
+  ruins?: number[];
 }
 
 /** 信仰的种类:民间信仰(每个民族自带)、大教、从大教分出的教派 */
@@ -518,6 +588,27 @@ export interface CivParams {
    * null = 没改过的星球长不出文明(按这个世界自己标定)。不给 = 现算。没改地形的世界不看它
    */
   tempo?: number | null;
+  /**
+   * 地形大事(upheaval.ts 的 upheavalSteps 排好、生成好的):按年份排(同一年已合成一件),各带改后的世界
+   * (第 k 件 = 原来的地形套上前 k 件大事的修改)。不给 / 空 = 没有。年份不在 (0, endYear) 里的不算
+   */
+  upheavals?: readonly import('./upheaval').UpheavalStep[];
+}
+
+/**
+ * 推演之后定下的名字、配色里要"钉住"的(地形大事,见 upheaval.ts):大事那一年以前已经有的民族、州、国家、城、王朝,
+ * 名字和配色照没有这件大事时的那份历史 —— 起名、配色本来看整段历史(结束时的疆域、历来的邻国),不钉住的话,
+ * 大事之后的历史一变,之前的名字也会跟着变。钉住的先占上,新出现的照常起名、配色,不和它们撞
+ */
+export interface NamePins {
+  /** 民族(推演前就定了,整份钉住):族名、语感、配色 */
+  cultures?: { name: string; style: string; color: [number, number, number] }[];
+  /** 州名(下标 = 州;没有 = 不钉) */
+  regionNames: (string | undefined)[];
+  /** 国家:国名词根、配色、东方语感;dynasties = 各朝的朝名(下标 = Polity.dynasties 的下标;没有 = 不钉) */
+  polities: Map<number, { name?: string; color?: [number, number, number]; dynasties: (string | undefined)[] }>;
+  /** 城名 */
+  settlements: Map<number, string>;
 }
 
 // ---- 对外函数的签名(实现分别在 index.ts / timeline.ts / polities.ts) ----

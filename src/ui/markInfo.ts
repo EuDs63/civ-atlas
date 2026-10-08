@@ -9,7 +9,7 @@ import type { ChronicleEntry } from '../gen/civ/chronicle';
 import { fullChronicle } from '../gen/civ/religionText';
 import { regionLabel } from '../gen/civ/display';
 import { polityName } from '../gen/civ/growth';
-import { markShownAt, regionOfKey, type AuthorMark } from '../gen/edits';
+import { keyCells, markShownAt, regionOfKey, type AuthorMark } from '../gen/edits';
 import { ownersOf } from './panelData';
 import type { HoverInfo } from './hoverInfo';
 import { MARK_HEX, markAreaShape, type AreaShape, type MarkItem } from '../render/marks';
@@ -33,7 +33,7 @@ export function cellAtWorld(world: World, raster: Raster | null, x: number, y: n
 export function markRegionIds(civ: Civ, m: Pick<AuthorMark, 'regions'>): number[] {
   const out: number[] = [];
   for (const k of m.regions ?? []) {
-    const r = regionOfKey(k, civ.regions.of);
+    const r = regionOfKey(k, keyCells(civ.regions));
     if (r >= 0 && r < civ.regions.count && !out.includes(r)) out.push(r);
   }
   return out;

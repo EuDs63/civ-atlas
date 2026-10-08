@@ -28,6 +28,7 @@ import {
   cleanName,
   cultureKey,
   dynastyKey,
+  keyCells,
   placeKeyOf,
   polityKey,
   regionKey,
@@ -442,7 +443,7 @@ function ivText(civ: Civ, v: Intervention): string {
     return r && r.kind === kind ? `${tag}${r.id}` : `(新历史里没有的${kind === 'polity' ? '国家' : '城'})`;
   };
   const reg = (key: string) => {
-    const r = regionOfKey(key, civ.regions.of);
+    const r = regionOfKey(key, keyCells(civ.regions));
     return r >= 0 && r < civ.regions.count ? `R${r}` : '(没有的州)';
   };
   const until = (u?: number) => (u !== undefined ? `,至第 ${u} 年` : '');

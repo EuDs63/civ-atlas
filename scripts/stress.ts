@@ -6,6 +6,8 @@
  * 以及 36k 默认精细度下的生成总时长。
  * 改地形(阶段 4):几组极端的地形修改(最大最强的火山 / 山脉铺满全图、两极的湖、跨 180° 经线的笔画、整片沉成海 / 抬成陆地)。
  * 草图:一片陆地也没画的"都是海"(整颗星球是海)、满图涂成山地、跨 180° 经线和两极的大杂烩(再叠上地形修改)。
+ * 地形大事:半路整颗星球沉入海中、整片抬成陆地、五件最大最强的火山(有同一年的、第 1 年和第 2999 年的),
+ * 各段的州和那时的地形对得上,大事以后的城、国家、信仰、编年史照样合法。
  */
 import { generateWorld, DEFAULT_PARAMS } from '../src/gen/world';
 import { rasterize } from '../src/gen/raster';
@@ -27,7 +29,9 @@ import { Layer } from '../src/gen/civ/types';
 import { faithAt, faithFromScratch } from '../src/gen/civ/religion';
 import { civLabelItems, civMapLayer, labelViewExtras } from '../src/render/civ/labels';
 import { placeMap } from '../src/render/labels/draw';
-import type { TerrainOp } from '../src/gen/edits';
+import type { TerrainOp, Upheaval } from '../src/gen/edits';
+import { upheavalSteps } from '../src/gen/civ/upheaval';
+import { buildChronicle } from '../src/gen/civ/chronicle';
 import { sketchGrid, type SketchEdit, type SketchKind } from '../src/gen/sketch';
 
 /** 极端的地形修改:大杂烩(最大最强的火山、横贯全图的山脉、角上 / 海里的湖、画笔)、整片沉成海、整片抬成陆地 */
@@ -325,3 +329,66 @@ console.log(`\n默认精细度下:宜居度+划州最慢 ${Math.round(worstHabRe
 // 城市兴衰(洗劫、毁城、重建、旧都衰落)自身只多几毫秒(攻城时掷两次骰子、看重建 / 看旧都每个世界几十次),人口多算两段
 console.log(`所有参数下:推演(民族 + 城镇 + 国家 + 战争 + 分合 + 王朝 + 同化迁徙 + 城市兴衰)最慢 ${worstSim.toFixed(1)}ms(预算 100ms);回放一帧(归属 + 国界 + 半分辨率色块,Node 里)最慢 ${worstFrame.toFixed(1)}ms(预算 30ms)`);
 console.log(`国名、城名、城镇符号排版 + 避让(缩放 1 倍,含国土栅格首次计算)最慢 ${worstLabels.toFixed(1)}ms`);
+
+// ---- 地形大事:极端的几种(整颗星球沉入海中、整片抬成陆地、五件最大最强的火山) ----
+const UPHEAVAL_CASES: [string, Upheaval[]][] = [
+  ['整颗星球沉入海中', [{ year: 1500, ops: rows('sink') }]],
+  ['整片抬成陆地', [{ year: 300, ops: rows('raise') }]],
+  [
+    '五件火山(有同一年的)',
+    [1, 1500, 1500, 2999, 1200].map((year, k): Upheaval => ({ year, ops: [{ kind: 'volcano', pts: [k * 410 + 100, (k * 397 + 200) % 1024], r: 160, s: 2 }] })),
+  ],
+];
+for (const [name, list] of UPHEAVAL_CASES) {
+  for (const seed of [3, 99]) {
+    const params = { ...DEFAULT_PARAMS, seed };
+    const t0 = performance.now();
+    const w = generateWorld(params);
+    const steps = upheavalSteps(params, [], null, list);
+    const t1 = performance.now();
+    const civ = generateCiv(w, { upheavals: steps });
+    const t2 = performance.now();
+    let cn = 0;
+    const worlds = [w, ...steps.map((s) => s.world)];
+    for (const x of worlds) for (let i = 0; i < x.mesh.n; i++) if (!Number.isFinite(x.elevation[i]) || !Number.isFinite(x.precipitation[i])) cn++;
+    // 各段的州和那时的地形对得上(陆地都在州里、水不在);州的各项数值不是 NaN
+    const eraRegions = [...(civ.eras ?? []).map((e) => e.regions), civ.regions];
+    if (civ.viable && eraRegions.length !== worlds.length) cn++;
+    eraRegions.forEach((R, k) => {
+      const x = worlds[Math.min(k, worlds.length - 1)];
+      for (let i = 0; i < x.mesh.n; i++) if ((x.water[i] === 0) !== (R.of[i] >= 0)) cn++;
+      for (let q = 0; q < R.count; q++) if (!Number.isFinite(R.area[q]) || !Number.isFinite(R.capacity[q]) || !Number.isFinite(R.elevation[q])) cn++;
+      if (k && R.count < eraRegions[k - 1].count) cn++;
+    });
+    const last = worlds[worlds.length - 1];
+    // 史事有序;结束时还在的城在陆地上;在世的国家国都在本国,亡了的一州不剩
+    for (let i = 1; i < civ.annals.length; i++) if (civ.annals[i].year < civ.annals[i - 1].year) cn++;
+    for (const st of civ.settlements) {
+      if (st.ended === undefined && last.water[st.cell] !== 0) cn++;
+      if (!Number.isFinite(populationAt(st, civ.endYear)) || !st.name) cn++;
+    }
+    for (const po of civ.polities) {
+      if (po.ended === undefined) {
+        if (civ.polity[civ.settlements[capitalAt(po, civ.endYear)].region] !== po.id) cn++;
+      } else if (civ.polity.includes(po.id)) cn++;
+    }
+    for (let q = 0; q < civ.regions.count; q++) if (civ.regions.cellStart[q + 1] === civ.regions.cellStart[q] && (civ.polity[q] >= 0 || civ.culture[q] >= 0)) cn++;
+    const rel = civ.religion;
+    if (rel) {
+      const a = faithAt(civ, civ.endYear * 0.55);
+      const b = faithFromScratch(civ, civ.endYear * 0.55);
+      for (let q = 0; q < civ.regions.count; q++) if (a[q] !== b[q]) cn++;
+    }
+    const ch = buildChronicle(civ).filter((e) => e.kind === 'upheaval');
+    if (civ.viable && civ.cultures.length && ch.length !== (civ.upheavals?.length ?? 0)) cn++;
+    for (const e of ch) if (!e.text) cn++;
+    if (cn) process.exitCode = 1;
+    console.log(
+      `{"地形大事":"${name}"}`, 'seed', seed,
+      `生成各段地形 ${Math.round(t1 - t0)}ms 文明 ${Math.round(t2 - t1)}ms`,
+      `段 ${worlds.length} 州 ${civ.regions.count} 国家 ${civ.polities.length}(在世 ${civ.polities.filter((p) => p.ended === undefined).length})城镇 ${civ.settlements.length}`,
+      `大事 ${ch.map((e) => `${Math.floor(e.year)} ${e.text}`).join(' | ')}`,
+      cn ? `NaN! ${cn}` : '',
+    );
+  }
+}

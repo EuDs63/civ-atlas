@@ -884,9 +884,10 @@ function saveCurrent(force = false): boolean {
   const edits = getEdits();
   // 上次没写进去的(存储满了):修改没再变也再试一次
   if (!force && edits === c.saved && !c.unsaved) return false;
-  // 干预变了:历史要重推,缩略图上结束那一年的国家跟着变,重截(App 等重推完才给图)
-  const was = c.saved?.interventions;
-  const redraw = !!was && edits.interventions !== was && JSON.stringify(edits.interventions) !== JSON.stringify(was);
+  // 干预、地形大事变了:历史要重推,缩略图上结束那一年的地形、国家跟着变,重截(App 等重推完、那一段的主图铺好才给图)
+  const was = c.saved;
+  const differs = (a: unknown, b: unknown) => a !== b && JSON.stringify(a ?? []) !== JSON.stringify(b ?? []);
+  const redraw = !!was?.interventions && (differs(edits.interventions, was.interventions) || differs(edits.upheavals, was.upheavals));
   c.saved = edits;
   // 新建中:走到这里就是作者动了(改了地形、起了名、调了参数);只换投影的走不到这里(没存过的不为它存)
   if (c.kind === 'draft') c.pristine = false;

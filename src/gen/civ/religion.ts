@@ -101,7 +101,10 @@ function sectDir(world: World, holyCell: number, capCell: number): string {
 export function buildReligion(world: World, civ: Civ): Religion {
   const seed = subSeed(civ.seed, 'trial-religion');
   const R = civ.regions.count;
-  const { adjStart, adj, landmass } = civ.regions;
+  // 地形大事(upheaval.ts)以前按那时的州(编号一样,后面的段只多出新州;各数组按最后一段的州数开)
+  const eras = civ.eras ?? [];
+  let era = 0;
+  let reg = eras.length ? eras[0].regions : civ.regions;
   const S = civ.settlements;
   const C = civ.cultures.length;
   const namers = personNamers(civ.seed);
@@ -158,7 +161,7 @@ export function buildReligion(world: World, civ: Civ): Religion {
   const folk = (f: number) => isFolk[f] === 1;
 
   // 创教的年份:把年份段均分成 nGreat 段,每段里随机一年
-  const nGreat = Math.max(2, Math.min(5, Math.round(R / 220)));
+  const nGreat = Math.max(2, Math.min(5, Math.round(reg.count / 220)));
   const foundYears = Array.from({ length: nGreat }, (_, i) => {
     const a = FOUND_SPAN[0] + ((FOUND_SPAN[1] - FOUND_SPAN[0]) * i) / nGreat;
     return Math.round(a + keyed(seed, 1, i) * ((FOUND_SPAN[1] - FOUND_SPAN[0]) / nGreat) * 0.8);
@@ -167,6 +170,7 @@ export function buildReligion(world: World, civ: Civ): Religion {
 
   /** 从 from 出发按州图走,max 步以内的州的步数(更远的 = −1) */
   const hops = (from: number, max: number): Int16Array => {
+    const { adjStart, adj } = reg;
     const d = new Int16Array(R).fill(-1);
     d[from] = 0;
     const q = [from];
@@ -218,6 +222,7 @@ export function buildReligion(world: World, civ: Civ): Religion {
   if (years[years.length - 1] < civ.endYear) years.push(civ.endYear);
   for (let step = 0; step < years.length; step++) {
     const y = years[step];
+    while (era < eras.length && y >= eras[era].until) reg = ++era < eras.length ? eras[era].regions : civ.regions;
     for (; li < L.size && L.year[li] <= y; li++) {
       if (L.layer[li] === Layer.Culture) ownC[L.region[li]] = L.value[li];
       else ownP[L.region[li]] = L.value[li];
@@ -291,7 +296,7 @@ export function buildReligion(world: World, civ: Civ): Religion {
     }
 
     // 传播:大教 / 教派向相邻的州传(结束年份补的那一步不满 STEP 年,不传,只跟上归属的变化)
-    if (y % STEP === 0) spreadStep(seed, y, civ.regions, faith, next, ownP, stateOf, isFolk, rootArr);
+    if (y % STEP === 0) spreadStep(seed, y, reg, faith, next, ownP, stateOf, isFolk, rootArr);
     else next.set(faith);
     // 改信:第一次传进一国(那国里还没有别的州信这一教)记一件"传入"
     const F = faiths.length;
@@ -359,7 +364,7 @@ export function buildReligion(world: World, civ: Civ): Religion {
           if (s.until !== undefined || s.faith !== f.id || y - s.from < SCHISM_STATE_YEARS) continue;
           const cap = S[capitalAt(civ.polities[s.polity], y)];
           if (!cap || ownP[hr] === s.polity) continue;
-          const farAway = landmass[cap.region] !== landmass[hr] || d[cap.region] < 0 || d[cap.region] >= SCHISM_FAR;
+          const farAway = reg.landmass[cap.region] !== reg.landmass[hr] || d[cap.region] < 0 || d[cap.region] >= SCHISM_FAR;
           let n = 0;
           for (let r = 0; r < R; r++) if (ownP[r] === s.polity && faith[r] === f.id) n++;
           if (!farAway || n < SCHISM_MIN) continue;
@@ -370,7 +375,7 @@ export function buildReligion(world: World, civ: Civ): Religion {
           addFaith({
             id: k,
             kind: 'sect',
-            name: sectName(faiths, f.name, sectDir(world, civ.regions.seat[hr], civ.regions.seat[cap.region]), cap.name, eastern),
+            name: sectName(faiths, f.name, sectDir(world, reg.seat[hr], reg.seat[cap.region]), cap.name, eastern),
             form: f.form,
             parent: f.id,
             founded: y,
@@ -571,7 +576,7 @@ export function faithAt(civ: Civ, year: Year, out?: Int16Array): Int16Array {
   const cp = lo > 0 ? cps[lo - 1] : null;
   let i = 0;
   if (cp) {
-    out.set(cp.faith);
+    out.set(cp.faith.length > R ? cp.faith.subarray(0, R) : cp.faith); // 地形大事以前那一段州少(同 ownersAt)
     i = faithLogAfter(rel.log, cp.year);
   } else out.fill(-1);
   const { log } = rel;

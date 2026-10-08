@@ -37,6 +37,8 @@ import { MarkPanel } from './MarkPanel';
 import { useMarkUi } from './markStore';
 import { CharacterPanel } from './CharacterPanel';
 import { useCharUi } from './characterStore';
+import { useUpUi } from './upheavalStore';
+import { UpheavalPanel } from './UpheavalPanel';
 import { setPanelTab, setSheet, setSheetDrag, usePanel } from './panelStore';
 import { ownersOf } from './panelData';
 import { phoneSheet, selectionKey } from './flyTo';
@@ -76,14 +78,19 @@ export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: C
   const { run, sheet } = usePanel();
   const narrow = useNarrow();
   const sheetDrag = useSheetDrag(narrow, sheet);
+  const up = useUpUi().on;
   lastCiv = civ;
   useSelectionReset(raw, sheetDrag.reset);
-  if (!civ || !raw || !sel) return null;
-  const stable = selectionKey(raw, sel);
+  if (!civ || !raw || (!sel && !up)) return null;
   const year = Math.floor(Math.min(civ.endYear, Math.max(0, t.year ?? civ.endYear)));
   const common = { civ, raw, raster, world, year, names: edits.names };
   let body: ReactNode = null;
-  if (sel.kind === 'polity' && civ.polities[sel.id]) body = <CountryPanel {...common} id={sel.id} />;
+  // 地形大事的卡片(侧栏「这颗星球」里打开):和选中的东西在同一处
+  const kind = up ? 'upheaval' : sel!.kind;
+  const stable = sel ? selectionKey(raw, sel) : '';
+  if (up) body = <UpheavalPanel civ={civ} world={world} phone={narrow} />;
+  else if (!sel) body = null;
+  else if (sel.kind === 'polity' && civ.polities[sel.id]) body = <CountryPanel {...common} id={sel.id} />;
   else if (sel.kind === 'settlement' && civ.settlements[sel.id]) body = <CityPanel key={stable} {...common} id={sel.id} />;
   else if (sel.kind === 'place' && civ.places[sel.id]) body = <PlacePanel key={stable} {...common} id={sel.id} />;
   else if (sel.kind === 'region' && sel.id >= 0 && sel.id < civ.regions.count) body = <RegionPanel key={stable} {...common} id={sel.id} />;
@@ -100,7 +107,7 @@ export function Inspector({ civ, raw, raster, world }: { civ: Civ | null; raw: C
   return (
     <section
       ref={sheetDrag.ref}
-      className={`inspector cpanel k-${sel.kind}${hidden ? ' hidden' : ''}${sheetCls}`}
+      className={`inspector cpanel k-${kind}${hidden ? ' hidden' : ''}${sheetCls}`}
       style={narrow && sheetDrag.top !== null ? { top: sheetDrag.top } : undefined}
       onPointerDown={(e) => {
         stop(e);

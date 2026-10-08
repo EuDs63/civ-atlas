@@ -41,8 +41,9 @@ export const ownersAt: OwnersAt = (civ: Civ, year: Year, out?: Owners): Owners =
   const cp = lo > 0 ? cps[lo - 1] : null;
   let from = 0;
   if (cp) {
-    out.culture.set(cp.culture);
-    out.polity.set(cp.polity);
+    // 地形大事以前那一段的州比检查点少(大事里新划出的州排在后面,那时还不存在):只取前面这些
+    out.culture.set(cp.culture.length > R ? cp.culture.subarray(0, R) : cp.culture);
+    out.polity.set(cp.polity.length > R ? cp.polity.subarray(0, R) : cp.polity);
     from = logIndexAfter(civ.log, cp.year);
   } else {
     out.culture.fill(-1);

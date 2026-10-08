@@ -79,38 +79,9 @@ export function buildRegions(world: World, habitat: Habitat, p: RegionParams): R
   const regionArea = p.regionArea * REGION_AREA_SCALE;
 
   // ---- 陆块编号(按面积从大到小) ----
-  const lmOf = new Int32Array(n).fill(-1);
-  const lmArea: number[] = [];
-  const lmFirst: number[] = [];
-  {
-    const q = new Int32Array(n);
-    for (let s = 0; s < n; s++) {
-      if (water[s] !== 0 || lmOf[s] >= 0) continue;
-      const id = lmArea.length;
-      let a = 0;
-      let qh = 0;
-      let qt = 0;
-      q[qt++] = s;
-      lmOf[s] = id;
-      while (qh < qt) {
-        const i = q[qh++];
-        a += cellArea[i];
-        for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
-          const j = adj[k];
-          if (water[j] === 0 && lmOf[j] < 0) {
-            lmOf[j] = id;
-            q[qt++] = j;
-          }
-        }
-      }
-      lmArea.push(a);
-      lmFirst.push(s);
-    }
-    const order = lmArea.map((_, i) => i).sort((a, b) => lmArea[b] - lmArea[a] || lmFirst[a] - lmFirst[b]);
-    const rank = new Int32Array(order.length);
-    order.forEach((id, r) => (rank[id] = r));
-    for (let i = 0; i < n; i++) if (lmOf[i] >= 0) lmOf[i] = rank[lmOf[i]];
-  }
+  const lmOf = landmassOf(world, cellArea);
+  let lmCount = 0;
+  for (let i = 0; i < n; i++) if (lmOf[i] >= lmCount) lmCount = lmOf[i] + 1;
 
   // ---- 每条邻接边的地形代价(只有陆地 → 陆地) ----
   const river = new Float32Array(n);
@@ -149,7 +120,7 @@ export function buildRegions(world: World, habitat: Habitat, p: RegionParams): R
   // 大河地块不作治所(城建在岸边,大河本身多是州界);没被罩住的大河段在第 2 步分给两岸。
   // 只有整个岛上除了大河没有别的地块时,才让大河地块当种子(每个岛至少一个州)
   const major = MAJOR_RIVER * riverThreshold;
-  const lmSeeded = new Uint8Array(lmArea.length);
+  const lmSeeded = new Uint8Array(lmCount);
 
   const R0 = Math.sqrt(regionArea) * SEED_RADIUS * fpow(n / REF_MESH_CELLS, RES_EXP);
   const covered = new Uint8Array(n);
@@ -250,6 +221,43 @@ export function buildRegions(world: World, habitat: Habitat, p: RegionParams): R
   of = of2;
 
   return finishRegions(world, habitat, of, Int32Array.from(seat), lmOf, cellArea, len, river, step);
+}
+
+/** 陆块编号:地块 → 所在陆块 / 岛(按面积从大到小编号,0 起;面积一样按第一块地块先后);水 = −1 */
+function landmassOf(world: World, cellArea: Float32Array): Int32Array {
+  const { mesh, water } = world;
+  const { n, adjStart, adj } = mesh;
+  const lmOf = new Int32Array(n).fill(-1);
+  const lmArea: number[] = [];
+  const lmFirst: number[] = [];
+  const q = new Int32Array(n);
+  for (let s = 0; s < n; s++) {
+    if (water[s] !== 0 || lmOf[s] >= 0) continue;
+    const id = lmArea.length;
+    let a = 0;
+    let qh = 0;
+    let qt = 0;
+    q[qt++] = s;
+    lmOf[s] = id;
+    while (qh < qt) {
+      const i = q[qh++];
+      a += cellArea[i];
+      for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+        const j = adj[k];
+        if (water[j] === 0 && lmOf[j] < 0) {
+          lmOf[j] = id;
+          q[qt++] = j;
+        }
+      }
+    }
+    lmArea.push(a);
+    lmFirst.push(s);
+  }
+  const order = lmArea.map((_, i) => i).sort((a, b) => lmArea[b] - lmArea[a] || lmFirst[a] - lmFirst[b]);
+  const rank = new Int32Array(order.length);
+  order.forEach((id, r) => (rank[id] = r));
+  for (let i = 0; i < n; i++) if (lmOf[i] >= 0) lmOf[i] = rank[lmOf[i]];
+  return lmOf;
 }
 
 /**
@@ -360,6 +368,7 @@ function fixFragments(world: World, of: Int32Array, seeds: number[]) {
 
 /**
  * 太小的州并进共享边界最长的邻州(从最小的开始)。孤岛上唯一的州不并(不能跨水)。
+ * from = 只看编号从这里起的州(地形大事里新划出来的州;并进去的可以是任何州)。
  * 返回每个州是否已被并掉;of 就地改写。
  */
 function mergeSmall(
@@ -368,6 +377,7 @@ function mergeSmall(
   seeds: number[],
   cellArea: Float32Array,
   minArea: number,
+  from = 0,
 ): Uint8Array {
   const { n, adjStart, adj } = world.mesh;
   const R = seeds.length;
@@ -381,7 +391,7 @@ function mergeSmall(
   }
   const merged = new Uint8Array(R);
   const small: number[] = [];
-  for (let r = 0; r < R; r++) if (area[r] < minArea) small.push(r);
+  for (let r = from; r < R; r++) if (area[r] < minArea) small.push(r);
   small.sort((a, b) => area[a] - area[b] || a - b);
   const tally = new Map<number, number>();
   for (const r of small) {
@@ -672,4 +682,137 @@ export function emptyRegions(n: number): Regions {
     landmass: new Int32Array(0),
     adjBorder: new Float32Array(0),
   };
+}
+
+/**
+ * 地形大事之后的州(upheaval.ts):沿用之前的划分和编号,只改地形变了的地方 ——
+ *   - 变成水的地块离开原来的州;一块陆地也不剩的州还占着编号(没有地块、没有邻接,人口上限 0)
+ *   - 新冒出来的陆地:离原有的州近的(一个种子半径以内,沿新陆地走)并进最近的州;远的(海里新长的岛、大片新陆地)
+ *     按建州时同样的规则撒种子,编号接在后面;新州太小的(和建州时同一个门槛)并进共享边界最长的邻州,孤岛上的不并
+ *   - 治所还在本州的陆地上就不动,否则换成区内最宜居的地块
+ *   - 稳定键用的 keyOf、keySeat 记着每块地、每州最早的样子(types.ts 的 Regions)
+ * 之后按新地形重算各州的面积、人口上限、群落、海拔、陆块和邻接(和 buildRegions 最后一步同一套)。
+ */
+export function reshapeRegions(world: World, habitat: Habitat, prev: Regions, p: RegionParams): Regions {
+  const { mesh, water, flux, riverThreshold } = world;
+  const { n, adjStart, adj } = mesh;
+  const base = subSeed(world.params.seed, 'civ-regions');
+  const len = adjLengths(mesh);
+  const cellArea = cellAreas(mesh);
+  const step = refSpacing(mesh);
+  const suit = habitat.suitability;
+  const regionArea = p.regionArea * REGION_AREA_SCALE;
+  const R0 = Math.sqrt(regionArea) * SEED_RADIUS * fpow(n / REF_MESH_CELLS, RES_EXP);
+
+  const of = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) if (water[i] === 0) of[i] = prev.of[i];
+  // 新陆地:从挨着它的老州地块出发沿新陆地洇染,一个种子半径以内的并进来
+  const dist = new Float64Array(n).fill(Infinity);
+  const heap = new MinHeap(256);
+  for (let i = 0; i < n; i++) {
+    if (of[i] < 0) continue;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (water[j] === 0 && of[j] < 0) {
+        dist[i] = 0;
+        heap.push(i, 0);
+        break;
+      }
+    }
+  }
+  while (heap.size) {
+    const i = heap.pop();
+    const d = heap.lastPri;
+    if (d > dist[i]) continue;
+    for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+      const j = adj[k];
+      if (water[j] !== 0 || prev.of[j] >= 0) continue;
+      const nd = d + len[k];
+      if (nd > R0 || nd >= dist[j]) continue;
+      dist[j] = nd;
+      of[j] = of[i];
+      heap.push(j, nd);
+    }
+  }
+  // 剩下的新陆地:按宜居度从高到低撒种子,各自洇染一个种子半径
+  const seat: number[] = Array.from(prev.seat);
+  const left: number[] = [];
+  for (let i = 0; i < n; i++) if (water[i] === 0 && of[i] < 0) left.push(i);
+  if (left.length) {
+    const tie = new Float64Array(n);
+    for (const i of left) tie[i] = keyed(base, i, 7);
+    left.sort((a, b) => suit[b] - suit[a] || tie[a] - tie[b]);
+    for (const s of left) {
+      if (of[s] >= 0) continue;
+      const id = seat.length;
+      seat.push(s);
+      of[s] = id;
+      dist[s] = 0;
+      heap.size = 0;
+      heap.push(s, 0);
+      while (heap.size) {
+        const i = heap.pop();
+        const d = heap.lastPri;
+        if (d > dist[i]) continue;
+        for (let k = adjStart[i]; k < adjStart[i + 1]; k++) {
+          const j = adj[k];
+          if (water[j] !== 0 || of[j] >= 0) continue;
+          const nd = d + len[k];
+          if (nd > R0) continue;
+          dist[j] = nd;
+          of[j] = id;
+          heap.push(j, nd);
+        }
+      }
+    }
+  }
+  // 新州太小的并进邻州,剩下的新州重新编号(接在原有的州后面)
+  if (seat.length > prev.count) {
+    const merged = mergeSmall(world, of, seat, cellArea, regionArea * MIN_AREA_FRAC, prev.count);
+    const newId = new Int32Array(seat.length);
+    const kept = seat.slice(0, prev.count);
+    for (let r = 0; r < seat.length; r++) {
+      if (r < prev.count) newId[r] = r;
+      else if (merged[r]) newId[r] = -1;
+      else {
+        newId[r] = kept.length;
+        kept.push(seat[r]);
+      }
+    }
+    for (let i = 0; i < n; i++) if (of[i] >= prev.count) of[i] = newId[of[i]];
+    seat.length = 0;
+    seat.push(...kept);
+  }
+  // 治所:还在本州陆地上的不动;不在了的换成区内最宜居的地块(一块陆地也不剩的州留着原来的治所)
+  const best = new Int32Array(seat.length).fill(-1);
+  for (let i = 0; i < n; i++) {
+    const r = of[i];
+    if (r < 0) continue;
+    if (best[r] < 0 || suit[i] > suit[best[r]] || (suit[i] === suit[best[r]] && i < best[r])) best[r] = i;
+  }
+  for (let r = 0; r < seat.length; r++) if (!(water[seat[r]] === 0 && of[seat[r]] === r) && best[r] >= 0) seat[r] = best[r];
+
+  const lmOf = landmassOf(world, cellArea);
+  const river = new Float32Array(n);
+  for (let i = 0; i < n; i++) if (water[i] === 0) river[i] = riverSize(flux[i], riverThreshold);
+  // 稳定键:地块按最早属于的州、州按最早的治所(大事以后沉了的地方、换了的治所照样指回同一州)
+  const prevOf = prev.keyOf ?? prev.of;
+  const prevSeat = prev.keySeat ?? prev.seat;
+  const keyOf = new Int32Array(n);
+  for (let i = 0; i < n; i++) keyOf[i] = prevOf[i] >= 0 ? prevOf[i] : of[i];
+  const keySeat = Int32Array.from(seat);
+  for (let r = 0; r < prev.count; r++) keySeat[r] = prevSeat[r];
+  // 新州的键要指回它自己:治所那块地早先属于别的州(沉下去又抬起来的地方)时,换一块从没属于过别的州的;
+  // 都属于过,就挑一块不是别的州治所键的地块,改指这个新州
+  const used = new Set(keySeat.subarray(0, prev.count));
+  for (let r = prev.count; r < seat.length; r++) {
+    if (keyOf[keySeat[r]] === r) continue;
+    let pick = -1;
+    for (let i = 0; i < n && pick < 0; i++) if (of[i] === r && keyOf[i] === r) pick = i;
+    for (let i = 0; i < n && pick < 0; i++) if (of[i] === r && !used.has(i)) pick = i;
+    if (pick < 0) continue;
+    keySeat[r] = pick;
+    keyOf[pick] = r;
+  }
+  return { ...finishRegions(world, habitat, of, Int32Array.from(seat), lmOf, cellArea, len, river, step), keyOf, keySeat };
 }

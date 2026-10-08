@@ -32,6 +32,7 @@ import {
   useCivTime,
 } from './civView';
 import { TimelineMarks } from './TimelineMarks';
+import { baseRegions } from './eras';
 import { useNarrow } from './device';
 import { PLAY_RATE, STORY_SECONDS, replayStart } from './timelineLayout';
 import './timeline.css';
@@ -54,9 +55,10 @@ export function CivTimeline({ civ, hidden, dock = 'bottom' }: CivTimelineProps) 
   const [rootRef, compat] = useThemeCompat();
 
   // 换了新世界:回到结束年份(第一次拿到文明时保留网址里的 civYear)。
-  // 按州(地理)认世界:改名(阶段 4)只换 civ 对象、州还是同一份,时间轴不动
+  // 按州(地理)认世界:改名(阶段 4)只换 civ 对象、州还是同一份,时间轴不动;
+  // 地形大事以后州跟着时间轴换段,按第一件大事以前的那一份认(eras.ts 的 baseRegions;重推时沿用)
   const prev = useRef<Civ['regions'] | null>(null);
-  const world = civ?.regions ?? null;
+  const world = civ ? baseRegions(civ) : null;
   useEffect(() => {
     if (prev.current && prev.current !== world) {
       resetCivTime();

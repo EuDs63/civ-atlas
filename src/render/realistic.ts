@@ -81,20 +81,39 @@ function makeCanvas(w: number, h: number): AnyCanvas {
     : new OffscreenCanvas(w, h);
 }
 
+interface Base {
+  raster: Raster;
+  canvas: AnyCanvas;
+  raw: Uint8ClampedArray | null;
+}
 /**
- * 当前这张地图的像素层(不含河;只留一份,换了世界就释放)。
+ * 当前这张地图的像素层(不含河;realisticBase 刚给出的那一份)。
  * raw = 水陆交界抗锯齿之前的像素(放大后的细节层拼水、陆两份要用,见 realisticShoreLayers;拼好就不留了)
  */
-let base: { raster: Raster; canvas: AnyCanvas; raw: Uint8ClampedArray | null } | null = null;
+let base: Base | null = null;
+/**
+ * 同一个世界最近铺过的几张(地形大事前后各一张主图,来回拖时间轴不用重铺;最近的在前)。
+ * 换了世界(主图的地块索引不是同一份)就都释放
+ */
+let bases: Base[] = [];
+const BASES_KEEP = 2;
 
 /** 像素层(地貌、海、冰、晕渲,不含河):铺进地形图,也给放大后的细节层当底图 */
 export function realisticBase(r: Raster): AnyCanvas {
   if (base?.raster === r) return base.canvas;
-  if (base) base.canvas.width = base.canvas.height = 0;
+  const hit = bases.find((b) => b.raster === r);
+  if (hit) {
+    base = hit;
+    bases = [hit, ...bases.filter((b) => b !== hit)];
+    return hit.canvas;
+  }
+  const keep = bases.filter((b) => b.raster.cell === r.cell).slice(0, BASES_KEEP - 1);
+  for (const b of bases) if (!keep.includes(b)) b.canvas.width = b.canvas.height = 0;
   const cv = makeCanvas(r.w, r.h);
   const ctx = cv.getContext('2d') as CanvasRenderingContext2D;
   const raw = paintRealistic(ctx, r, undefined, true);
   base = { raster: r, canvas: cv, raw };
+  bases = [base, ...keep];
   return cv;
 }
 

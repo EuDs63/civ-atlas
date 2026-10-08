@@ -120,7 +120,7 @@ export interface ChronicleEntry {
   end: Year;
   /** 纪事正文(不带年份) */
   text: string;
-  /** 一个字的标签(界面上的小印章):立 升 降 战 占 征 和 割 亡 迁 分 复 合 朝 徙 化 湮 掠 毁 建 衰 干 役 嗣;信仰:创 皈 传 派 圣 */
+  /** 一个字的标签(界面上的小印章):立 升 降 战 占 征 和 割 亡 迁 分 复 合 朝 徙 化 湮 掠 毁 建 衰 干 役 变 没 嗣;信仰:创 皈 传 派 圣 */
   tag: string;
   importance: Importance;
   /** 相关国家(按国家筛选、地图高亮用;先主后次,不含 −1) */
@@ -466,6 +466,8 @@ const TAG: Record<AnnalKind, string> = {
   decline: '衰',
   intervene: '干',
   battle: '役',
+  upheaval: '变',
+  sunk: '没',
 };
 
 function base(
@@ -516,10 +518,10 @@ function conquerText(civ: Civ, e: Annal, war?: [number, number], retake = false,
 /** 亡国之君的下场 */
 const LAST_FATE: Partial<Record<NonNullable<Person['fate']>, string>> = { fell: '殉国', surrendered: '出降', fled: '出奔' };
 
-/** 灭亡:"大昌亡于大渭,享国 312 年";有人物的加上末代君主的下场:",哀帝殉国"(土崩瓦解的出奔写"不知所终") */
+/** 灭亡:"大昌亡于大渭,享国 312 年";有人物的加上末代君主的下场:",哀帝殉国"(土崩瓦解、亡于天灾的出奔写"不知所终") */
 function fallText(civ: Civ, e: Annal, last: Person | null = null): string {
   const A = pn(civ, e.a, e.year);
-  let t = e.b >= 0 ? `${A}亡于${pn(civ, e.b, e.year)}` : `${A}土崩瓦解`;
+  let t = e.b >= 0 ? `${A}亡于${pn(civ, e.b, e.year)}` : e.b === -2 ? `${A}亡于天灾` : `${A}土崩瓦解`;
   const p = polityOf(civ, e.a);
   if (p && Number.isFinite(p.founded)) {
     // 享国按当朝算(改朝换代过的,从新朝那年起)
@@ -924,6 +926,10 @@ function simpleEntry(ctx: Ctx, e: Annal, id: number): ChronicleEntry {
       return assimChild(civ, e, id);
     case 'migrate':
       return migrateChild(civ, e, id, false);
+    case 'upheaval':
+      return upheavalEntry(ctx, [id]);
+    case 'sunk':
+      return base(e, id, sunkText(civ, e, true), 2, [e.a], [e.region]);
     case 'intervene': {
       const story = interveneStory(civ, e, id);
       const x = base(e, id, story.text, 3, [e.a, e.b], [e.region]);
@@ -935,6 +941,88 @@ function simpleEntry(ctx: Ctx, e: Annal, id: number): ChronicleEntry {
     default:
       return base(e, id, `${pn(civ, e.a, y)}有事`, 1, [e.a], []);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 地形大事:那一刻的后果(城没了、迁都、亡国)折叠成一条
+
+/** 城在地形大事里没了:"揽霞城没于水" / "别尔格勒毁于火山";who = 带上国名("大霄揽霞城没于水") */
+function sunkText(civ: Civ, e: Annal, who = false): string {
+  const city = cityName(civ, e.settlement) || '一城';
+  const head = who && e.a >= 0 ? pn(civ, e.a, e.year) : '';
+  return `${head}${city}${e.b === 1 ? '没于水' : '毁于火山'}`;
+}
+
+/** 这条史事是地形大事那一刻的后果(紧跟在 upheaval 后面、同一刻的 sunk / 因天灾迁都 / 亡于天灾):编年史并进大事那一条 */
+function upheavalTail(e: Annal, head: Annal): boolean {
+  if (e.year !== head.year) return false;
+  return e.kind === 'sunk' || (e.kind === 'capital' && e.b === -2) || (e.kind === 'fall' && e.b === -2);
+}
+
+/**
+ * 地形大事:"海水漫入大霄,六州沉入海中,揽霞城等十城没于水,迁都长风城" / "兹拉季纳王国境内火山喷发,国都别尔格勒被毁,
+ * 迁都奥斯托斯克" / "萨尔斯坦帝国与库那汗国之间的海峡隆起成陆"。ids = upheaval 那一条和紧跟着的后果(upheavalTail)
+ */
+function upheavalEntry(ctx: Ctx, ids: number[]): ChronicleEntry {
+  const { civ } = ctx;
+  const A = civ.annals;
+  const e = A[ids[0]];
+  const y = e.year;
+  const F = civ.upheavals?.[e.a];
+  const tail = ids.slice(1).map((i) => A[i]);
+  const P = F?.polity ?? -1;
+  const where = P >= 0 ? pn(civ, P, y) : '';
+  const rn = regionName(civ, e.region);
+  const kinds = F?.kinds ?? [];
+  let t: string;
+  if (kinds.includes('volcano')) {
+    if (where) t = `${where}境内火山喷发`;
+    else if (F?.added.length) t = '海中火山喷发,隆起新岛';
+    else t = `${rn || '荒野之中'}火山喷发`;
+  } else if (kinds.includes('sink') && (!kinds.includes('raise') || F!.sunk >= F!.risen)) {
+    t = where ? `海水漫入${where}` : rn ? `海水漫入${rn}一带` : '海水漫入';
+    const drowned = F ? F.drowned.filter((_, i) => P < 0 || F.drownedBy[i] === P).length : 0;
+    if (drowned) t += `,${cnNumber(drowned)}州沉入海中`;
+    else if (F?.shrunk.length) t += ',沿岸之地沉入海中';
+  } else if (F?.joined && F.joinedBy) {
+    const side = (i: number) => (F.joinedBy![i] >= 0 ? pn(civ, F.joinedBy![i], y) : regionName(civ, F.joined![i]) || '荒野');
+    t = F.joinedBy[0] >= 0 && F.joinedBy[0] === F.joinedBy[1] ? `${where || side(0)}境内的海峡隆起成陆` : `${side(0)}与${side(1)}之间的海峡隆起成陆`;
+  } else if (F?.added.length && !F.grown.length) t = `${where || rn ? `${where || rn}外` : ''}海中隆起新岛`;
+  else t = `${where || rn || ''}沿海隆起新陆`;
+  // 没了的城:先说毁于火山的,再说没于水的(各自国都在前,史事里已经排好)
+  const cities = (list: Annal[], word: string) => {
+    if (!list.length) return '';
+    const first = list[0];
+    const p = polityOf(civ, first.a);
+    // 只没了国都一座城时点明是国都("国都别尔格勒被毁");好几座城时只举头一座("揽霞城等十城没于水",后面有迁都)
+    const cap = list.length === 1 && !!p && capitalBefore(p, y) === first.settlement && p.founded < y;
+    const name = `${cap ? (first.a === P ? '国都' : `${pn(civ, first.a, y)}国都`) : ''}${cityName(civ, first.settlement) || '一城'}`;
+    return list.length > 1 ? `,${name}等${cnNumber(list.length)}城${word}` : `,${name}${word}`;
+  };
+  const sunk = tail.filter((x) => x.kind === 'sunk');
+  t += cities(
+    sunk.filter((x) => x.b === 0),
+    '被毁',
+  );
+  t += cities(
+    sunk.filter((x) => x.b === 1),
+    '没于水',
+  );
+  for (const x of tail) {
+    if (x.kind === 'capital') t += `,${x.a === P ? '' : pn(civ, x.a, y)}迁都${cityName(civ, x.settlement) || regionName(civ, x.region)}`;
+    else if (x.kind === 'fall') t += `,${pn(civ, x.a, y)}亡`;
+  }
+  const regions = [e.region, ...(F ? [...F.drowned, ...F.shrunk, ...F.grown, ...F.added] : [])].filter((r) => r >= 0);
+  const polities = [P, ...(F?.joinedBy ?? []), ...tail.map((x) => x.a)].filter((p) => p >= 0);
+  const x = { ...base(e, ids[0], t, 3, polities, regions), settlement: -1 };
+  if (tail.length) {
+    x.children = ids.slice(1).map((i) => {
+      const c = A[i];
+      if (c.kind === 'sunk') return base(c, i, sunkText(civ, c), 2, [c.a], [c.region]);
+      return simpleEntry(ctx, c, i);
+    });
+  }
+  return x;
 }
 
 // ---------------------------------------------------------------------------
@@ -1598,6 +1686,13 @@ export function buildChronicle(civ: Civ): ChronicleEntry[] {
   }
   for (let i = 0; i < A.length; i++) {
     const e = A[i];
+    // 地形大事:那一刻的后果(城没了、迁都、亡于天灾)并进大事那一条
+    if (e.kind === 'upheaval') {
+      const ids = [i];
+      while (i + 1 < A.length && upheavalTail(A[i + 1], e)) ids.push(++i);
+      out.push(upheavalEntry(ctx, ids));
+      continue;
+    }
     // 被迫迁都(capital 带战争编号)、洗劫、毁城(阶段 3 城市兴衰)也折进那场战争
     const inWar =
       e.war >= 0 &&

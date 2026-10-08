@@ -218,6 +218,13 @@ export function installCities(sim: CivSim, pm: PolityModel, wm: WarModel, cm: Ci
   return cm;
 }
 
+/** 城 sid 刚在别的事里被毁(地形大事里毁于火山,upheaval.ts):和战火里毁城一样,过些年看能不能重建 */
+export function scheduleRebuild(sim: CivSim, sid: number): void {
+  const cm = models.get(sim);
+  const s = cm?.pm.settlements[sid];
+  if (cm && s && s.ended !== undefined && rebuildTries(cm, s) > 0) sim.schedule(rebuildTime(cm, s, 0), Ev.CityRebuild, 0, sid);
+}
+
 function newModel(pm: PolityModel, wm: WarModel): CityModel {
   return { pm, wm, base: subSeed(pm.seed, 'civ-city'), razed: new Map() };
 }
@@ -227,7 +234,7 @@ function newModel(pm: PolityModel, wm: WarModel): CityModel {
  * 每场战争毁了几座城从史事里读;毁了还没重建的城、没到"看旧都"的旧都从城镇表里读;
  * 再按"城 + 第几次"算出还没到的看重建、看旧都,补进引擎。
  */
-export function resumeCities(sim: CivSim, _world: World, civ: Civ): void {
+export function resumeCities(sim: CivSim, world: World, civ: Civ): void {
   const pm = polityModelOf(sim);
   const wm = warModelOf(sim);
   if (!pm || !wm) return;
@@ -239,8 +246,8 @@ export function resumeCities(sim: CivSim, _world: World, civ: Civ): void {
   const rebuilt = new Set<number>();
   for (const s of pm.settlements) if (s.rebuilds !== undefined) rebuilt.add(s.rebuilds);
   for (const s of pm.settlements) {
-    // 毁了、还没重建(州里也没有别的城):下一次看重建
-    if (s.ended !== undefined && !rebuilt.has(s.id) && pm.cityOf[s.region] < 0) {
+    // 毁了、还没重建(州里也没有别的城):下一次看重建。城址已经沉入海中的(地形大事,upheaval.ts)不再重建
+    if (s.ended !== undefined && !rebuilt.has(s.id) && pm.cityOf[s.region] < 0 && world.water[s.cell] === 0) {
       const n = rebuildTries(cm, s);
       let k = 0;
       while (k < n && quantize(rebuildTime(cm, s, k)) <= now) k++;

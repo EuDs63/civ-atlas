@@ -1,16 +1,16 @@
 /**
- * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改、草图、作者标记、改旗、作者的人物。
+ * 当前世界的用户修改(阶段 4,格式见 gen/edits.ts 的 WorldEdits):改名、干预、地形修改、草图、地形大事、作者标记、改旗、作者的人物。
  * 和 civView.ts 一样的小 store(get / set / use)。换世界(种子 / 参数变了)时 App 调 clearEdits 清空。
  *
  * 这里只管内存里的这一份;存进浏览器 / 存成文件在 saveStore.ts(经 subscribeEdits 订阅,修改一变就自动存),
  * 读档时 App 先按存档的参数生成,再 setEdits(存档里的修改)。
  *
- * 撤销 / 重做(⌘Z / ⇧⌘Z,见 undo.ts):改名、改旗、干预、作者标记、作者的人物、AI 改写每次都记一步(改之前、改之后两份),只记这次打开网页以后、这个世界上的;
+ * 撤销 / 重做(⌘Z / ⇧⌘Z,见 undo.ts):改名、改旗、干预、地形大事、作者标记、作者的人物、AI 改写每次都记一步(改之前、改之后两份),只记这次打开网页以后、这个世界上的;
  * 读档、换世界(setEdits / clearEdits)、创建世界(clearEditHistory)清空。地形修改、草图不记:只在新建世界时能改,工具有自己的"撤销一笔"。
  */
 import { useSyncExternalStore } from 'react';
-import { EMPTY_EDITS, MARKS_MAX, MARK_REGIONS_TOTAL, cleanIntervention, cleanMark, markRegionTotal, sameMark, markAiName, nextMarkId, type AuthorMark, type Intervention, type TerrainOp, type WorldEdits } from '../gen/edits';
-import { TERRAIN_MAX_OPS, cleanTerrainOp } from '../gen/terrainEdits';
+import { EMPTY_EDITS, MARKS_MAX, MARK_REGIONS_TOTAL, cleanIntervention, cleanMark, markRegionTotal, sameMark, markAiName, nextMarkId, type AuthorMark, type Intervention, type TerrainOp, type Upheaval, type WorldEdits } from '../gen/edits';
+import { TERRAIN_MAX_OPS, UPHEAVALS_MAX, cleanTerrainOp, cleanUpheaval } from '../gen/terrainEdits';
 import { SKETCH_MAX_STROKES, cleanSketch, cleanSketchImage, cleanSketchStroke, encodeLayer, sketchCoast, type SketchEdit, type SketchImage, type SketchStroke } from '../gen/sketch';
 import { CHARACTERS_MAX, cleanCharacter, nextCharacterId, sameCharacter, type AuthorCharacter } from '../gen/characters';
 import { showToast } from './toastStore';
@@ -113,14 +113,17 @@ export function revertEdits(now: WorldEdits, from: WorldEdits, to: WorldEdits): 
   const aiNames = moveMap(now.aiNames, from.aiNames, to.aiNames);
   const interventions = moveList(now.interventions, from.interventions, to.interventions);
   const terrain = moveList(now.terrain, from.terrain, to.terrain);
+  const upheavals = moveList(now.upheavals ?? [], from.upheavals ?? [], to.upheavals ?? []);
   const marks = moveById(now.marks, from.marks, to.marks);
   const flags = moveMap(now.flags, from.flags, to.flags);
   const characters = moveById(now.characters, from.characters, to.characters);
-  if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain && marks === now.marks && flags === now.flags && characters === now.characters)
+  const sameUps = upheavals === (now.upheavals ?? []) || (!upheavals.length && !now.upheavals);
+  if (names === now.names && aiNames === now.aiNames && interventions === now.interventions && terrain === now.terrain && sameUps && marks === now.marks && flags === now.flags && characters === now.characters)
     return now;
   const out: WorldEdits = { names, interventions, terrain };
   // 草图不记撤销步(见文件头),照现在的留着
   if (now.sketch) out.sketch = now.sketch;
+  if (upheavals.length) out.upheavals = sameUps ? now.upheavals : upheavals;
   if (aiNames && Object.keys(aiNames).length) out.aiNames = aiNames;
   if (marks?.length) out.marks = marks;
   if (flags && Object.keys(flags).length) out.flags = flags;
@@ -175,12 +178,22 @@ function moveList<T>(now: readonly T[], from: readonly T[], to: readonly T[]): T
   const drop = without(from, to);
   const add = without(to, from);
   if (!drop.length && !add.length) return now as T[];
+  // 之后没再改过这一项(现在和 from 一模一样):正好换成 to(一模一样的有几条时,也不会认错撤销的是哪一条)
+  if (now.length === from.length && now.every((x, i) => x === from[i] || key(x) === key(from[i]))) return to.slice();
   const out = without(now, drop);
-  const have = new Set(out.map(key));
+  // 一模一样的可以有几条(同一处放了两次):按条数比,现在已经和 to 里一样多的不再放
+  const count = (list: readonly T[]) => {
+    const m = new Map<string, number>();
+    for (const x of list) m.set(key(x), (m.get(key(x)) ?? 0) + 1);
+    return m;
+  };
+  const have = count(out);
+  const want = count(to);
   for (const x of add) {
-    if (have.has(key(x))) continue;
+    const k = key(x);
+    if ((have.get(k) ?? 0) >= (want.get(k) ?? 0)) continue;
     out.splice(Math.min(out.length, to.indexOf(x)), 0, x);
-    have.add(key(x));
+    have.set(k, (have.get(k) ?? 0) + 1);
   }
   return out.length === now.length && out.every((x, i) => x === now[i]) ? (now as T[]) : out;
 }
@@ -303,6 +316,27 @@ export function addIntervention(v: Intervention): boolean {
 export function removeIntervention(i: number) {
   if (!(i >= 0 && i < state.interventions.length)) return;
   commitEdits({ ...state, interventions: state.interventions.filter((_, j) => j !== i) });
+}
+
+/**
+ * 地形大事:加一件(清理过的;不合格的、已满 UPHEAVALS_MAX 件的不加)。返回加上的那一件(没加 = null)。
+ * App 看到地形大事变了就在后台从那一年起重推(那一年以前不变)
+ */
+export function addUpheaval(u: Upheaval): Upheaval | null {
+  const c = cleanUpheaval(u);
+  const list = state.upheavals ?? [];
+  if (!c || list.length >= UPHEAVALS_MAX) return null;
+  commitEdits({ ...state, upheavals: [...list, c] });
+  return c;
+}
+
+/** 地形大事:去掉第 i 件(下标越界 = 不动;一件不剩就去掉这一项) */
+export function removeUpheaval(i: number) {
+  const list = state.upheavals ?? [];
+  if (!(i >= 0 && i < list.length)) return;
+  const next: WorldEdits = { ...state, upheavals: list.filter((_, j) => j !== i) };
+  if (!next.upheavals!.length) delete next.upheavals;
+  commitEdits(next);
 }
 
 /**

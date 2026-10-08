@@ -95,9 +95,10 @@ export class InterventionModel {
     this.haltRules = list.filter((v): v is Halt => v.kind === 'halt');
   }
 
-  /** 地块 → 州(国家模型挂上以后才有;按地块定位的键靠它找州) */
+  /** 地块 → 州(国家模型挂上以后才有;按地块定位的键靠它找州;地形大事以后按每块地最早属于的州,见 Regions.keyOf) */
   get of(): ArrayLike<number> {
-    return this.pm?.terrain.regions.of ?? [];
+    const r = this.pm?.terrain.regions;
+    return r ? (r.keyOf ?? r.of) : [];
   }
 
   /** 挂上国家模型以后(installInterventions):解析永久划州的州键 */

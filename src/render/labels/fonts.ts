@@ -91,9 +91,13 @@ export async function ensureFonts(style: LabelStyle, text: string, timeoutMs = 8
   }
 }
 
-/** 字体是否已经就绪(同步查询,测试和冒烟检查用) */
+/** 字体是否已经就绪(同步查询;字多时 document.fonts.check 要逐字查,查过就绪的记下,不再查) */
 export function fontsReady(style: LabelStyle, text = '海'): boolean {
   if (typeof document === 'undefined' || !document.fonts) return false;
   const family = familyFor(style);
-  return FONT_FILES.filter((f) => f.family === family).every((f) => document.fonts.check(fontCss(f.family, f.weight, 16), text));
+  const key = `${family}|${text}`;
+  if (ready.has(key)) return true;
+  const ok = FONT_FILES.filter((f) => f.family === family).every((f) => document.fonts.check(fontCss(f.family, f.weight, 16), text));
+  if (ok) ready.add(key);
+  return ok;
 }
