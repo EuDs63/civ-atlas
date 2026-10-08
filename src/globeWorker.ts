@@ -9,6 +9,7 @@
  */
 import type { World } from './gen/world';
 import { rasterize } from './gen/raster';
+import { rasterizeWithHelpers } from './gullyPool';
 import type { LayerId } from './render/layers';
 import { renderLayer } from './render/layers';
 import { realisticGlobeMaps } from './render/realistic';
@@ -25,12 +26,13 @@ export type GlobeTexResponse =
   | { ok: true; bitmap: ImageBitmap; ms: number; slope?: { w: number; h: number; data: Uint8Array } }
   | { ok: false; error: string };
 
-self.onmessage = (e: MessageEvent<GlobeTexRequest>) => {
+self.onmessage = async (e: MessageEvent<GlobeTexRequest>) => {
   const m = e.data;
   try {
     if (typeof OffscreenCanvas === 'undefined') throw new Error('这个浏览器不支持后台画图');
     const t0 = performance.now();
-    const raster = rasterize(m.world, m.scale);
+    // 沟和山脊只有写实风打光用得着(分给帮手线程算)
+    const raster = m.style === 'realistic' ? await rasterizeWithHelpers(m.world, m.scale) : rasterize(m.world, m.scale, false);
     let bitmap: ImageBitmap;
     let slope: { w: number; h: number; data: Uint8Array } | undefined;
     if (m.style === 'realistic') {

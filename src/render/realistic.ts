@@ -19,6 +19,7 @@ import {
   mix,
   ramp,
   riverLod,
+  rasterRowCos,
   rowCos,
   valueNoiseP,
   wrapCells,
@@ -28,6 +29,7 @@ import {
   type VecView,
 } from './common';
 import { smoothstep } from '../gen/util';
+import { CREEK_FRAC, creeksOf } from '../gen/creeks';
 import { reprojectImage, type Projector } from './projection';
 
 /**
@@ -107,6 +109,7 @@ export function renderRealistic(ctx: CanvasRenderingContext2D, world: World, r: 
 /**
  * 河流的细节层级(k = 缩放倍数):
  * - 全图只画流量够大的河(小溪放大才出现);最粗的河约 2.4 个世界单位(全图约 1.5 个屏幕像素)
+ * - 放大后先补齐小河,再往下是比成河门槛还小的小溪(gen/creeks.ts):放大 4 倍左右小溪都出来
  * - 放大后细水那一份宽度按 k^−0.6 收(屏幕上几乎不变粗),大河的宽度几乎按世界单位(k^−0.12,屏幕上约按 k^0.88 变粗)→ 主干越放大越显得粗
  */
 export function realisticRiverStyle(k: number, threshold: number): RiverStyle {
@@ -117,18 +120,32 @@ export function realisticRiverStyle(k: number, threshold: number): RiverStyle {
     maxW: 0.55 + 1.9 * Math.pow(kk, -0.12),
     fluxRef: 1400,
     thin: Math.pow(kk, -0.6),
-    minFlux: threshold * riverLod(kk),
+    minFlux: threshold * (kk > 1 ? Math.max(CREEK_FRAC, 4.5 * Math.pow(kk, -2.2)) : riverLod(kk)),
   };
 }
 
-/** 河流(矢量层):越往下游越宽,河口张开;深色河岸让细河在浅色地面上也看得清 */
-export function drawRealisticRivers(ctx: CanvasRenderingContext2D, world: World, r: Raster, v: VecView) {
+/** 河 + 小溪(放大后的细节层画;记住上一次的,河网几何也就按这个数组缓存) */
+const withCreeks = new WeakMap<World, World['rivers']>();
+function riversOf(world: World, k: number): World['rivers'] {
+  if (k <= 1) return world.rivers;
+  let r = withCreeks.get(world);
+  if (!r) withCreeks.set(world, (r = [...world.rivers, ...creeksOf(world)]));
+  return r;
+}
+
+/**
+ * 河流(矢量层):越往下游越宽,河口张开;深色河岸让细河在浅色地面上也看得清。
+ * creeks = false:放大后也不画小溪(细节层上盖着现算的块、块里画了小溪时,底下这张省掉)
+ */
+export function drawRealisticRivers(ctx: CanvasRenderingContext2D, world: World, r: Raster, v: VecView, creeks = true) {
   const style = realisticRiverStyle(v.k, world.riverThreshold);
-  drawRivers(ctx, world.rivers, { ...v, wrap: wrapOf(world) }, world.riverThreshold, style, {
+  drawRivers(ctx, creeks ? riversOf(world, v.k) : world.rivers, { ...v, wrap: wrapOf(world) }, world.riverThreshold, style, {
     water: r.water,
     w: r.w,
     h: r.h,
     scale: r.scale,
+    // 放大后现算的一块:河只留在这一块自己的陆地上
+    origin: r.win ? [r.win.x0 / r.scale, r.win.y0 / r.scale] : undefined,
     bank: { color: 'rgba(22, 40, 30, 0.34)', width: 0.45 * (style.thin ?? 1) },
     mouthFlare: 1.5,
     widthPower: 0.65,
@@ -549,33 +566,60 @@ export function realisticGlobePixels(r: Raster): { shaded: Uint8ClampedArray; al
   return { shaded: shaded!, albedo: cap.albedo, slope: cap.slope };
 }
 
+/**
+ * 放大后现算的一块(gen/rasterWindow.ts)上色:和整张图同一套画法(不含河),大尺度晕渲按整张图的粗网格(macroGrids)取样。
+ * 返回 RGBA 像素(已做水陆交界抗锯齿);四周 WINDOW_PAD 个像素邻居不全,调用方裁掉
+ */
+export function realisticWindowPixels(r: Raster, grids: MacroGrids): Uint8ClampedArray {
+  let out: Uint8ClampedArray | null = null;
+  const sink = {
+    createImageData: (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData: (img: { data: Uint8ClampedArray }) => {
+      out = img.data;
+    },
+  } as unknown as CanvasRenderingContext2D;
+  paintRealistic(sink, r, undefined, false, grids);
+  return out!;
+}
 
 /**
  * cap:地球仪要的底色和等效坡度也顺手记下来(不给 = 只画平面主图,画出来的一样)。
  * keepRaw:返回水陆交界抗锯齿之前的像素(一份拷贝)
  */
-function paintRealistic(ctx: CanvasRenderingContext2D, r: Raster, cap?: GlobeCapture, keepRaw = false): Uint8ClampedArray | null {
+function paintRealistic(ctx: CanvasRenderingContext2D, r: Raster, cap?: GlobeCapture, keepRaw = false, grids?: MacroGrids): Uint8ClampedArray | null {
   const { w, h, elev, water, temp, precip, ice: iceCover, iceConc, iceTone } = r;
+  // 打光用的地面:海拔 + 山坡上的沟和山脊(只管明暗,见 Raster.gully)
+  const relief = reliefOf(r);
   // 细节晕渲(沟壑纹理)+ 大尺度晕渲(整条山脉的明暗面)+ 海底晕渲
-  const shade = hillshade(r, 0.012, 0);
-  const { shade: macro, level, gx: mgx, gy: mgy } = macroShade(r, !!cap);
+  const shade = hillshade(relief === elev ? r : { ...r, elev: relief }, 0.012, 0);
+  // 放大后现算的一块(r.win):大尺度晕渲按整张图的那一份取样,纹理按整张图上的位置取(和整张图、相邻的块都接得上)
+  const win = r.win;
+  const { shade: macro, level, gx: mgx, gy: mgy } = grids ? macroUpsample(grids, r) : macroShade(r, !!cap);
   const zd = 0.012 * r.scale;
   const alb = cap?.albedo;
   const slo = cap?.slope;
   const lut = biomePalette();
   const ocean = oceanLut();
   const slopeZ = 0.5 * 0.012 * r.scale; // 中心差分 / 2,与细节晕渲同一夸张系数
+  // 整张图的宽高(像素)和这张图的像素 → 整张图像素的换算:x' = (x + x0 + 0.5) × fx − 0.5
+  const W0 = win ? grids!.w : w;
+  const fx = win ? W0 / win.W : 1;
+  const fy = win ? grids!.h / win.H : 1;
+  const wx0 = win ? win.x0 : 0;
+  const wy0 = win ? win.y0 : 0;
   // 东西相连:纹理噪声的格数取整,左右两边的格点对上
-  const n6 = wrapCells(w, 6);
+  const n6 = wrapCells(W0, 6);
   // 雪线的抖动:平滑噪声(高纬度大片地方气温都在雪线附近,值噪声会露出一格一格)
-  const snowN = cylinderNoise(11, w, 5);
+  const snowN = win ? cylinderNoise(11, W0, 5, Float64Array.from({ length: w }, (_, px) => (wx0 + px + 0.5) * fx)) : cylinderNoise(11, w, 5);
 
   const img = ctx.createImageData(w, h);
   const d = img.data;
   const col: RGB = [0, 0, 0];
   for (let py = 0; py < h; py++) {
     // 东西向坡度按纬度修正
-    const gxk = 1 / Math.max(rowCos(py, h), 0.01);
+    const gxk = 1 / Math.max(rasterRowCos(r, py), 0.01);
+    // 纹理按整张图的行取
+    const ty = win ? (wy0 + py + 0.5) * fy - 0.5 : py;
     for (let px = 0; px < w; px++) {
       const k = py * w + px;
       const e = elev[k];
@@ -627,22 +671,22 @@ function paintRealistic(ctx: CanvasRenderingContext2D, r: Raster, cap?: GlobeCap
         // 1. 生物群落底色:按 温度 × 降水 查连续调色板,群落之间自然渐变
         paletteColor(lut, temp[k], precip[k], col);
         // 同一群落内的明暗变化:降水多更深
-        const vn = valueNoiseP((px * n6) / w, py / 6, 3, n6);
+        const vn = win ? valueNoiseP((((wx0 + px + 0.5) * fx - 0.5) * n6) / W0, ty / 6, 3, n6) : valueNoiseP((px * n6) / w, py / 6, 3, n6);
         const v = 1.03 - Math.min(0.12, precip[k] / 25000) + 0.05 * (vn - 0.5);
         let cr = col[0] * v;
         let cg = col[1] * v;
         let cb = col[2] * v;
         // 高山 / 陡坡:裸岩。坡度直接按海拔梯度算(和光照方向无关),
         // 不再用"明暗偏离平地多少"来估计 —— 那样背光面一律被当成陡坡,暗面会发灰
-        const gx = (elev[px < w - 1 ? k + 1 : k - w + 1] - elev[px > 0 ? k - 1 : k + w - 1]) * gxk;
-        const gy = elev[py < h - 1 ? k + w : k] - elev[py > 0 ? k - w : k];
+        const gx = (relief[px < w - 1 ? k + 1 : k - w + 1] - relief[px > 0 ? k - 1 : k + w - 1]) * gxk;
+        const gy = relief[py < h - 1 ? k + w : k] - relief[py > 0 ? k - w : k];
         const steep = Math.sqrt(gx * gx + gy * gy) * slopeZ;
         const rock = Math.min(0.85, smoothstep(1600, 3600, e) * 0.75 + smoothstep(0.9, 2.2, steep) * 0.45);
         cr += (ROCK[0] - cr) * rock;
         cg += (ROCK[1] - cg) * rock;
         cb += (ROCK[2] - cb) * rock;
         // 积雪:按像素温度(已含海拔递减)
-        const sn = 0.5 + 0.5 * snowN(px, py);
+        const sn = 0.5 + 0.5 * snowN(px, ty);
         const snow = smoothstep(-2, -7, temp[k] + 3 * (sn - 0.5));
         cr += (SNOW[0] - cr) * snow;
         cg += (SNOW[1] - cg) * snow;
@@ -701,6 +745,15 @@ function paintRealistic(ctx: CanvasRenderingContext2D, r: Raster, cap?: GlobeCap
   antialiasShores(d, r);
   ctx.putImageData(img, 0, 0);
   return raw;
+}
+
+/** 打光用的地面高度:海拔加上沟和山脊(没有就是海拔本身) */
+function reliefOf(r: Raster): Float32Array {
+  const g = r.gully;
+  if (!g) return r.elev;
+  const out = new Float32Array(r.elev);
+  for (let k = 0; k < out.length; k++) out[k] += g[k];
+  return out;
 }
 
 /** 暗面最多压暗多少(1 - 下限) */
@@ -788,6 +841,28 @@ function paletteColor(lut: Float32Array, t: number, p: number, out: RGB) {
  * 只要低频信息,所以在 1/4 分辨率上算,再双线性放大回来(省时间)。
  */
 function macroShade(r: Raster, grad = false): { shade: Float32Array; level: Float32Array; gx?: Float32Array; gy?: Float32Array } {
+  return macroUpsample(macroGrids(r, grad), r);
+}
+
+/** 大尺度晕渲的粗网格(1/F 分辨率;见 macroShade):放大后现算的一块也按整张图的这一份取样(各块接得上) */
+export interface MacroGrids {
+  F: number;
+  mw: number;
+  mh: number;
+  /** 整张主图的宽(像素) */
+  w: number;
+  h: number;
+  /** 陆地、海底的明暗;陆地的大范围平均海拔 */
+  SL: Float32Array;
+  SS: Float32Array;
+  P: Float32Array;
+  /** 地球仪要的坡度(陆地、海底各东、南两份) */
+  GL: [Float32Array, Float32Array] | null;
+  GS: [Float32Array, Float32Array] | null;
+}
+
+/** 整张主图(不能是放大现算的一块)的大尺度晕渲粗网格 */
+export function macroGrids(r: Raster, grad = false): MacroGrids {
   const { w, h, elev, water } = r;
   const F = 4;
   const mw = Math.ceil(w / F);
@@ -831,27 +906,44 @@ function macroShade(r: Raster, grad = false): { shade: Float32Array; level: Floa
   // 地球仪:同样的坡度也放大回来(见 GlobeCapture)
   const GL = grad ? lowGrad(E, mw, mh, (MACRO_EXAG * r.scale) / F, stretch) : null;
   const GS = grad ? lowGrad(D, mw, mh, (SEA_EXAG * r.scale) / F, stretch) : null;
-  const gx = grad ? new Float32Array(w * h) : undefined;
-  const gy = grad ? new Float32Array(w * h) : undefined;
-  // 4) 双线性放大回原分辨率:海面像素取海底的明暗,其余取陆地的
+  return { F, mw, mh, w, h, SL, SS, P, GL, GS };
+}
+
+/**
+ * 4) 双线性放大回 r 的分辨率:海面像素取海底的明暗,其余取陆地的。
+ * r 是放大现算的一块(r.win)时,按它在整张图上的位置取样(列取模,行夹在上下边之内)
+ */
+function macroUpsample(g: MacroGrids, r: Raster): { shade: Float32Array; level: Float32Array; gx?: Float32Array; gy?: Float32Array } {
+  const { w, h, water } = r;
+  const { F, mw, mh, SL, SS, P, GL, GS } = g;
+  const win = r.win;
+  // 这张图的像素 → 整张图的像素:x' = (x + 0.5) × fx − 0.5
+  const fx = win ? g.w / win.W : 1;
+  const fy = win ? g.h / win.H : 1;
+  const ox = win ? win.x0 : 0;
+  const oy = win ? win.y0 : 0;
+  const gx = GL ? new Float32Array(w * h) : undefined;
+  const gy = GL ? new Float32Array(w * h) : undefined;
   const shade = new Float32Array(w * h);
   const level = new Float32Array(w * h);
   const cx0 = new Int32Array(w);
   const cx1 = new Int32Array(w);
   const cax = new Float32Array(w);
   for (let px = 0; px < w; px++) {
-    const fx = (px + 0.5) / F - 0.5;
+    const fx0 = win ? ((ox + px + 0.5) * fx) / F - 0.5 : (px + 0.5) / F - 0.5;
     // 左右边的像素插在最后一格和第一格之间
-    const x0 = Math.floor(fx);
-    cax[px] = fx - x0;
-    cx0[px] = x0 < 0 ? x0 + mw : x0;
-    cx1[px] = x0 + 1 >= mw ? x0 + 1 - mw : x0 + 1;
+    const x0 = Math.floor(fx0);
+    cax[px] = fx0 - x0;
+    let a = x0 % mw;
+    if (a < 0) a += mw;
+    cx0[px] = a;
+    cx1[px] = a + 1 >= mw ? a + 1 - mw : a + 1;
   }
   for (let py = 0; py < h; py++) {
-    let fy = (py + 0.5) / F - 0.5;
-    fy = fy < 0 ? 0 : fy > mh - 1 ? mh - 1 : fy;
-    const y0 = Math.max(0, Math.min(mh - 2, fy | 0));
-    const ay = mh > 1 ? fy - y0 : 0;
+    let fy0 = win ? ((oy + py + 0.5) * fy) / F - 0.5 : (py + 0.5) / F - 0.5;
+    fy0 = fy0 < 0 ? 0 : fy0 > mh - 1 ? mh - 1 : fy0;
+    const y0 = Math.max(0, Math.min(mh - 2, fy0 | 0));
+    const ay = mh > 1 ? fy0 - y0 : 0;
     const r0 = y0 * mw;
     const r1 = Math.min(mh - 1, y0 + 1) * mw;
     for (let px = 0; px < w; px++) {

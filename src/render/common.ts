@@ -62,6 +62,14 @@ export function rowCos(py: number, h: number): number {
   return Math.sin(((py + 0.5) / h) * Math.PI);
 }
 
+/** 栅格第 py 行像素中心的纬度余弦(放大后现算的一块按它在整张图上的位置,见 Raster.win) */
+export function rasterRowCos(r: Pick<Raster, 'h' | 'win'>, py: number): number {
+  const v = r.win;
+  if (!v) return rowCos(py, r.h);
+  const y = Math.min(v.H - 0.5, Math.max(0.5, v.y0 + py + 0.5));
+  return Math.sin((y / v.H) * Math.PI);
+}
+
 /**
  * 东西相连时的值噪声格数:宽 w 像素、每格约 cell 像素 → 取整成整数格,左右两边的格点正好对上。
  * 取样时 x 按 px × n / w 算(见 valueNoiseP)
@@ -92,13 +100,15 @@ export function valueNoiseP(x: number, y: number, s: number, period: number): nu
  * 东西相连的主图上的平滑噪声(约 −1..1,波长约 cell 像素):把像素列绕成一个圆柱取三维单纯形噪声 ——
  * 左右无缝,也没有值噪声那种方格感(拿来做"过门槛"的抖动时,大片缓变的区域不会露出一格一格)
  */
-export function cylinderNoise(seed: number, w: number, cell: number): (px: number, py: number) => number {
+export function cylinderNoise(seed: number, w: number, cell: number, cols?: ArrayLike<number>): (px: number, py: number) => number {
   const n3 = noise3(seed);
   const R = w / (2 * Math.PI * cell);
-  const cx = new Float64Array(w);
-  const sx = new Float64Array(w);
-  for (let px = 0; px < w; px++) {
-    const t = ((px + 0.5) / w) * 2 * Math.PI;
+  // cols:每一列像素中心在 w 宽的整张图上的 x(放大后现算的一块用;py 也按整张图的行给,可以是小数)
+  const n = cols ? cols.length : w;
+  const cx = new Float64Array(n);
+  const sx = new Float64Array(n);
+  for (let px = 0; px < n; px++) {
+    const t = ((cols ? cols[px] : px + 0.5) / w) * 2 * Math.PI;
     cx[px] = R * Math.cos(t);
     sx[px] = R * Math.sin(t);
   }
@@ -157,7 +167,7 @@ export function hillshade(r: Raster, exaggeration: number, waterFactor = 0.15): 
   for (let py = 0; py < h; py++) {
     const up = py > 0 ? py - 1 : py;
     const dn = py < h - 1 ? py + 1 : py;
-    const zx = z / Math.max(rowCos(py, h), 0.01);
+    const zx = z / Math.max(rasterRowCos(r, py), 0.01);
     const row = py * w;
     for (let px = 0; px < w; px++) {
       const k = row + px;
@@ -324,6 +334,8 @@ export interface RiverOptions {
   h: number;
   /** 水陆图每世界单位几个像素(raster.scale;默认 1) */
   scale?: number;
+  /** 水陆图左上角在哪(世界单位;放大后现算的一块用,默认整张图的左上角) */
+  origin?: [number, number];
   /** 河岸暗边:颜色 + 每侧加宽(像素,按 scale=1 计) */
   bank?: { color: string; width: number };
   /** 河口喇叭口:末端放大到几倍 */
@@ -825,7 +837,7 @@ function drawRiverNetwork(
     l.g.imageSmoothingEnabled = true;
     l.g.imageSmoothingQuality = 'low';
     if (pm) l.g.drawImage(pm.canvas, 0, 0);
-    else l.g.drawImage(mask!.canvas, v.ox, v.oy, w * ms, h * ms);
+    else l.g.drawImage(mask!.canvas, v.ox + (opts.origin?.[0] ?? 0) * v.s, v.oy + (opts.origin?.[1] ?? 0) * v.s, w * ms, h * ms);
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.drawImage(l.canvas, 0, 0);

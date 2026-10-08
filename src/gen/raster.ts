@@ -22,6 +22,8 @@ import type { Mesh } from './mesh';
 import { blurField } from './mesh';
 import { classifyBiome } from './biomes';
 import { SEA_ICE_MIN, seaIceNodes, seaIcePixels } from './seaice';
+import { Gullies, gullyHeights, type GullyInput } from './gully';
+export { gullyHeights } from './gully';
 import { smoothstep, subSeed, tileableFbm } from './util';
 // 河谷要正好落在画出来的河下面,所以直接用画河的同一套几何(纯计算,不碰页面,worker / Node 都能跑)
 import { riverGeometry } from '../render/common';
@@ -51,6 +53,16 @@ export interface Raster {
   iceConc: Uint8Array;
   /** 这个像素所在那块浮冰的随机色调 × 255(ice > 0 时才有意义)。写实风用来让每块冰明暗略有不同 */
   iceTone: Uint8Array;
+  /**
+   * 山坡上的沟和山脊(米,见 gen/gully.ts):写实风打光时叠在海拔上。只管明暗 —— 海拔、水陆、群落都不变,
+   * 手绘风、数据图层、查询看到的还是 elev。没有 = 不叠
+   */
+  gully?: Float32Array;
+  /**
+   * 放大后现算的一块(gen/rasterWindow.ts):这一块左上角在 W × H 的主图(scale 倍)里的像素位置。
+   * 没有 = 整张主图。画风据此按真实的纬度、整张图上的位置算晕渲和纹理(和整张图接得上)
+   */
+  win?: { x0: number; y0: number; W: number; H: number };
   /**
    * 等距圆柱主图东西相连 —— 第 0 列和最后一列相邻,邻域操作的列下标取模;
    * 第 py 行像素中心的纬度 = 90° − (py + 0.5) / h × 180°(上边是北极、下边是南极)
@@ -155,7 +167,7 @@ function cellFields(world: World): CellFields {
 
 /** 噪声贴图只和种子有关:记住上一次的,只调参数不换种子时直接复用 */
 let tileCache: { seed: number; dTile: Float32Array; jTile: Float32Array } | null = null;
-function noiseTiles(seed: number) {
+export function noiseTiles(seed: number) {
   if (tileCache && tileCache.seed === seed) return tileCache;
   const dTile = tileableFbm(subSeed(seed, 'detail'), DETAIL_SIZE, 36, 4, 0.55);
   const jTile = tileableFbm(subSeed(seed, 'jitter'), JITTER_SIZE, 18, 3, 0.5);
@@ -170,29 +182,56 @@ const RIVER_STYLE = { color: '', minW: 0.5, maxW: 7.5, fluxRef: 1000 };
 const RIVER_FLARE = 1.7;
 const RIVER_POWER = 0.65;
 
+/** 刻河谷用的河道几何(世界单位;河道的 x 已展开成连续的,可能出左右边) */
+export type ValleyLines = ReturnType<typeof riverGeometry>;
+
+/**
+ * 河道中心线和河宽:用画河的同一套几何(riverGeometry:平滑 + 样条、支流接到干流上),这样谷底正好在画出来的河下面。
+ * rivers 可以带上比成河门槛更小的溪流(threshold 仍是成河门槛:溪流的谷浅一些)
+ */
+export function valleyLines(rivers: { pts: Float32Array }[], threshold: number, width: number): ValleyLines {
+  return riverGeometry(rivers, threshold, RIVER_STYLE, RIVER_FLARE, RIVER_POWER, width);
+}
+
 /**
  * 沿每条河刻出河谷:写入下切深度 carve(米)和噪声抑制系数 calm(0..1),都取各河段的最大值。
- * 河道中心线和河宽用画河的同一套几何(riverGeometry:平滑 + 样条、支流接到干流上),
- * 这样谷底正好在画出来的河下面。
+ * 画布是 w × h 像素(scale 像素 / 世界单位),左上角在 scale 倍主图的 (ox, oy) 像素;period = scale 倍主图的宽
+ * (东西相连:出边的那段在另一边再刻一份)。整张主图 ox = oy = 0、period = w;放大现算的一块见 gen/rasterWindow.ts。
+ * 流量不到成河门槛的溪流(threshold)谷更浅、更窄
  */
-function carveValleys(world: World, scale: number, w: number, h: number, carve: Float32Array, calm: Float32Array) {
-  // 河道的 x 已展开成连续的(可能出左右边),出边的那段在另一边再刻一份
-  const lines = riverGeometry(world.rivers, world.riverThreshold, RIVER_STYLE, RIVER_FLARE, RIVER_POWER, world.width);
+export function carveValleys(
+  lines: ValleyLines,
+  threshold: number,
+  scale: number,
+  w: number,
+  h: number,
+  carve: Float32Array,
+  calm: Float32Array,
+  ox = 0,
+  oy = 0,
+  period = w,
+) {
   const span = RIVER_STYLE.maxW - RIVER_STYLE.minW;
   for (const d of lines) {
     for (let i = 0; i < d.x.length - 1; i++) {
       const rw = 0.5 * (d.w[i] + d.w[i + 1]); // 河宽(世界单位)
       const t = Math.min(1, Math.max(0, (rw - RIVER_STYLE.minW) / span)); // 河的大小 0..1
+      const fl = 0.5 * (d.f[i] + d.f[i + 1]);
+      // 溪流:按流量收(成河门槛的 1/5 时约一半)
+      const cf = fl < threshold ? Math.sqrt(Math.max(0, fl) / threshold) : 1;
       const flat = 0.5 * rw * scale; // 谷底 ≈ 河面半宽
-      const wall = flat + (2.5 + 1.5 * t) * scale; // 谷壁在河岸外 2.5–4 像素内收住
+      const wall = flat + (2.5 + 1.5 * t) * scale * (cf < 1 ? 0.5 + 0.5 * cf : 1); // 谷壁在河岸外 2.5–4 像素内收住
       const reach = wall + 2 * scale; // 噪声抑制再往外延一点
-      const depth = 30 + 50 * t;
-      const ax = d.x[i] * scale;
-      const bx = d.x[i + 1] * scale;
+      const depth = cf < 1 ? (30 + 50 * t) * cf : 30 + 50 * t;
+      const ax = d.x[i] * scale - ox;
+      const bx = d.x[i + 1] * scale - ox;
+      const ay = d.y[i] * scale - oy;
+      const by = d.y[i + 1] * scale - oy;
+      if (Math.min(ay, by) - reach > h || Math.max(ay, by) + reach < 0) continue;
       for (const s of WRAP_SHIFTS) {
-        const sh = s * w;
+        const sh = s * period;
         if (Math.min(ax, bx) + sh - reach > w || Math.max(ax, bx) + sh + reach < 0) continue;
-        valleySegment(carve, calm, w, h, ax + sh, d.y[i] * scale, bx + sh, d.y[i + 1] * scale, depth, flat, wall, reach);
+        valleySegment(carve, calm, w, h, ax + sh, ay, bx + sh, by, depth, flat, wall, reach);
       }
     }
   }
@@ -523,8 +562,58 @@ function tri3(tile: Float32Array, size: number, f: number, o: number): number {
   return s;
 }
 
-/** 铺像素(流程见文件头) */
-export function rasterize(world: World, scale = 1): Raster {
+/**
+ * 铺像素(流程见文件头)。沟和山脊(只管写实风的明暗)当场算好,存进 gully;
+ * gully = false:不算(高度图、手绘风、数据图层用不着,省下和整张图一样大的几个数组和逐像素的噪声)
+ */
+export function rasterize(world: World, scale = 1, gully = true): Raster {
+  const { raster, job } = rasterizeRaw(world, scale, gully);
+  if (job) finishGully(raster, job, gullyHeights(job, 0, job.n));
+  return raster;
+}
+
+/**
+ * 铺像素,但沟和山脊先不算:返回要算的像素(job)。沟壑是铺像素里最慢的一步(全是陆地上的逐像素噪声),
+ * 后台线程可以把它分给几个线程,和推文明同时算(gullyHeights 分段算,finishGully 叠回去);结果和 rasterize 一样
+ */
+export function rasterizeDeferred(world: World, scale = 1): { raster: Raster; job: GullyJob } {
+  const { raster, job } = rasterizeRaw(world, scale, true);
+  return { raster, job: trimJob(job!) };
+}
+
+/** 铺像素;gully = true 时把要算沟壑的像素记进 job(没截短) */
+function rasterizeRaw(world: World, scale: number, gully: boolean): { raster: Raster; job: GullyJob | null } {
+  const b = rasterBase(world, scale);
+  const { w, h, N } = b;
+  const carve = b.scratch.fill(0);
+  const calm = new Float32Array(N);
+  carveValleys(valleyLines(world.rivers, world.riverThreshold, world.width), world.riverThreshold, scale, w, h, carve, calm);
+
+  const { dTile, jTile } = noiseTiles(world.params.seed);
+  const out: Raster = {
+    w,
+    h,
+    scale,
+    elev: new Float32Array(N),
+    temp: new Float32Array(N),
+    precip: new Float32Array(N),
+    water: new Uint8Array(N),
+    biome: new Uint8Array(N),
+    cell: b.cell,
+    ice: new Float32Array(N),
+    iceConc: new Uint8Array(N),
+    iceTone: new Uint8Array(N),
+    wrap: true,
+  };
+  const R = world.width / (2 * Math.PI);
+  const job = gully ? newGullyJob(subSeed(world.params.seed, 'gully'), w, h, R, scale) : null;
+  shadeSphere(out, b.tri, b.wa, b.wb, b.planes, b.elev, carve, calm, dTile, jTile, b.g, R, job);
+  seaIcePixels(world, out);
+  return { raster: out, job };
+}
+
+/** 铺像素的前半段(整张主图和放大现算都要用):插值源、球面三角形覆盖、柔化后的海拔、最近地块 */
+export function rasterBase(world: World, scale: number) {
   const w = Math.round(world.width * scale);
   const h = Math.round(world.height * scale);
   const N = w * h;
@@ -532,8 +621,21 @@ export function rasterize(world: World, scale = 1): Raster {
   const f = cellFields(world);
   const g = sphereGrid(w, h);
   const { tri, wa, wb } = sphereCover(mesh, g);
+  const planes = cellPlanes(mesh, f);
+  const elev = new Float32Array(N);
+  const cell = new Int32Array(N);
+  sphereFill(mesh.triangles, f.sElev, tri, wa, wb, elev, cell);
 
-  // 海拔、最近地块;其余字段存成"权重的线性函数":v = P₀·w_A + P₁·w_B + P₂(P₀ = v_A − v_C,P₁ = v_B − v_C,P₂ = v_C)
+  // 柔化(约半个地块宽;东西向按纬度放宽,列下标取模)
+  const br = Math.max(1, Math.round(mesh.spacing * scale * 0.35));
+  const scratch = new Float32Array(N);
+  blurSphere(elev, w, h, br, scratch, g.cosLat);
+  blurSphere(elev, w, h, br, scratch, g.cosLat);
+  return { w, h, N, g, tri, wa, wb, planes, elev, cell, scratch };
+}
+
+/** 海拔之外的字段存成"权重的线性函数":v = P₀·w_A + P₁·w_B + P₂(P₀ = v_A − v_C,P₁ = v_B − v_C,P₂ = v_C),每个三角形 PLANE 个数 */
+export function cellPlanes(mesh: Mesh, f: CellFields): Float32Array {
   const { triangles } = mesh;
   const nt = triangles.length / 3;
   const planes = new Float32Array(nt * PLANE);
@@ -550,39 +652,80 @@ export function rasterize(world: World, scale = 1): Raster {
       planes[o + 2] = fv[c];
     }
   }
-  const elev = new Float32Array(N);
-  const cell = new Int32Array(N);
-  sphereFill(triangles, f.sElev, tri, wa, wb, elev, cell);
+  return planes;
+}
 
-  // 柔化(约半个地块宽;东西向按纬度放宽,列下标取模)
-  const br = Math.max(1, Math.round(mesh.spacing * scale * 0.35));
-  const scratch = new Float32Array(N);
-  blurSphere(elev, w, h, br, scratch, g.cosLat);
-  blurSphere(elev, w, h, br, scratch, g.cosLat);
+// ---------------------------------------------------------------------------
+// 整张主图的沟和山脊:先记下要算的像素,算好再叠回去
 
-  const carve = scratch.fill(0);
-  const calm = new Float32Array(N);
-  carveValleys(world, scale, w, h, carve, calm);
+/**
+ * 整张主图上要算沟和山脊的像素(按行排好)。gullyHeights 只要 GullyInput 那几样(可以分段交给后台线程);
+ * base / cut / floor 留在原地,finishGully 用
+ */
+export interface GullyJob extends GullyInput {
+  n: number;
+  /** 叠沟壑之前的海拔(坡上的细节噪声已经压过) */
+  base: Float32Array;
+  /** 河谷往下切多少(米;0 = 不在河谷里) */
+  cut: Float32Array;
+  /** 1 = 内陆(最低垫到 2 米,不出现海) */
+  floor: Uint8Array;
+}
 
-  const { dTile, jTile } = noiseTiles(world.params.seed);
-  const out: Raster = {
+/** 记像素用的大数组(和 1 倍主图一样大)留着下次用:每次重新分配几十 MB 也要时间。导出用的大图不留(用完就放掉) */
+let jobBuf: GullyJob | null = null;
+
+function newGullyJob(seed: number, w: number, h: number, R: number, scale: number): GullyJob {
+  const N = w * h;
+  if (jobBuf && jobBuf.idx.length === N) return { ...jobBuf, seed, w, h, R, scale, n: 0 };
+  const job: GullyJob = {
+    seed,
     w,
     h,
+    R,
     scale,
-    elev: new Float32Array(N),
-    temp: new Float32Array(N),
-    precip: new Float32Array(N),
-    water: new Uint8Array(N),
-    biome: new Uint8Array(N),
-    cell,
-    ice: new Float32Array(N),
-    iceConc: new Uint8Array(N),
-    iceTone: new Uint8Array(N),
-    wrap: true,
+    n: 0,
+    idx: new Int32Array(N),
+    ge: new Float32Array(N),
+    gn: new Float32Array(N),
+    amp: new Float32Array(N),
+    base: new Float32Array(N),
+    cut: new Float32Array(N),
+    floor: new Uint8Array(N),
   };
-  shadeSphere(out, tri, wa, wb, planes, elev, carve, calm, dTile, jTile, g, world.width / (2 * Math.PI));
-  seaIcePixels(world, out);
-  return out;
+  if (scale === 1) jobBuf = job;
+  return { ...job };
+}
+
+/** 按实际个数截短(交给后台线程时只拷用到的那一段) */
+function trimJob(j: GullyJob): GullyJob {
+  const n = j.n;
+  return {
+    ...j,
+    idx: j.idx.slice(0, n),
+    ge: j.ge.slice(0, n),
+    gn: j.gn.slice(0, n),
+    amp: j.amp.slice(0, n),
+    base: j.base.slice(0, n),
+    cut: j.cut.slice(0, n),
+    floor: j.floor.slice(0, n),
+  };
+}
+
+/** 算好的沟壑叠回去:raster.gully = 叠了沟壑(再按河谷、内陆规则修过)的海拔 − 原来的海拔 */
+export function finishGully(r: Raster, j: GullyJob, heights: Float32Array): void {
+  const gully = new Float32Array(r.w * r.h);
+  const { idx, base, cut, floor } = j;
+  const elev = r.elev;
+  for (let i = 0; i < j.n; i++) {
+    const k = idx[i];
+    let eg = base[i] + heights[i];
+    if (floor[i] && eg < 2) eg = 2;
+    const c = cut[i];
+    if (c > 0 && eg > 0) eg = Math.max(eg - c, Math.min(eg, 1));
+    gully[k] = eg - elev[k];
+  }
+  r.gully = gully;
 }
 
 /** 按重心权重插值一个地块字段(海拔),同时定最近地块(权重最大的顶点) */
@@ -655,12 +798,41 @@ function blurSphere(src: Float32Array, w: number, h: number, r: number, tmp: Flo
   }
 }
 
+/** 沟和山脊(gen/gully.ts)的强弱:幅度 = 系数 × (当地起伏 × 平地留多少 ~ 1(坡越陡越强)+ 破碎海岸另加) */
+const GULLY_K = 1.1;
+/** 平地上沟壑留多少(相对陡坡) */
+const GULLY_FLAT = 0.3;
+/** 破碎海岸(峡湾那样的)另加的幅度(米) */
+const GULLY_FJORD = 160;
+/** 坡度(米 / 世界单位)从多少到多少,沟壑从"平地"过渡到"陡坡" */
+const GULLY_S0 = 2;
+const GULLY_S1 = 30;
+/** 幅度不到这么多米的地方不算(整张图上看不出来:写实风会把平原上很小的明暗起伏压掉) */
+const GULLY_MIN = 5;
+
+/**
+ * 放大现算的一块(gen/rasterWindow.ts):海拔底图是整张主图柔化后的海拔(scale 1 倍)按三次 B 样条取样来的,
+ * 海岸挪动也到这里取(会取到这一块外面)。(x0, y0) = 这一块左上角在 S 倍主图里的像素
+ */
+export interface ZoomBase {
+  /** 沟和山脊(直接算进海拔) */
+  gullies: Gullies;
+  base: Float32Array;
+  w: number;
+  h: number;
+  x0: number;
+  y0: number;
+  S: number;
+}
+
 /**
  * 主图的逐像素:字段按重心权重插值;噪声是三向贴图(按像素在球面上的三维位置取样,
  * 波长按地面上的世界单位算);海岸挪动的东西向位移按纬度放大(同样的地面距离,高纬度占更多像素)、列下标取模。
  * R = 球半径(世界单位)。
+ * 沟和山脊:整张主图记进 job(之后 finishGully 单独存进 out.gully,海拔、水陆不变);放大现算的一块(zoom)直接算进海拔,
+ * 另外多叠两层更细的细节噪声、海岸多挪一层细的(放大以后海岸、山都要更碎)。
  */
-function shadeSphere(
+export function shadeSphere(
   out: Raster,
   tri: Int32Array,
   wA: Float32Array,
@@ -673,12 +845,17 @@ function shadeSphere(
   jTile: Float32Array,
   g: SphereGrid,
   R: number,
+  job: GullyJob | null,
+  zoom: ZoomBase | null = null,
 ) {
   const { w, h, scale } = out;
   const { elev: oElev, temp: oTemp, precip: oPrecip, water: oWater, biome: oBiome, ice: oIce } = out;
+  const gl = zoom?.gullies ?? null;
   const { cosLon, sinLon, cosLat, sinLat } = g;
   // 贴图频率(每世界单位几个贴图像素):细节 1(波长约 14)、海岸低频 1/3、山地细纹理 2.37、气候抖动(波长约 40)
   const FJ = JITTER_SIZE / 18 / 40;
+  const fine2 = !!zoom && scale >= 2;
+  const fine4 = !!zoom && scale >= 4;
   let ti = 0;
   for (let py = 0; py < h; py++) {
     const row = py * w;
@@ -689,6 +866,8 @@ function shadeSphere(
     const w2r = a2 > 0 ? a2 * a2 : 0;
     // 海岸挪动的东西向位移:同样的地面距离在高纬度占 1 / cos(纬度) 个像素(极点附近封顶)
     const stretch = 1 / Math.max(cl, 0.05);
+    const up = py > 0 ? -w : 0;
+    const dn = py < h - 1 ? w : 0;
     for (let px = 0; px < w; px++) {
       const k = row + px;
       const tv = tri[k];
@@ -701,8 +880,10 @@ function shadeSphere(
       const cw = P[o + 6] * fx + P[o + 7] * fy + P[o + 8];
 
       // 三向贴图的权重(按像素在球面上的法向),归一到"混合后标准差不变"
-      const qx = cl * cosLon[px];
-      const qy = cl * sinLon[px];
+      const cL = cosLon[px];
+      const sL = sinLon[px];
+      const qx = cl * cL;
+      const qy = cl * sL;
       const X = qx * R;
       const Y = qy * R;
       const a0 = (qx < 0 ? -qx : qx) - TRI_T;
@@ -722,29 +903,67 @@ function shadeSphere(
       TRI_AT[4] = w1;
       TRI_AT[5] = w2;
       const e = base[k];
-      const d = tri3(dTile, DETAIL_SIZE, 1, 0);
+      let d = tri3(dTile, DETAIL_SIZE, 1, 0);
+      if (fine2) d += 0.45 * tri3(dTile, DETAIL_SIZE, 2, 19.7);
+      if (fine4) d += 0.2 * tri3(dTile, DETAIL_SIZE, 4, 27.1);
       const isLake = lake + 0.12 * d > 0.5;
       let ee = e;
+      let eg = e;
       if (!isLake) {
         const q = 1 - 0.85 * calm[k];
         let eb = e;
+        let rug = 0;
         if (cw > 0.01) {
-          const rug = P[o + 15] * fx + P[o + 16] * fy + P[o + 17];
+          rug = P[o + 15] * fx + P[o + 16] * fy + P[o + 17];
           const D = ((1.2 + 3.5 * rug) * scale * smoothstep(0.01, 0.5, cw)) / DETAIL_STD;
           let wx = tri3(dTile, DETAIL_SIZE, 1, 211.3);
           let wy = tri3(dTile, DETAIL_SIZE, 1, 53.9);
+          if (fine2) {
+            wx += 0.25 * tri3(dTile, DETAIL_SIZE, 2, 311.3);
+            wy += 0.25 * tri3(dTile, DETAIL_SIZE, 2, 83.9);
+          }
           if (rug > 0.02) {
             wx += 1.3 * rug * tri3(dTile, DETAIL_SIZE, 1 / 3, 101.7);
             wy += 1.3 * rug * tri3(dTile, DETAIL_SIZE, 1 / 3, 157.1);
           }
-          eb = sampleWrapped(base, w, h, px + D * wx * stretch, py + D * wy);
+          eb = zoom
+            ? sampleSpline(zoom.base, zoom.w, zoom.h, (zoom.x0 + px + 0.5 + D * wx * stretch) / zoom.S - 0.5, (zoom.y0 + py + 0.5 + D * wy) / zoom.S - 0.5)
+            : sampleWrapped(base, w, h, px + D * wx * stretch, py + D * wy);
         }
         let dd = d;
         if (amp > 60 && e > 0) dd += 0.5 * smoothstep(60, 250, amp) * tri3(dTile, DETAIL_SIZE, 2.37, 33.1);
         ee = eb + amp * q * dd;
-        if (cw === 0 && ee < 2) ee = 2;
         const cv = carve[k];
+        if (cw === 0 && ee < 2) ee = 2;
         if (cv > 0 && ee > 0) ee = Math.max(ee - cv * (1 + amp / 250), Math.min(ee, 1));
+        eg = ee;
+        // 沟和山脊:坡向取柔化海拔的坡(东西向按纬度修正,列下标取模)。
+        // 整张图只算陆地(只管打光,海上看不出来);放大现算的一块连近岸的浅海也算(沟壑会把海岸切碎)
+        if ((job || gl) && (amp > 15 || cw > 0.01) && (zoom ? eb > -120 : ee >= 0)) {
+          const ge = (base[px < w - 1 ? k + 1 : k - w + 1] - base[px > 0 ? k - 1 : k + w - 1]) * 0.5 * scale * stretch;
+          const gn = (base[k + up] - base[k + dn]) * (up && dn ? 0.5 : 1) * scale;
+          const st = smoothstep(GULLY_S0, GULLY_S1, Math.sqrt(ge * ge + gn * gn));
+          const a = GULLY_K * q * (amp * (GULLY_FLAT + (1 - GULLY_FLAT) * st) + (rug > 0 ? GULLY_FJORD * rug * smoothstep(0.01, 0.5, cw) : 0));
+          if (a > GULLY_MIN) {
+            // 坡上本来的细节噪声压一些,让沟壑当主角
+            const gb = eb + amp * q * dd * (1 - 0.6 * st);
+            if (job) {
+              const n = job.n++;
+              job.idx[n] = k;
+              job.ge[n] = ge;
+              job.gn[n] = gn;
+              job.amp[n] = a;
+              job.base[n] = gb;
+              job.cut[n] = cv > 0 ? cv * (1 + amp / 250) : 0;
+              job.floor[n] = cw === 0 ? 1 : 0;
+            } else if (gl) {
+              eg = gb + gl.height(X, Y, Z, -sL, cL, -sl * cL, -sl * sL, cl, ge, gn, a, scale);
+              if (cw === 0 && eg < 2) eg = 2;
+              if (cv > 0 && eg > 0) eg = Math.max(eg - cv * (1 + amp / 250), Math.min(eg, 1));
+            }
+          }
+        }
+        if (zoom) ee = eg;
       }
       oElev[k] = ee;
       const wtr = isLake ? 2 : ee < 0 ? 1 : 0;
@@ -761,6 +980,36 @@ function shadeSphere(
       }
     }
   }
+}
+
+/**
+ * 东西相连的主图上三次 B 样条取值(列下标取模,行夹在上下边之内):比双线性平滑(二阶导数连续),
+ * 放大很多倍再打光也看不出一格一格
+ */
+export function sampleSpline(base: Float32Array, w: number, h: number, sx: number, sy: number): number {
+  const xf = Math.floor(sx);
+  const yf = Math.floor(sy);
+  const tx = sx - xf;
+  const ty = sy - yf;
+  const ux = 1 - tx;
+  const uy = 1 - ty;
+  const bx0 = (ux * ux * ux) / 6;
+  const bx1 = (3 * tx * tx * tx - 6 * tx * tx + 4) / 6;
+  const bx2 = (-3 * tx * tx * tx + 3 * tx * tx + 3 * tx + 1) / 6;
+  const bx3 = (tx * tx * tx) / 6;
+  let x0 = (xf - 1) % w;
+  if (x0 < 0) x0 += w;
+  const x1 = x0 + 1 === w ? 0 : x0 + 1;
+  const x2 = x1 + 1 === w ? 0 : x1 + 1;
+  const x3 = x2 + 1 === w ? 0 : x2 + 1;
+  let v = 0;
+  for (let j = 0; j < 4; j++) {
+    const yy = yf - 1 + j;
+    const r = (yy < 0 ? 0 : yy > h - 1 ? h - 1 : yy) * w;
+    const by = j === 0 ? (uy * uy * uy) / 6 : j === 1 ? (3 * ty * ty * ty - 6 * ty * ty + 4) / 6 : j === 2 ? (-3 * ty * ty * ty + 3 * ty * ty + 3 * ty + 1) / 6 : (ty * ty * ty) / 6;
+    v += by * (bx0 * base[r + x0] + bx1 * base[r + x1] + bx2 * base[r + x2] + bx3 * base[r + x3]);
+  }
+  return v;
 }
 
 /** 东西相连的主图上双线性取值:列下标取模,行夹在上下边(极点)之内 */

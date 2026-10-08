@@ -1294,3 +1294,25 @@ body.terrain-pan .stage.terrain-on:active {
   vertical-align: -2px;
   margin-right: 4px;
 }
+/* 放大后现算的写实风地形块(TerrainDetail.tsx):每一档一个容器,按这一档的比例缩放;块算好淡入 */
+.detail-tiles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.detail-tiles .tile-level {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.detail-tiles canvas.tile {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  transition: opacity 0.35s ease-out;
+}
+.detail-tiles canvas.tile.fade {
+  opacity: 0;
+}

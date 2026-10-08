@@ -11,6 +11,7 @@
  */
 import type { World } from './gen/world';
 import { rasterize, type Raster } from './gen/raster';
+import { rasterizeWithHelpers } from './gullyPool';
 import type { Civ, Year } from './gen/civ/types';
 import type { CivShow, CivStyle } from './render/civ/overlay';
 import type { LayerId } from './render/layers';
@@ -62,14 +63,16 @@ self.onmessage = async (e: MessageEvent<ExportRequest>) => {
     }
     const t0 = performance.now();
     if (m.job === 'heightmap') {
-      const r = m.raster ?? (m.world ? rasterize(m.world, m.scale) : null);
+      // 高度图只要海拔和水陆,不算沟壑
+      const r = m.raster ?? (m.world ? rasterize(m.world, m.scale, false) : null);
       if (!r) throw new Error('没有世界数据');
       const t1 = performance.now();
       const { png, info } = await heightmapPng(r, m.bits, m.seed);
       post({ ok: true, job: 'heightmap', png, info, ms: { raster: t1 - t0, encode: performance.now() - t1 } }, [png.buffer]);
       return;
     }
-    const raster = m.raster ?? rasterize(m.world, m.scale);
+    // 沟和山脊只有写实风打光用得着(分给帮手线程算)
+    const raster = m.raster ?? (m.style === 'realistic' ? await rasterizeWithHelpers(m.world, m.scale) : rasterize(m.world, m.scale, false));
     const t1 = performance.now();
     const cv = new OffscreenCanvas(raster.w, raster.h);
     const ctx = cv.getContext('2d');

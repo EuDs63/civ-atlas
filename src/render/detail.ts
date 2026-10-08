@@ -25,11 +25,14 @@ export const DETAIL_K = 1.2;
 
 export type DetailStyle = 'realistic' | 'fantasy';
 
-/** 在画布上画细节层:v = 世界坐标 → 画布像素的变换,v.k = 缩放倍数 */
-export function drawTerrainDetail(ctx: CanvasRenderingContext2D, world: World, raster: Raster, style: DetailStyle, v: VecView) {
+/**
+ * 在画布上画细节层:v = 世界坐标 → 画布像素的变换,v.k = 缩放倍数。
+ * creeks = false:写实风不画小溪(上面盖着现算的块,块里有)
+ */
+export function drawTerrainDetail(ctx: CanvasRenderingContext2D, world: World, raster: Raster, style: DetailStyle, v: VecView, creeks = true) {
   if (style === 'realistic') {
     drawRealisticShores(ctx, raster, v);
-    drawRealisticRivers(ctx, world, raster, v);
+    drawRealisticRivers(ctx, world, raster, v, creeks);
     return;
   }
   // 像素层按视口变换放大贴上(和地形图被 CSS 放大时一样是双线性插值;放大用不着更贵的高质量缩放)

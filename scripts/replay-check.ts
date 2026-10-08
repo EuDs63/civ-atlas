@@ -1026,6 +1026,88 @@ const cached = await wf();
 console.log('切回画过的画风 renderMs:', cached.renderMs.toFixed(1));
 if (!(cached.renderMs < 20)) errs.push(`切回画过的画风仍在重画(renderMs=${cached.renderMs.toFixed(1)})`);
 
+// 写实风放大到 4 倍左右:地形按屏幕现算一块块(后台线程),停下来以后看得见的块都算好、放上去(淡入完),没有报错;
+// 换到地形图(手绘风)现算的块撤掉;缩回 1 倍细节层关掉
+{
+  const zp = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  zp.on('pageerror', (e) => errs.push(`放大现算:${e.message}`));
+  zp.on('console', (m) => m.type() === 'error' && errs.push(`放大现算:${m.text()}`));
+  await zp.goto(`${dev.url}/?seed=7&style=realistic`);
+  await zp.waitForFunction(() => (window as any).__wf?.ready, null, { timeout: 60000 });
+  const at = await centerOn(zp, 1040, 650);
+  if (at) await zp.mouse.move(at[0], at[1]);
+  const zk = () => zp.evaluate(() => (window as any).__wfDetail?.k ?? (window as any).__wfView?.k ?? 1);
+  for (let i = 0; i < 8; i++) {
+    const cur = await zk();
+    if (Math.abs(Math.log(4 / cur)) < 0.05) break;
+    await zp.mouse.wheel(0, -Math.log(4 / cur) / 0.0015);
+    await zp.waitForTimeout(250);
+  }
+  await zp.mouse.move(5, 5);
+  const t0 = Date.now();
+  const allIn = await zp
+    .waitForFunction(() => {
+      const t = (window as any).__wfDetail?.tiles;
+      return t && t.want > 0 && t.shown >= t.want && t.busy === 0 && t.queued === 0;
+    }, null, { timeout: 60000 })
+    .then(() => true, () => false);
+  const took = Date.now() - t0;
+  await zp.waitForTimeout(600);
+  const z = await zp.evaluate(() => {
+    const d = (window as any).__wfDetail;
+    const tiles = [...document.querySelectorAll('.detail-tiles canvas.tile')] as HTMLCanvasElement[];
+    // 放上去的块有画面(不是空白的)
+    let lit = 0;
+    for (const c of tiles.slice(0, 4)) {
+      const px = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let n = 0;
+      for (let i = 3; i < px.length; i += 4 * 97) if (px[i] > 0) n++;
+      if (n > 0.9 * (px.length / (4 * 97))) lit++;
+    }
+    return { k: d?.k, tiles: d?.tiles, dom: tiles.length, faded: tiles.filter((c) => c.classList.contains('fade') || getComputedStyle(c).opacity !== '1').length, lit, checked: Math.min(4, tiles.length) };
+  });
+  console.log(
+    `写实风放大 ${z.k?.toFixed(1)} 倍现算:第 ${z.tiles?.S} 档,要 ${z.tiles?.want} 块、放上 ${z.tiles?.shown} 块(页面上 ${z.dom} 块,没淡入完 ${z.faded} 块,抽查 ${z.checked} 块有画面 ${z.lit} 块);` +
+      `停下来到齐 ${took} ms,${z.tiles?.workers} 个后台线程、每块平均 ${z.tiles?.ms?.toFixed(0)} ms`,
+  );
+  if (!allIn || !z.tiles || !(z.tiles.want > 0)) errs.push(`放大现算:写实风放大到 4 倍停下来以后,看得见的块没有都算好(${JSON.stringify(z.tiles)})`);
+  if (z.dom < (z.tiles?.want ?? 1) || z.faded) errs.push(`放大现算:块没有都放上去 / 没淡入完(页面上 ${z.dom} 块,没淡入完 ${z.faded} 块)`);
+  if (z.lit < z.checked) errs.push(`放大现算:放上去的块是空白的(抽查 ${z.checked} 块,有画面 ${z.lit} 块)`);
+  // 同一档往旁边拖几屏再停下:挪出视口的块撤掉,页面上的块不越攒越多(不超过看得见的块数)
+  for (let i = 0; i < 3; i++) {
+    await zp.evaluate(() => {
+      const v = (window as any).__wfView;
+      (window as any).__wfSetView({ k: v.k, x: v.x - 700, y: v.y });
+    });
+    await zp.waitForTimeout(300);
+  }
+  const panIn = await zp
+    .waitForFunction(() => {
+      const t = (window as any).__wfDetail?.tiles;
+      return t && t.want > 0 && t.shown >= t.want && t.busy === 0 && t.queued === 0;
+    }, null, { timeout: 60000 })
+    .then(() => true, () => false);
+  await zp.waitForTimeout(600);
+  const pan = await zp.evaluate(() => ({ dom: document.querySelectorAll('.detail-tiles canvas.tile').length, tiles: (window as any).__wfDetail?.tiles }));
+  if (!panIn || !pan.tiles || pan.dom > pan.tiles.want) errs.push(`放大现算:拖远以后页面上的块比看得见的多(页面上 ${pan.dom} 块,${JSON.stringify(pan.tiles)})`);
+  await pickLayer(zp, 'terrain');
+  await zp.waitForFunction(() => (window as any).__wf?.style === 'fantasy', null, { timeout: 30000 }).catch(() => {});
+  await zp.waitForTimeout(400);
+  const fz = await zp.evaluate(() => ({ dom: document.querySelectorAll('.detail-tiles canvas.tile').length, tiles: (window as any).__wfDetail?.tiles ?? null }));
+  if (fz.dom || fz.tiles) errs.push(`放大现算:换到手绘风以后现算的块没有撤掉(页面上 ${fz.dom} 块)`);
+  await pickLayer(zp, 'realistic');
+  await zp.waitForFunction(() => (window as any).__wf?.style === 'realistic', null, { timeout: 30000 }).catch(() => {});
+  await zp.mouse.move(700, 400);
+  for (let i = 0; i < 8 && (await zk()) > 1.01; i++) {
+    await zp.mouse.wheel(0, Math.log(await zk()) / 0.0015 + 50);
+    await zp.waitForTimeout(250);
+  }
+  await zp.waitForTimeout(400);
+  const back = await zp.evaluate(() => ({ k: (window as any).__wfView?.k, on: (window as any).__wfDetail?.on, dom: document.querySelectorAll('.detail-tiles canvas.tile').length }));
+  if (back.on || back.dom) errs.push(`放大现算:缩回 1 倍后细节层 / 现算的块没有撤掉(${JSON.stringify(back)})`);
+  await zp.close();
+}
+
 // 回放中点概览"世界设定"页的"以它为底稿新建…":概览收起,换成新建界面(左边设定:种子锁着,地形、参数带过去;不放开场);
 // 带着东西、起好了名,一开始就存成没建完的(网址 w=编号,刷新不丢);什么都没动就点返回,这一份删掉
 await replayClick();

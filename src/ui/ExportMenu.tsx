@@ -224,7 +224,7 @@ async function exportMap(m: MapInput, scale: ExportScale, format: ImageFormat): 
     detail.draw = res.ms.draw;
   } else if (!res.ok && res.code === 'no-offscreen') {
     // 老浏览器:线程里画不了,只好在主线程画(会卡一下)
-    const raster = scale === 1 ? m.raster : rasterize(m.world, scale);
+    const raster = scale === 1 ? m.raster : rasterize(m.world, scale, m.style === 'realistic');
     drawMapBase(ctx, { ...m, raster }, (w, h) => Object.assign(document.createElement('canvas'), { width: w, height: h }));
   } else throw new Error(res.ok ? '后台线程回错了东西' : res.error);
   detail.worker = t1 - t0;
