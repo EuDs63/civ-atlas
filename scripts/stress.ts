@@ -75,7 +75,7 @@ const SKETCH_MIX: SketchEdit = {
 
 const cases = [
   {}, { landFraction: 0.12 }, { landFraction: 0.6 }, { plates: 5 }, { plates: 30 }, { plates: 60 },
-  { cells: 80000 }, { cells: 12000 }, { temperature: -12 }, { temperature: 12 }, { rainfall: 0.4 }, { mountains: 2 }, { mountains: 0.2 },
+  { cells: 200000 }, { cells: 12000 }, { temperature: -12 }, { temperature: 12 }, { rainfall: 0.4 }, { mountains: 2 }, { mountains: 0.2 },
   { terrain: MIX }, { terrain: rows('sink') }, { terrain: rows('raise') },
   { sketch: { rest: 'sea', strokes: [] } }, { sketch: fill('mountain') }, { sketch: fill('land', 'sea') }, { sketch: fill('isles', 'sea') }, { sketch: fill('plateau') },
   { sketch: { ...SKETCH_MIX, coast: 0 }, terrain: MIX }, { sketch: SKETCH_MIX, terrain: [...MIX, { kind: 'river', pts: [1950, 420, 2150, 470, 2300, 500], r: 9, s: 1 }] },

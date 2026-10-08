@@ -224,6 +224,7 @@ import {
 } from './TerrainTools';
 import { dismissing, tookDismissClick } from './dismissClick';
 import { makeFlagView, setFlagView, useFlagPreview } from './flagStore';
+import { noteGenSpeed } from './genSpeed';
 
 type Replay = { w: number; h: number; frames: Uint8ClampedArray[]; mya: number[]; idx: number };
 
@@ -682,6 +683,7 @@ export function App() {
         if (m.id !== reqId.current) return; // 过时的请求(上一个世界的)
         if (m.type === 'progress') setProgress((s) => ({ stage: m.stage, pct: m.pct, regen: regenRef.current?.id === m.id, seed: s?.seed }));
         else if (m.type === 'done') {
+          noteGenSpeed(m.world.params.cells, m.genMs, m.ms);
           setData({ world: m.world, raster: m.raster });
           setRawCiv(m.civ);
           setProgress(null);

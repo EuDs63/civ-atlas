@@ -11,6 +11,7 @@ import type { TerrainKind } from '../gen/edits';
 import { useEdits } from './editsStore';
 import { currentWorld, useSavesVersion } from './saveStore';
 import { Icon } from './icons';
+import { genSeconds } from './genSpeed';
 
 interface Slider {
   key: keyof WorldParams;
@@ -20,6 +21,8 @@ interface Slider {
   step: number;
   fmt: (v: number) => string;
   hint: string;
+  /** 拖滑条时数字后面再加一句(只在新建世界的滑条上;世界设定页只写数字) */
+  more?: (v: number) => string | null;
 }
 
 export const SLIDERS: Slider[] = [
@@ -28,7 +31,19 @@ export const SLIDERS: Slider[] = [
   { key: 'mountains', name: '造山强度', min: 0.2, max: 2, step: 0.05, fmt: (v) => `${v.toFixed(2)}×`, hint: '板块碰撞隆起的力度' },
   { key: 'temperature', name: '气温', min: -12, max: 12, step: 1, fmt: (v) => `${v > 0 ? '+' : ''}${v}°C`, hint: '整体偏冷(冰河期)还是偏暖' },
   { key: 'rainfall', name: '降水', min: 0.4, max: 1.8, step: 0.05, fmt: (v) => `${v.toFixed(2)}×`, hint: '整体偏干还是偏湿' },
-  { key: 'cells', name: '精细度', min: 12000, max: 80000, step: 2000, fmt: (v) => `${Math.round(v / 1000)}k 地块`, hint: '越精细越慢' },
+  {
+    key: 'cells',
+    name: '精细度',
+    min: 12000,
+    max: 200000,
+    step: 2000,
+    fmt: (v) => `${Math.round(v / 1000)}k 地块`,
+    hint: '越精细越慢',
+    more: (v) => {
+      const sec = genSeconds(v);
+      return sec === null ? null : `约 ${sec} 秒`;
+    },
+  },
 ];
 
 /** 世界参数的一行简写(卡片里"世界参数"那一行右边) */
@@ -57,11 +72,12 @@ export function ParamSlider({ s, value, onCommit, disabled }: { s: Slider; value
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   const pct = ((v - s.min) / (s.max - s.min)) * 100;
+  const more = s.more?.(v);
   return (
     <label className="param-slider" title={s.hint} data-param={s.key}>
       <span className="param-slider-row">
         <span>{s.name}</span>
-        <b>{s.fmt(v)}</b>
+        <b>{more ? `${s.fmt(v)}，${more}` : s.fmt(v)}</b>
       </span>
       <input
         type="range"

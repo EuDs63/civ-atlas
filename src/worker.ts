@@ -44,8 +44,8 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: 'progress'; id: number; stage: string; pct: number }
-  /** ms = 线程里花的时间(生成 + 文明 + 铺像素);tempo = 这组参数的扩张节拍(知道的话) */
-  | { type: 'done'; id: number; world: World; raster: Raster; civ: Civ; ms: number; tempo?: TempoNote }
+  /** ms = 线程里花的时间(生成 + 文明 + 铺像素),genMs = 其中生成世界那一步;tempo = 这组参数的扩张节拍(知道的话) */
+  | { type: 'done'; id: number; world: World; raster: Raster; civ: Civ; ms: number; genMs: number; tempo?: TempoNote }
   | ({ type: 'history'; id: number } & HistoryFrames)
   /** 重推好的文明;ms = 线程里花的时间(含按参数重新生成世界);tempo 同 done */
   | { type: 'civ'; id: number; seq: number; civ: Civ; ms: number; tempo?: TempoNote }
@@ -119,6 +119,7 @@ async function handle(m: WorkerRequest): Promise<void> {
     const t0 = performance.now();
     const world = generateWorld(m.params, (stage, pct) => post({ type: 'progress', id: m.id, stage, pct }), m.terrain, sketchGrid(m.sketch));
     last = { key: keyOf(m.params, m.terrain, m.sketch), world };
+    const genMs = performance.now() - t0;
     // 先铺像素(山坡上的沟和山脊交给帮手线程),同时推文明
     post({ type: 'progress', id: m.id, stage: '铺展地图', pct: 0.93 });
     const { raster, job } = rasterizeDeferred(world, m.scale);
@@ -135,7 +136,7 @@ async function handle(m: WorkerRequest): Promise<void> {
     // 回放快照体积大且主线程用不上,不随世界一起发送
     const { history: _history, ...rest } = world;
     void _history;
-    post({ type: 'done', id: m.id, world: { ...rest, history: [] }, raster, civ, ms: performance.now() - t0, tempo: noteOf(m.params, m.sketch) }, transfer);
+    post({ type: 'done', id: m.id, world: { ...rest, history: [] }, raster, civ, ms: performance.now() - t0, genMs, tempo: noteOf(m.params, m.sketch) }, transfer);
   } else if (m.type === 'history') {
     const h = buildHistoryFrames(worldOf(m.params, m.terrain, m.sketch));
     post({ type: 'history', id: m.id, ...h }, h.frames.map((f) => f.buffer));
