@@ -212,6 +212,14 @@ const PATHS = {
       <path d="M7 10h.01M10.5 10h.01M14 10h.01M17 10h.01M8 14h8" />
     </>
   ),
+  image: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <path d="M3.5 16l5-5 4 4 2.5-2.5 5.5 5" />
+      <circle cx="15.5" cy="9.5" r="1.5" />
+    </>
+  ),
+  warn: <path d="M12 3.5l9.5 16.5h-19zM12 10v4.5M12 17.2v.3" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

@@ -26,8 +26,9 @@
  * - edits.interventions:干预(具体种类见 edits.ts 文件头"干预");这里当成不透明的数组原样存、原样读回
  * - edits.terrain:地形修改(edits.ts 文件头"地形修改");读档时逐处过 cleanTerrainOp,格式不对的跳过。
  *   旧存档没有这个字段 = 没改地形。check 是**改过地形以后**的地形哈希(读档时带着地形修改生成,再核对)
- * - edits.sketch(可选):地形草图(edits.ts 文件头"地形草图"),`{ "rest": "auto", "strokes": [{ "kind": "land", "r": 32, "pts": [700, 300, 760, 310] }] }`;
- *   没画时不写这个字段。读档时过 cleanSketch,格式不对的笔画跳过。check 同样是照草图生成以后的地形哈希
+ * - edits.sketch(可选):地形草图(edits.ts 文件头"地形草图"),`{ "rest": "auto", "strokes": [{ "kind": "land", "r": 32, "pts": [700, 300, 760, 310] }] }`,
+ *   导入过图片的多一个 `"image": { "name": "地图.jpg", "cells": "<认出来的格子图>" }`;
+ *   没画时不写这个字段。读档时过 cleanSketch,格式不对的笔画、图片跳过。check 同样是照草图生成以后的地形哈希
  * - edits.marks(可选):作者标记(edits.ts 文件头"作者标记"),`[{ "id": 1, "title": "主角的故乡", "color": "red", "from": 2490, "at": [1852.4, 512] }]`;
  *   没有标记时不写这个字段。读档时过 cleanMarks,格式不对的跳过
  * - edits.characters(可选):作者的人物(characters.ts),`[{ "id": 1, "name": "林小满", "color": "red", "born": 2490, "died": 2561,
@@ -316,8 +317,13 @@ export function makeSave(
   if (ai.length) save.edits.aiNames = Object.fromEntries(ai.map((k) => [k, { ...edits.aiNames![k] }]));
   // 草图:画了才写
   if (edits.sketch) {
-    const { rest, coast, strokes } = edits.sketch;
-    save.edits.sketch = { rest, ...(coast !== undefined ? { coast } : {}), strokes: strokes.map((x) => ({ ...x, pts: x.pts.slice() })) };
+    const { rest, coast, strokes, image } = edits.sketch;
+    save.edits.sketch = {
+      rest,
+      ...(coast !== undefined ? { coast } : {}),
+      strokes: strokes.map((x) => ({ ...x, pts: x.pts.slice() })),
+      ...(image ? { image: { ...image } } : {}),
+    };
   }
   // 作者标记:有才写
   if (edits.marks?.length) save.edits.marks = edits.marks.map(copyMark);
@@ -468,6 +474,7 @@ export function parseSave(text: string): ParseResult {
       const bad = raw.slice(0, SKETCH_MAX_STROKES).filter((x) => !cleanSketchStroke(x)).length;
       if (bad) warnings.push(`草图有 ${bad} 笔格式不对,已跳过`);
       if (raw.length > SKETCH_MAX_STROKES) warnings.push(`草图最多 ${SKETCH_MAX_STROKES} 笔,多出来的 ${raw.length - SKETCH_MAX_STROKES} 笔没有读进来`);
+      if ((E.sketch as Record<string, unknown>).image !== undefined && !sketch?.image) warnings.push('草图里导入的图片格式不对,已跳过');
     }
   }
   // 作者标记:逐个清理,认不出的跳过;编号重复的换一个新编号;最多留 MARKS_MAX 个、一共圈 MARK_REGIONS_TOTAL 个州;旧存档没有 = 没有标记

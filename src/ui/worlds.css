@@ -988,6 +988,162 @@
 .tp-whole.open + .tp-opts {
   border-top: 0.5px solid var(--line);
 }
+/* 「整张草图」第一行:导入图片(右边写能导入什么);导入过的写照的哪张图,右边「去掉」 */
+.tp .tp-image .sb-row-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.tp .tp-image .sb-link {
+  flex: none;
+  font-size: 13.5px;
+}
+/* 组底下一句小字 */
+.tp-fine {
+  padding: 2px 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* ---- 导入图片的面板(ImportImage.tsx 的 ImportPanel,导入时整块换下编辑地形的面板) ---- */
+.tp.imp {
+  gap: 12px;
+}
+.tp.imp .tp-fine {
+  padding-top: 0;
+}
+/* 图片那一行:缩略图、文件名和大小,右边「换一张」 */
+.imp-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.imp-file img {
+  flex: none;
+  display: block;
+  border-radius: 4px;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+  object-fit: cover;
+}
+.imp-file-tx {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.imp-file-tx b {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.imp-file-tx span {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.imp-file .sb-link {
+  flex: none;
+  font-size: 13.5px;
+}
+.imp-hint {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+/* 高低也照图:标题下面一行说明,右边开关 */
+.tp .imp-heights {
+  min-height: 52px;
+}
+.tp .imp-heights .sb-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+}
+.tp .imp-heights .sb-row-main small {
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--ink-2);
+  white-space: normal;
+}
+/* 认不准的提醒:淡橙色底,左边一个三角 */
+.imp-warn {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 0.5px solid var(--line);
+  background: rgba(255, 159, 10, 0.12);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.imp-warn .icon {
+  flex: none;
+  margin-top: 1px;
+  color: #ff9f0a;
+}
+.imp-warn .sb-link {
+  font-size: 13px;
+}
+/* 认出来多少:陆地占几成,带颜色小圆点 */
+.imp-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-top: 0.5px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.imp-result b {
+  color: var(--ink);
+  font-weight: 500;
+}
+.imp-result-n {
+  flex: none;
+}
+.imp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.imp-result-n + .imp-legend {
+  margin-left: auto;
+}
+.imp-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 50%;
+}
+.tp .imp-use {
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.tp .imp-use:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.tp .imp-use:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.st-sheet .tp .imp-use {
+  height: 40px;
+}
+.st-sheet .imp-file {
+  padding: 8px 12px;
+}
 /* 圈起来填满正在画:地图下边一句提示 */
 .studio .tp-cap {
   transform: translateX(-50%);

@@ -7,7 +7,9 @@
  *   程序照草图重新长出整颗星球。
  * - 放一处:火山 / 湖 = 点一下放一处(拖动照样平移);河 = 从源头画到海边的一条线。三档大小见 gen/terrainEdits.ts 的 TERRAIN_PRESETS。
  *   加一处 = editsStore.addTerrainOp。旧存档里、或"让助手改"做出来的山脉 / 抬起陆地 / 沉成海照常生效、照常画出来,算在"画了几笔"里。
- * - 撤销 / 重做按先后,草图的笔和放的一处混在一起算(Ctrl / ⌘ + Z,Ctrl / ⌘ + Shift + Z 或 Ctrl + Y);全部清除点两下才清,回到程序原来的星球。
+ * - 导入图片(「整张草图」第一行,或者把图片拖到地图上):左边整块换成导入面板,地图上画预览(ImportImage.tsx);
+ *   用了以后认出来的格子铺成草图的底子(editsStore.setSketchImage),算一步;第一行改成写照的哪张图、可以去掉。
+ * - 撤销 / 重做按先后,草图的笔、导入图片和放的一处混在一起算(Ctrl / ⌘ + Z,Ctrl / ⌘ + Shift + Z 或 Ctrl + Y);全部清除点两下才清,回到程序原来的星球。
  *   App 看到地形修改或草图变了就在后台重新生成世界、重推文明(见 App.tsx)。
  * - 地图事件由 App 转给这里:terrainDown / terrainMove / terrainUp(画线、涂、圈)、terrainClick(放点)、terrainCancel(第二根手指按下);
  *   返回 true = 这一下归编辑地形管。按住空格拖动是平移。
@@ -15,10 +17,46 @@
  */
 import { useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { TerrainKind, TerrainOp } from '../gen/edits';
-import { SKETCH_COAST, SKETCH_MAX_PTS, SKETCH_R, sketchCoast, type SketchEdit, type SketchKind, type SketchStroke } from '../gen/sketch';
+import { SKETCH_COAST, SKETCH_MAX_PTS, SKETCH_R, sketchCoast, type SketchEdit, type SketchImage, type SketchKind, type SketchStroke } from '../gen/sketch';
 import { TERRAIN_MAX_PTS, TERRAIN_PRESETS as PRESETS, isPointKind, sameTerrain } from '../gen/terrainEdits';
 import { Icon, type IconName } from './icons';
-import { addSketchStroke, addTerrainOp, clearSketch, clearTerrain, editsEra, getEdits, setSketchCoast, setSketchRest, undoSketchStroke, undoTerrainOp, useEdits } from './editsStore';
+import { Seg, Slider } from './tpControls';
+import {
+  addSketchStroke,
+  addTerrainOp,
+  clearSketch,
+  clearTerrain,
+  editsEra,
+  getEdits,
+  redoSketchImage,
+  removeSketchImage,
+  setSketchCoast,
+  setSketchImage,
+  setSketchRest,
+  sketchImageSteps,
+  undoSketchImage,
+  undoSketchStroke,
+  undoTerrainOp,
+  useEdits,
+} from './editsStore';
+import {
+  ImportLayer,
+  ImportPanel,
+  LayerMark,
+  cancelImport,
+  coverMaskUrl,
+  importCancel,
+  importCaption,
+  importClick,
+  importDown,
+  importMove,
+  importOn,
+  importResult,
+  importUndoClick,
+  importUp,
+  pickImage,
+  useImport,
+} from './ImportImage';
 
 // ---------------------------------------------------------------------------
 // 工具状态
@@ -57,7 +95,10 @@ export function setTerrainTool(p: Partial<TerrainToolState>) {
   const next = { ...tool, ...p };
   if ((Object.keys(next) as (keyof TerrainToolState)[]).every((k) => next[k] === tool[k])) return;
   tool = next;
-  if (!tool.on) setDraft({ draft: null, cursor: null });
+  if (!tool.on) {
+    setDraft({ draft: null, cursor: null });
+    cancelImport();
+  }
   emitTool();
 }
 export function useTerrainTool(): TerrainToolState {
@@ -144,6 +185,7 @@ const lassoOn = (t: TerrainToolState) => !isPlaceTool(t.tool) && t.method === 'l
 
 /** 地图上按下:涂、圈、画河的工具开始画(返回 true = 这一下归编辑地形管,不平移) */
 export function terrainDown(w: [number, number] | null, button: number): boolean {
+  if (tool.on && importOn()) return !space && importDown(w, button);
   if (!tool.on || !w || button !== 0 || space || tool.tool === 'volcano' || tool.tool === 'lake') return false;
   draftT0 = performance.now();
   setDraft({ draft: [Math.round(w[0]), Math.round(w[1])], cursor: w });
@@ -153,6 +195,7 @@ export function terrainDown(w: [number, number] | null, button: number): boolean
 /** 地图上移动:更新光标;正在画就把线接长(返回 true = 正在画) */
 export function terrainMove(w: [number, number] | null): boolean {
   if (!tool.on) return false;
+  if (importOn()) return importMove(w);
   const d = draftNow.draft;
   if (!d) {
     if (w !== draftNow.cursor) setDraft({ draft: null, cursor: w });
@@ -175,6 +218,7 @@ export function terrainMove(w: [number, number] | null): boolean {
 
 /** 松开:画完的一笔加进草图,或者加成一条河 */
 export function terrainUp() {
+  if (importOn()) return importUp();
   const d = draftNow.draft;
   if (!d) return;
   const c0 = draftNow.cursor;
@@ -200,6 +244,10 @@ export function terrainUp() {
 /** 单击地图:火山、湖在这里放一处(返回 true = 这一下归编辑地形管,不看详情) */
 export function terrainClick(w: [number, number] | null): boolean {
   if (!tool.on) return false;
+  if (importOn()) {
+    importClick(w);
+    return true;
+  }
   if (!w || (tool.tool !== 'volcano' && tool.tool !== 'lake')) return true;
   const [r, s] = PRESETS[tool.tool][tool.size];
   addOp({ kind: tool.tool, pts: [Math.round(w[0]), Math.round(w[1])], r, s });
@@ -211,6 +259,10 @@ export function terrainClick(w: [number, number] | null): boolean {
  * 已经画了一阵的照旧画完(手掌碰到屏幕不打断)
  */
 export function terrainCancel(): boolean {
+  if (importOn()) {
+    importCancel();
+    return true;
+  }
   if (!draftNow.draft) return true;
   if (performance.now() - draftT0 > 400) return false;
   setDraft({ draft: null, cursor: null });
@@ -218,11 +270,12 @@ export function terrainCancel(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// 撤销 / 重做:草图的笔和放的一处按先后混在一起
+// 撤销 / 重做:草图的笔、导入图片和放的一处按先后混在一起
 
-type Item = { t: 's'; v: SketchStroke } | { t: 'o'; v: TerrainOp };
-/** 这次编辑里加的先后('s' 草图的一笔,'o' 放的一处);和 editsStore 里两份列表的末尾对得上 */
-let order: ('s' | 'o')[] = [];
+type Step = 's' | 'o' | 'i';
+type Item = { t: 's'; v: SketchStroke } | { t: 'o'; v: TerrainOp } | { t: 'i'; v: SketchImage };
+/** 这次编辑里加的先后('s' 草图的一笔,'o' 放的一处,'i' 导入一张图);和 editsStore 里两份列表的末尾、导入的那几次对得上 */
+let order: Step[] = [];
 /** 撤掉的(最后撤的在最后),和撤完时的样子(之后又改过别的 = 不能重做) */
 let redo: Item[] = [];
 let redoAt: { terrain: readonly TerrainOp[]; sketch: SketchEdit | undefined } | null = null;
@@ -240,10 +293,11 @@ function trimOrder() {
   const e = getEdits();
   let ns = e.sketch?.strokes.length ?? 0;
   let no = e.terrain.length;
+  let ni = sketchImageSteps();
   // 从后往前对:多出来的(被别处清掉、撤掉的)去掉
-  const keep: ('s' | 'o')[] = [];
+  const keep: Step[] = [];
   for (let i = order.length - 1; i >= 0; i--) {
-    if (order[i] === 's' ? ns-- > 0 : no-- > 0) keep.push(order[i]);
+    if (order[i] === 's' ? ns-- > 0 : order[i] === 'o' ? no-- > 0 : ni-- > 0) keep.push(order[i]);
   }
   order = keep.reverse();
 }
@@ -259,6 +313,21 @@ function addOp(op: TerrainOp) {
   order.push('o');
   redo = [];
 }
+/** 「用这张图」:导入的图铺成草图的底子(算一步),收起导入面板 */
+function applyImport() {
+  const r = importResult();
+  if (!r) return;
+  trimOrder();
+  if (!setSketchImage(r.name, r.layer, tool.coast)) return;
+  order.push('i');
+  redo = [];
+  cancelImport();
+}
+/** 去掉导入的图片(笔画留着) */
+export function removeImage() {
+  removeSketchImage();
+  trimOrder();
+}
 const canRedo = (terrain: readonly TerrainOp[], sketch: SketchEdit | undefined) => redo.length > 0 && !!redoAt && redoAt.terrain === terrain && redoAt.sketch === sketch;
 
 /** 撤销最后一笔(这次加的按先后;更早的、助手加的:先撤草图,再撤放的) */
@@ -266,10 +335,16 @@ export function undoTerrain() {
   trimOrder();
   const e = getEdits();
   const ns = e.sketch?.strokes.length ?? 0;
-  const t = order.pop() ?? (ns ? 's' : e.terrain.length ? 'o' : null);
+  const img = e.sketch?.image;
+  // 没记下先后的(读档来的、助手加的):导入的图在最后几笔之后就先撤它
+  const t = order.pop() ?? (img && (img.at ?? 0) >= ns ? 'i' : ns ? 's' : e.terrain.length ? 'o' : null);
   if (!t) return;
   if (!canRedo(e.terrain, e.sketch)) redo = [];
-  if (t === 's') {
+  if (t === 'i') {
+    if (!img) return;
+    redo.push({ t, v: img });
+    undoSketchImage();
+  } else if (t === 's') {
     redo.push({ t, v: e.sketch!.strokes[ns - 1] });
     // 撤掉最后一笔、草图没了:记下它的海岸线,重做时照样
     if (ns === 1) setTerrainTool({ coast: sketchCoast(e.sketch) });
@@ -288,7 +363,9 @@ export function redoTerrain() {
   if (!canRedo(e.terrain, e.sketch)) return;
   const it = redo.pop()!;
   trimOrder();
-  const ok = it.t === 's' ? addSketchStroke(it.v, tool.coast) : addTerrainOp(it.v);
+  let ok = true;
+  if (it.t === 'i') redoSketchImage(it.v, tool.coast);
+  else ok = it.t === 's' ? addSketchStroke(it.v, tool.coast) : addTerrainOp(it.v);
   if (ok) order.push(it.t);
   const a = getEdits();
   redoAt = { terrain: a.terrain, sketch: a.sketch };
@@ -314,6 +391,7 @@ export function terrainCount(e: { terrain: readonly TerrainOp[]; sketch?: Sketch
 /** 入口那一行、创建前确认框里地形那一行右边写什么(none = 一笔没画时) */
 export function terrainSide(e: { terrain: readonly TerrainOp[]; sketch?: SketchEdit }, none: string): string {
   const n = terrainCount(e);
+  if (e.sketch?.image) return n ? `照一张图，又画了 ${n} 笔` : '照一张图';
   // 一笔没画、没涂的地方都是海(草图只剩这一条设定)
   return n ? `画了 ${n} 笔` : e.sketch ? '都是海' : none;
 }
@@ -329,45 +407,9 @@ export interface TerrainStatus {
   last?: { ms: number; lostNames: number; lostInterventions: number } | null;
 }
 
-function Seg<T extends string | number>({ label, items, value, onPick, act }: { label: string; items: { v: T; name: string }[]; value: T; onPick: (v: T) => void; act: string }) {
-  return (
-    <div className="tp-lbl">
-      <b>{label}</b>
-      <div className="tp-seg" role="radiogroup" aria-label={label} data-act={act}>
-        {items.map((x) => (
-          <button key={String(x.v)} role="radio" aria-checked={value === x.v} className={value === x.v ? 'on' : ''} data-v={x.v} onClick={() => onPick(x.v)}>
-            {x.name}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /** 大小滑条:两头一个小点、一个大点,右边写半径 */
 function SizeSlider({ r }: { r: number }) {
-  const fill = ((r - SKETCH_R[0]) / (SKETCH_R[1] - SKETCH_R[0])) * 100;
-  return (
-    <div className="tp-lbl">
-      <b>大小</b>
-      <div className="tp-range">
-        <i className="tp-dot s" />
-        <input
-          type="range"
-          aria-label="大小"
-          data-act="terrain-size"
-          min={SKETCH_R[0]}
-          max={SKETCH_R[1]}
-          step={1}
-          value={r}
-          style={{ '--fill': `${fill}%` } as React.CSSProperties}
-          onChange={(e) => setTerrainTool({ r: Number(e.target.value) })}
-        />
-        <i className="tp-dot l" />
-        <em>{r}</em>
-      </div>
-    </div>
-  );
+  return <Slider label="大小" act="terrain-size" min={SKETCH_R[0]} max={SKETCH_R[1]} value={r} onChange={(v) => setTerrainTool({ r: v })} show={r} />;
 }
 
 /**
@@ -382,8 +424,10 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
   const edits = useEdits();
   const [confirm, setConfirm] = useState(false);
   const [wholeOpen, setWholeOpen] = useState(false);
+  const importing = !!useImport();
   const n = terrainCount(edits);
   const sk = edits.sketch;
+  const img = sk?.image;
   const coast = sk ? sketchCoast(sk) : t.coast;
   const rest = sk?.rest ?? 'auto';
   const redoOk = canRedo(edits.terrain, sk);
@@ -405,7 +449,13 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
       if (typing(e)) return;
       const k = e.key.toLowerCase();
       const mod = e.metaKey || e.ctrlKey;
-      if (e.key === 'Escape') setTerrainTool({ on: false });
+      // 导入图片的时候:Esc 取消导入,Ctrl / ⌘ + Z 撤销点的那一下
+      if (importOn() && (e.key === 'Escape' || (mod && k === 'z' && !e.shiftKey))) {
+        e.preventDefault();
+        if (e.key === 'Escape') cancelImport();
+        else importUndoClick();
+      } else if (e.key === 'Escape') setTerrainTool({ on: false });
+      else if (importOn() && mod && (k === 'y' || k === 'z')) e.preventDefault();
       else if (mod && (k === 'y' || (k === 'z' && e.shiftKey))) {
         e.preventDefault();
         redoTerrain();
@@ -435,6 +485,8 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
       document.body.classList.remove('terrain-pan');
     };
   }, [t.on]);
+
+  if (importing) return <ImportPanel phone={phone} onUse={applyImport} />;
 
   const place = isPlaceTool(t.tool) ? PLACE.find((x) => x.id === t.tool)! : null;
   const paint = PAINT.find((x) => x.id === t.tool);
@@ -517,7 +569,7 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
   const count = (
     <div className="tp-count">
       <b className="tp-n">{disabled ? '生成中…' : n ? `画了 ${n} 笔` : '还没画'}</b>
-      <button className="sb-link" data-act="terrain-undo" disabled={!n} onClick={undoTerrain} title="撤销最后一笔(Ctrl / ⌘ + Z)">
+      <button className="sb-link" data-act="terrain-undo" disabled={!n && !img} onClick={undoTerrain} title="撤销最后一笔(Ctrl / ⌘ + Z)">
         撤销
       </button>
       <button className="sb-link" data-act="terrain-redo" disabled={!redoOk} onClick={redoTerrain} title="重做(Ctrl / ⌘ + Shift + Z)">
@@ -541,6 +593,27 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
     <button className="sb-row tp-show" role="switch" aria-checked={t.show} data-act="terrain-show" onClick={() => setTerrainTool({ show: !t.show })}>
       <span className="sb-row-main">在地图上显示草图</span>
       <span className={`ai-switch${t.show ? ' on' : ''}`} aria-hidden="true" />
+    </button>
+  );
+  // 「整张草图」第一行:导入图片;导入过的写照的哪张图、可以去掉
+  const imageRow = img ? (
+    <div className="sb-row tp-image">
+      <Icon name="image" size={18} className="sb-ico" />
+      <span className="sb-row-main" title={img.name}>
+        {img.name ? `照图：${img.name}` : '照图'}
+      </span>
+      <button className="sb-link" data-act="terrain-image-remove" onClick={removeImage}>
+        去掉
+      </button>
+    </div>
+  ) : (
+    <button className="sb-row tp-import" data-act="terrain-import" onClick={pickImage}>
+      <Icon name="image" size={18} className="sb-ico" />
+      <span className="sb-row-main">
+        <b>导入图片</b>
+      </span>
+      <span className="sb-row-side">手画的地图、高度图</span>
+      <Icon name="chevron" size={14} className="sb-chev" />
     </button>
   );
   const coastName = COASTS.find((x) => x.v === coast)?.name ?? '适中';
@@ -569,6 +642,7 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
           </button>
           {wholeOpen && (
             <>
+              {imageRow}
               {wholeOpts}
               {showRow}
             </>
@@ -581,10 +655,12 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
             <span>整张草图</span>
           </div>
           <div className="sb-group">
+            {imageRow}
             {wholeOpts}
             {count}
             {showRow}
           </div>
+          {!img && <div className="tp-fine">也可以把图片直接拖到地图上。</div>}
         </section>
       )}
     </div>
@@ -597,7 +673,9 @@ export function TerrainPanel({ disabled, phone = false }: { disabled: boolean; p
 export function TerrainCaption({ phone }: { phone: boolean }) {
   const t = useTerrainTool();
   const d = useDraft();
-  const on = t.on && !!d.draft && lassoOn(t);
+  const im = useImport();
+  const impText = t.on ? importCaption(im) : null;
+  const on = !!impText || (t.on && !im && !!d.draft && lassoOn(t));
   let style: React.CSSProperties | undefined;
   if (on && !phone) {
     // 地图左右无限接着画,横着看的就是舞台(两边面板中间那一块);竖着取地图下边和舞台下边靠上的那个
@@ -609,7 +687,7 @@ export function TerrainCaption({ phone }: { phone: boolean }) {
   const name = PAINT.find((x) => x.id === kind)?.name ?? '';
   return (
     <div className={`st-cap st-tip tp-cap${on ? '' : ' off'}`} style={style} aria-hidden={!on}>
-      {kind === 'erase' ? '松手自动连上起点，圈里整片交还给程序' : `松手自动连上起点，圈里整片变成${name}`}
+      {impText ?? (kind === 'erase' ? '松手自动连上起点，圈里整片交还给程序' : `松手自动连上起点，圈里整片变成${name}`)}
     </div>
   );
 }
@@ -680,13 +758,47 @@ const disp = (pts: readonly number[], wrap: number) => (wrap ? displayPts(pts, w
  * 草图那一层:按先后叠;遇到擦掉的一笔,把之前叠好的整个用它挖掉(左右各挪一圈也挖,跨 180° 经线的照样擦得掉)。
  * erasing = 正在用擦掉涂的那一笔(跟着一起挖,淡淡描出擦到哪儿)
  */
-function sketchLayer(strokes: readonly SketchStroke[], sameS: number, erasing: SketchStroke | null, uid: string, width: number, height: number, wrap: number) {
+function sketchLayer(
+  strokes: readonly SketchStroke[],
+  sameS: number,
+  image: { img: SketchImage; pending: boolean } | null,
+  erasing: SketchStroke | null,
+  uid: string,
+  width: number,
+  height: number,
+  wrap: number,
+) {
   const pat = `${uid}-isles`;
   const masks: ReactNode[] = [];
   let body: ReactNode[] = [];
-  const list = strokes.map((s, i) => ({ s, pending: i >= sameS, draft: false }));
+  type Entry = { s: SketchStroke; pending: boolean; draft: boolean } | { img: SketchImage; pending: boolean };
+  const list: Entry[] = strokes.map((s, i) => ({ s, pending: i >= sameS, draft: false }));
+  // 导入的图铺在第 at 笔之后(前面的笔被它盖住,后面的盖在它上面)
+  if (image) list.splice(Math.min(image.img.at ?? 0, list.length), 0, image);
   if (erasing) list.push({ s: erasing, pending: true, draft: true });
-  list.forEach(({ s, pending, draft }, i) => {
+  list.forEach((e, i) => {
+    if ('img' in e) {
+      // 导入的图盖住的格子(海也算)生成时盖掉了前面的笔:前面画好的整个用它挖掉,再画这一层
+      const url = body.length ? coverMaskUrl(e.img.cells) : '';
+      if (url) {
+        const id = `${uid}-i${i}`;
+        masks.push(
+          <mask key={id} id={id} maskUnits="userSpaceOnUse" x={-width} y={-height} width={width * 4} height={height * 3}>
+            <rect x={-width} y={-height} width={width * 4} height={height * 3} fill="#fff" />
+            {[0, ...(wrap ? [-wrap, wrap] : [])].map((dx) => (
+              <image key={dx} href={url} x={dx} y={0} width={width} height={height} preserveAspectRatio="none" />
+            ))}
+          </mask>,
+        );
+        body = [
+          <g key={id} mask={`url(#${id})`}>
+            {body}
+          </g>,
+        ];
+      }
+      return void body.push(<LayerMark key={i} image={e.img} width={width} height={height} pending={e.pending} />);
+    }
+    const { s, pending, draft } = e;
     if (s.kind !== 'erase') return void body.push(<StrokeMark key={i} s={{ ...s, pts: disp(s.pts, wrap) }} pending={pending} pat={pat} />);
     const id = `${uid}-e${i}`;
     const d = s.fill ? `${pathOf(disp(s.pts, wrap))}Z` : pathOf(disp(s.pts, wrap));
@@ -720,17 +832,23 @@ export function TerrainOverlay({
   shown,
   shownSketch,
   wrap = 0,
+  scale = 1,
 }: {
   width: number;
   height: number;
   shown: readonly TerrainOp[];
   shownSketch?: SketchEdit;
   wrap?: number;
+  /** 屏幕上一个世界单位多少像素(导入图片时序号、小方块按屏幕大小画) */
+  scale?: number;
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const t = useTerrainTool();
   const edits = useEdits();
   const dr = useDraft();
+  const importing = !!useImport();
+  const img = edits.sketch?.image;
+  const shownImg = shownSketch?.image;
   const ops = edits.terrain;
   const strokes = edits.sketch?.strokes ?? NO_STROKES;
   const shownStrokes = shownSketch?.strokes ?? NO_STROKES;
@@ -740,8 +858,9 @@ export function TerrainOverlay({
     // 从第几笔开始地图上还没有(按先后比;撤销的不算)
     let sameS = 0;
     while (sameS < strokes.length && sameS < shownStrokes.length && sameStroke(strokes[sameS], shownStrokes[sameS])) sameS++;
-    return sketchLayer(t.show ? strokes : NO_STROKES, sameS, erasePts && { kind: 'erase', r: t.r, pts: erasePts }, uid, width, height, wrap);
-  }, [t.on, t.show, t.r, strokes, shownStrokes, erasePts, uid, width, height, wrap]);
+    const image = t.show && img ? { img, pending: !shownImg || shownImg.cells !== img.cells || (shownImg.at ?? 0) !== (img.at ?? 0) } : null;
+    return sketchLayer(t.show ? strokes : NO_STROKES, sameS, image, erasePts && { kind: 'erase', r: t.r, pts: erasePts }, uid, width, height, wrap);
+  }, [t.on, t.show, t.r, strokes, shownStrokes, img, shownImg, erasePts, uid, width, height, wrap]);
   const opMarks = useMemo(() => {
     if (!t.on || !t.show) return null;
     let same = 0;
@@ -749,6 +868,15 @@ export function TerrainOverlay({
     return ops.map((op, i) => <OpMark key={i} op={{ ...op, pts: disp(op.pts, wrap) }} pending={i >= same} />);
   }, [t.on, t.show, ops, shown, wrap]);
   if (!t.on) return null;
+  if (importing)
+    return (
+      <svg className="terrain-overlay" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+        <g id={uid}>
+          <ImportLayer width={width} height={height} scale={scale} rest={edits.sketch?.rest ?? 'auto'} />
+        </g>
+        {!!wrap && [-wrap, wrap, 2 * wrap].map((dx) => <use key={dx} href={`#${uid}`} x={dx} />)}
+      </svg>
+    );
   const r = radiusOf(t);
   const pat = `${uid}-isles`;
 

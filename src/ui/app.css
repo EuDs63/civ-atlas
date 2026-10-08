@@ -1255,7 +1255,59 @@ body.terrain-pan .stage.terrain-on:active {
   stroke-width: 1.2;
   stroke-dasharray: 2 4;
 }
+/* 导入图片(ImportImage.tsx):预览时海岸描白线(认得不像样时不描)、点过的地方是白底蓝圈的序号、保持比例时图的范围是白色虚线框 + 四角小方块,
+   没盖到的地方压暗;用了以后草图里那一层的海岸是浅绿的线 */
+.terrain-overlay .imp-coast {
+  stroke: rgba(255, 255, 255, 0.95);
+  stroke-width: 1.6;
+}
+/* 按深浅认:海岸细一点(高低的颜色是主角) */
+.terrain-overlay .imp-coast.thin {
+  stroke: rgba(255, 255, 255, 0.8);
+  stroke-width: 1;
+}
+.terrain-overlay .imp-dim {
+  fill: rgba(0, 0, 0, 0.62);
+}
+.terrain-overlay .imp-box-halo {
+  stroke: rgba(0, 0, 0, 0.25);
+  stroke-width: 3.5;
+}
+.terrain-overlay .imp-box {
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.terrain-overlay .imp-corner {
+  fill: #fff;
+  stroke: rgba(0, 0, 0, 0.35);
+  stroke-width: 1;
+}
+.terrain-overlay .imp-tag {
+  fill: rgba(255, 255, 255, 0.75);
+}
+.terrain-overlay .imp-pin-shade {
+  fill: rgba(0, 0, 0, 0.28);
+}
+.terrain-overlay .imp-pin-dot {
+  fill: #fff;
+  stroke: rgba(10, 132, 255, 0.9);
+  stroke-width: 2;
+}
+.terrain-overlay .imp-pin text {
+  fill: #0a6cdc;
+  font-weight: 700;
+}
+.terrain-overlay .sk-image-coast {
+  stroke: rgba(184, 240, 140, 0.95);
+  stroke-width: 1.5;
+}
+/* 保持比例时光标在图上:可以拖着挪 */
+body.imp-move .stage.terrain-on {
+  cursor: move;
+}
 /* 还在重新生成的那几处(含正在画的线):一闪一闪 */
+.sk-image.pending,
 .sk-mark.pending,
 .tt-mark.pending {
   animation: tt-pulse 0.9s ease-in-out infinite alternate;

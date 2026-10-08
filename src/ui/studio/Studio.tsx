@@ -25,6 +25,7 @@ import { TITLE_MAX, worldKey } from '../../gen/savefile';
 import type { DraftBase } from '../stageStore';
 import { getEdits, useEdits } from '../editsStore';
 import { TerrainCaption, TerrainPanel, setTerrainTool, terrainSide, useTerrainTool } from '../TerrainTools';
+import { useImportOn } from '../ImportImage';
 import { ParamSlider, SLIDERS, paramsSide } from '../WorldOverviewGenesis';
 import { openAiSettings } from '../AiSettings';
 import { AiSettingsItem, MenuItem, MenuSep, PopMenu } from '../PopMenu';
@@ -126,6 +127,7 @@ const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(pre
 export function Studio(p: StudioProps) {
   const edits = useEdits();
   const tool = useTerrainTool();
+  const importing = useImportOn();
   const reduce = useMemo(reducedMotion, []);
   const style: MapLayer = STYLE_IDS.includes(p.layer) ? p.layer : 'realistic';
   const styleRef = useRef(style);
@@ -820,7 +822,7 @@ export function Studio(p: StudioProps) {
     />
   );
   const createBtn = (
-    <button className="nw-create" data-act="create-world" disabled={p.busy || !p.ready || busyIntro || out > 0} onClick={askCreate}>
+    <button className="nw-create" data-act="create-world" disabled={p.busy || !p.ready || busyIntro || out > 0 || importing} onClick={askCreate}>
       {base ? '创建新世界' : '创建世界'}
     </button>
   );

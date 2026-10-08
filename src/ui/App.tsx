@@ -222,6 +222,7 @@ import {
   useTerrainTool,
   type TerrainStatus,
 } from './TerrainTools';
+import { isImageFile, startImport, useImportOn } from './ImportImage';
 import { dismissing, tookDismissClick } from './dismissClick';
 import { makeFlagView, setFlagView, useFlagPreview } from './flagStore';
 import { noteGenSpeed } from './genSpeed';
@@ -621,6 +622,8 @@ export function App() {
   const [shownSketch, setShownSketch] = useState<SketchEdit | undefined>(undefined);
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus>({ busy: false });
   const terrainTool = useTerrainTool();
+  // 导入图片时地图上只看图(地名先藏起来)
+  const importing = useImportOn();
   // 手机:改地形、回放世界形成都要看地图 —— 拉到顶的世界卡片先收起来(两样都是从卡片里的"地形"那一组点开的)
   useEffect(() => {
     if (terrainTool.on || replayOn) setWorldSheet('peek');
@@ -1479,14 +1482,15 @@ export function App() {
     if (home || !t || !cur || cur.id !== t.id) return;
     if (isStored(t.id) && new URLSearchParams(location.search).get('w') !== t.id) writeWorldUrl(t);
   }, [v, home]);
-  // 把 .json 拖进页面 = 从文件打开
-  const [dropping, setDropping] = useState(false);
+  // 把 .json 拖进页面 = 从文件打开;编辑地形时拖进来的图片 = 导入成草图
+  const [dropping, setDropping] = useState<false | 'save' | 'image'>(false);
   const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
   const onDragOver = (e: React.DragEvent) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    if (!dropping) setDropping(true);
+    const kind = getTerrainTool().on && e.dataTransfer.items?.[0]?.type.startsWith('image/') ? 'image' : 'save';
+    if (dropping !== kind) setDropping(kind);
   };
   const onDragLeave = (e: React.DragEvent) => {
     if (!e.relatedTarget || !(e.currentTarget as Node).contains(e.relatedTarget as Node)) setDropping(false);
@@ -1497,6 +1501,7 @@ export function App() {
     setDropping(false);
     const f = e.dataTransfer.files[0];
     if (!f) return;
+    if (getTerrainTool().on && isImageFile(f)) return void startImport(f);
     f.text().then(
       (t) => openText(t, f.name),
       () => notify({ kind: 'error', text: `打不开 ${f.name}`, more: ['读不了这个文件'] }),
@@ -3182,11 +3187,13 @@ export function App() {
             )}
             <canvas ref={overlayRef} className={`overlay ${replayOn && replay ? 'show' : ''}`} />
             <canvas ref={overlayCopyRef} className={`overlay wrap-copy ${replayOn && replay ? 'show' : ''}`} />
-            {data && !curved && <TerrainOverlay width={data.world.width} height={data.world.height} shown={shownTerrain} shownSketch={shownSketch} wrap={wrapW} />}
+            {data && !curved && (
+              <TerrainOverlay width={data.world.width} height={data.world.height} shown={shownTerrain} shownSketch={shownSketch} wrap={wrapW} scale={(box.w / data.world.width) * view.k} />
+            )}
           </div>
         </div>
-        {/* 文字层(CivLayer 放进来);回放世界形成时藏起来(回放画面盖住文明层,字也不露出来) */}
-        <div className="screen-layer" ref={setLabelsHost} style={replayOn && replay ? { ...screenStyle, display: 'none' } : screenStyle} />
+        {/* 文字层(CivLayer 放进来);回放世界形成时、导入图片时藏起来(回放画面盖住文明层,字也不露出来;导入时只看图) */}
+        <div className="screen-layer" ref={setLabelsHost} style={(replayOn && replay) || importing ? { ...screenStyle, display: 'none' } : screenStyle} />
         {/* 地图上钉在事发地的事件标签 */}
         {data && world && <EventPins civ={civ} world={data.world} toClient={globeOn ? globeToClient : worldToClient} hidden={replayOn} />}
         {data && globeOn && (
@@ -3332,7 +3339,7 @@ export function App() {
       <TipLayer />
       {dropping && (
         <div className="drop-hint">
-          <div>松手打开存档(.json)</div>
+          <div>{dropping === 'image' ? '松手导入这张图' : '松手打开存档(.json)'}</div>
         </div>
       )}
     </div>

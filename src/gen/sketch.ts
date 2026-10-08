@@ -7,6 +7,9 @@
  * 山地笔另带高低(h),"圈起来填满"画的一笔带 fill(首尾连起来,圈里涂满)。
  * 生成前(sketchGrid)按先后把笔画涂到一张等距圆柱的小格子图上(SKETCH_W × SKETCH_H,一格 = 世界坐标 2 × 2),后涂的盖住先涂的;
  * 格子值见下面的 SKETCH_*:0 = 没涂(照旧由程序定),值 ≥ SKETCH_LAND 的都是陆地。rest = 'sea' 时没涂的格子都当海。
+ *
+ * 导入的图片(SketchEdit.image):图片本身不存,只存认出来的格子图(sketchImage.ts 认,LAYER_W × LAYER_H,一格 = 草图格子 2 × 2),
+ * 和笔画排在同一个先后里:前 at 笔先涂,再铺这张图(值是 0 的格子 = 没盖到,留着底下的),后面的笔画盖在它上面。
  */
 import type { Mesh } from './mesh';
 import { clamp } from './util';
@@ -56,6 +59,16 @@ export interface SketchStroke {
   fill?: 1;
 }
 
+/** 导入的图片认出来的格子图 */
+export interface SketchImage {
+  /** 图片的文件名(只用来显示照的是哪张图;最多 SKETCH_IMAGE_NAME_MAX 个字) */
+  name: string;
+  /** 格子:LAYER_W × LAYER_H 格(逐行从北往南、每行从西往东),值同草图格子(0 = 没盖到);行程编码 [个数 1–255, 值]… 再 base64 */
+  cells: string;
+  /** 铺在第几笔之后:前 at 笔先涂,然后铺这张图,剩下的笔画盖在它上面(不给 = 0,在所有笔画底下) */
+  at?: number;
+}
+
 export interface SketchEdit {
   /** 没涂的地方:'auto' = 照旧由程序定,'sea' = 都是海 */
   rest: 'auto' | 'sea';
@@ -63,6 +76,8 @@ export interface SketchEdit {
   coast?: number;
   /** 笔画,按先后 */
   strokes: SketchStroke[];
+  /** 导入的图片(不给 = 没导入) */
+  image?: SketchImage;
 }
 
 /** 最多多少笔、一笔最多多少个点 */
@@ -72,6 +87,11 @@ export const SKETCH_MAX_PTS = 2000;
 export const SKETCH_R: readonly [number, number] = [2, 160];
 /** 海岸线的默认值(适中) */
 export const SKETCH_COAST = 0.6;
+/** 导入图片的格子图多大:草图格子的一半,一格 = 草图 2 × 2 格 */
+export const LAYER_W = SKETCH_W / 2;
+export const LAYER_H = SKETCH_H / 2;
+/** 图片文件名最多留几个字 */
+export const SKETCH_IMAGE_NAME_MAX = 60;
 
 const KINDS: readonly SketchKind[] = ['land', 'hills', 'mountain', 'plateau', 'shelf', 'sea', 'isles', 'erase'];
 const VALUE: Record<SketchKind, number> = {
@@ -93,6 +113,49 @@ function valueOf(s: SketchStroke): number {
 /** 草图的海岸线参数(0 贴着画 – 1 曲折) */
 export function sketchCoast(edit: SketchEdit | null | undefined): number {
   return edit?.coast ?? SKETCH_COAST;
+}
+
+// ---------------------------------------------------------------------------
+// 导入图片的格子图:行程编码
+
+/** 存的字符串最长多少(每格单独一段时的长度) */
+const LAYER_CELLS_B64_MAX = Math.ceil((LAYER_W * LAYER_H * 2) / 3) * 4;
+
+/** 格子图(LAYER_W × LAYER_H,值 0–9)→ 存的字符串:连着的同一个值记成 [个数, 值](个数 1–255,长的拆开),字节再转 base64 */
+export function encodeLayer(layer: Uint8Array): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < layer.length; ) {
+    const v = layer[i];
+    let j = i + 1;
+    while (j < layer.length && layer[j] === v && j - i < 255) j++;
+    bytes.push(j - i, v);
+    i = j;
+  }
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode(...bytes.slice(i, i + 4096));
+  return btoa(bin);
+}
+
+/** 存的字符串 → 格子图;不是 base64、个数是 0、值超过 9、加起来不是正好 LAYER_W × LAYER_H 格的 = null */
+export function decodeLayer(cells: string): Uint8Array | null {
+  if (cells.length > LAYER_CELLS_B64_MAX || !/^[A-Za-z0-9+/]*={0,2}$/.test(cells)) return null;
+  let bin: string;
+  try {
+    bin = atob(cells);
+  } catch {
+    return null;
+  }
+  if (bin.length & 1) return null;
+  const out = new Uint8Array(LAYER_W * LAYER_H);
+  let k = 0;
+  for (let i = 0; i < bin.length; i += 2) {
+    const n = bin.charCodeAt(i);
+    const v = bin.charCodeAt(i + 1);
+    if (!n || v > SKETCH_MOUNTAIN + 2 || k + n > out.length) return null;
+    out.fill(v, k, k + n);
+    k += n;
+  }
+  return k === out.length ? out : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,9 +200,29 @@ export function cleanSketchStroke(x: unknown): SketchStroke | null {
 }
 
 /**
+ * 清理导入的图片:格子读不出来(decodeLayer)、或者一格也没盖到的 = null;文件名去掉控制字符、首尾空白,
+ * 最多 SKETCH_IMAGE_NAME_MAX 个字;at 取整夹到 [0, 笔画数](0 是默认,不存;给了 at 参数就用它,不看图片里写的)。本来就合格的原样返回
+ */
+export function cleanSketchImage(x: unknown, strokes: number, at?: number): SketchImage | null {
+  if (!x || typeof x !== 'object') return null;
+  const o = x as Record<string, unknown>;
+  if (typeof o.cells !== 'string') return null;
+  const layer = decodeLayer(o.cells);
+  if (!layer || !layer.some((v) => v !== SKETCH_NONE)) return null;
+  // eslint-disable-next-line no-control-regex
+  const name0 = typeof o.name === 'string' ? o.name.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
+  const name = [...name0].slice(0, SKETCH_IMAGE_NAME_MAX).join('');
+  const a0 = at ?? num(o.at);
+  const at1 = a0 === null ? 0 : Math.round(clamp(a0, 0, strokes));
+  const out: SketchImage = at1 ? { name, cells: o.cells, at: at1 } : { name, cells: o.cells };
+  const same = name === o.name && out.at === o.at && Object.keys(o).length === Object.keys(out).length;
+  return same ? (x as SketchImage) : out;
+}
+
+/**
  * 清理一份草图:不是对象的 = null;笔画逐笔过 cleanSketchStroke(不合格的丢掉,最多 SKETCH_MAX_STROKES 笔);
- * rest 不认识的当 'auto';coast 夹到 [0, 1] 保留两位小数(SKETCH_COAST 是默认,不存)。
- * 一笔也没有、没涂的又交给程序 = null(和没画一样)。本来就合格的原样返回
+ * rest 不认识的当 'auto';coast 夹到 [0, 1] 保留两位小数(SKETCH_COAST 是默认,不存);导入的图片过 cleanSketchImage(不合格的丢掉)。
+ * 一笔也没有、没导入图片、没涂的又交给程序 = null(和没画一样)。本来就合格的原样返回
  */
 export function cleanSketch(x: unknown): SketchEdit | null {
   if (!x || typeof x !== 'object') return null;
@@ -150,16 +233,26 @@ export function cleanSketch(x: unknown): SketchEdit | null {
   const list = Array.isArray(o.strokes) ? (o.strokes as unknown[]) : [];
   const strokes: SketchStroke[] = [];
   let same = rest === o.rest && list === o.strokes && list.length <= SKETCH_MAX_STROKES;
-  same = same && (coast === SKETCH_COAST ? !('coast' in o) : coast === o.coast) && Object.keys(o).length === (coast === SKETCH_COAST ? 2 : 3);
-  for (const s of list) {
+  same = same && (coast === SKETCH_COAST ? !('coast' in o) : coast === o.coast);
+  // 导入的图铺在原来第几笔之后;丢掉了不合格的笔画时,换成它前面留下来的笔数(先后不变)
+  const img = o.image && typeof o.image === 'object' ? (o.image as Record<string, unknown>) : null;
+  const a0 = img ? num(img.at) : null;
+  const at0 = a0 === null ? 0 : Math.round(clamp(a0, 0, list.length));
+  let at = -1;
+  for (let i = 0; i < list.length; i++) {
+    if (i === at0) at = strokes.length;
     if (strokes.length >= SKETCH_MAX_STROKES) break;
-    const v = cleanSketchStroke(s);
+    const v = cleanSketchStroke(list[i]);
     if (v) strokes.push(v);
-    if (v !== s) same = false;
+    if (v !== list[i]) same = false;
   }
-  if (!strokes.length && rest === 'auto') return null;
+  if (at < 0) at = strokes.length;
+  const image = o.image === undefined ? null : cleanSketchImage(o.image, strokes.length, at);
+  same = same && (image ? image === o.image : !('image' in o));
+  same = same && Object.keys(o).length === 2 + (coast === SKETCH_COAST ? 0 : 1) + (image ? 1 : 0);
+  if (!strokes.length && !image && rest === 'auto') return null;
   if (same) return x as SketchEdit;
-  return coast === SKETCH_COAST ? { rest, strokes } : { rest, coast, strokes };
+  return { rest, ...(coast === SKETCH_COAST ? {} : { coast }), strokes, ...(image ? { image } : {}) };
 }
 
 /** 两份草图是不是一样(逐笔逐字段比;都没有也算一样) */
@@ -167,6 +260,9 @@ export function sameSketch(a: SketchEdit | null | undefined, b: SketchEdit | nul
   if (a === b) return true;
   if (!a || !b) return !a && !b;
   if (a.rest !== b.rest || sketchCoast(a) !== sketchCoast(b) || a.strokes.length !== b.strokes.length) return false;
+  const ia = a.image;
+  const ib = b.image;
+  if (ia !== ib && (!ia || !ib || ia.name !== ib.name || ia.cells !== ib.cells || (ia.at ?? 0) !== (ib.at ?? 0))) return false;
   return a.strokes.every((x, i) => {
     const y = b.strokes[i];
     return x.kind === y.kind && x.r === y.r && x.h === y.h && x.fill === y.fill && x.pts.length === y.pts.length && x.pts.every((v, j) => v === y.pts[j]);
@@ -256,6 +352,18 @@ function fillPolygon(grid: Uint8Array, pts: number[], v: number) {
   }
 }
 
+/** 导入图片的格子图铺到草图格子上:一格铺 2 × 2 格,值是 0(没盖到)的格子不动 */
+function paintLayer(grid: Uint8Array, layer: Uint8Array) {
+  for (let ly = 0; ly < LAYER_H; ly++) {
+    for (let lx = 0; lx < LAYER_W; lx++) {
+      const v = layer[ly * LAYER_W + lx];
+      if (v === SKETCH_NONE) continue;
+      const i = 2 * ly * SKETCH_W + 2 * lx;
+      grid[i] = grid[i + 1] = grid[i + SKETCH_W] = grid[i + SKETCH_W + 1] = v;
+    }
+  }
+}
+
 /**
  * 草图涂成的格子图(生成用)。没有草图、或者涂完一格也没有(没涂的又交给程序)= null,和没画一样。
  * rest = 'sea' 时没涂的格子当海:什么也没画就是一颗全是海的星球
@@ -263,7 +371,11 @@ function fillPolygon(grid: Uint8Array, pts: number[], v: number) {
 export function sketchGrid(edit: SketchEdit | null | undefined): Sketch | null {
   if (!edit) return null;
   const grid = new Uint8Array(SKETCH_W * SKETCH_H);
-  for (const s of edit.strokes) paint(grid, s);
+  const layer = edit.image ? decodeLayer(edit.image.cells) : null;
+  const at = layer ? Math.min(edit.image!.at ?? 0, edit.strokes.length) : edit.strokes.length;
+  for (let k = 0; k < at; k++) paint(grid, edit.strokes[k]);
+  if (layer) paintLayer(grid, layer);
+  for (let k = at; k < edit.strokes.length; k++) paint(grid, edit.strokes[k]);
   if (edit.rest === 'sea') for (let i = 0; i < grid.length; i++) if (grid[i] === SKETCH_NONE) grid[i] = SKETCH_SEA;
   const out = { grid, coast: sketchCoast(edit) };
   return sketchUsed(out) ? out : null;
