@@ -20,6 +20,9 @@
  * - 投影和中央经线(ui/projection.ts、mapWrap.ts)跟着世界存:存档时按当时的设置写进 view;
  *   已经存着的世界换了投影 / 中心,App 调 viewChanged 重写一次。
  * - 删掉一个世界,AI 给它写的东西(ai/library.ts,按世界编号存)一起删。
+ * - 旧版本生成器存的世界,第一次按新版重存时,把浏览器里原来那份原样另存一份(keepOriginal;同一个世界只留最早那份,
+ *   以后不覆盖):重存会把存档里的生成器版本换成新的,留着这份才知道它原来是哪一版、长什么样。删除、撤销、复制跟着世界走;
+ *   存储满了留不下就不留,不为它删别的世界,也不挡着新的存进去。
  * - 登录了网站账号的,世界还会同步进账号(account/sync.ts):这里给它原样读写一个世界(rawWorld / putSyncedWorld),
  *   用户删掉一个世界时告诉它(setDeleteHook);为了腾地方删掉的旧世界不算删除(账号里的还在)。
  */
@@ -59,6 +62,8 @@ const META = 'wenming-ditu:meta:';
 const NOTES = 'civ-atlas:ai-notes:';
 /** 以前按"种子 + 参数"当编号存的世界换成了哪个新编号(旧网址只带种子、参数,刷新还回到它) */
 const LEGACY = 'wenming-ditu:legacy:';
+/** 旧版本生成器存的世界,第一次按新版重存之前的原样(存档原文;见 keepOriginal) */
+const ORIG = 'wenming-ditu:orig:';
 /** 最多存多少个世界(每个几 KB + 缩略图三十来 KB) */
 export const MAX_WORLDS = 60;
 /** 缩略图的大小("我的世界"里一张卡片宽 480) */
@@ -214,7 +219,10 @@ function migrateLegacy(kv: KV) {
       for (const p of [PREFIX, THUMB, NOTES]) kv.remove(p + id);
       continue;
     }
-    for (const p of [PREFIX, THUMB, NOTES, META]) kv.remove(p + old);
+    // 旧版本的原样跟过去;写不下就不带,不挡着换新编号
+    const orig = kv.get(ORIG + old);
+    if (orig !== null) kv.set(ORIG + id, orig);
+    for (const p of [PREFIX, THUMB, NOTES, META, ORIG]) kv.remove(p + old);
     kv.set(LEGACY + old, id);
   }
 }
@@ -519,15 +527,15 @@ const nameOf = (id: string) => {
 
 function removeKeys(id: string) {
   const kv = store();
-  for (const p of [PREFIX, THUMB, META, NOTES]) kv.remove(p + id);
+  for (const p of [PREFIX, THUMB, META, NOTES, ORIG]) kv.remove(p + id);
 }
 
-/** 删掉最旧的一个世界(不删 keep;读不出来的坏条目、没有存档的缩略图最先删);没得删 = false */
+/** 删掉最旧的一个世界(不删 keep;读不出来的坏条目、没有存档的缩略图和原样最先删);没得删 = false */
 function evictOldest(keep: string): boolean {
   const kv = store();
   const ids = new Set<string>();
   for (const k of kv.keys()) {
-    for (const p of [PREFIX, THUMB, META]) if (k.startsWith(p)) ids.add(k.slice(p.length));
+    for (const p of [PREFIX, THUMB, META, ORIG]) if (k.startsWith(p)) ids.add(k.slice(p.length));
   }
   ids.delete(keep);
   if (shield) ids.delete(shield);
@@ -580,6 +588,24 @@ function touchMeta(id: string, m: Meta): boolean {
 }
 
 /**
+ * 一个世界要存成第 next 版生成器的存档:浏览器里原来那份是更旧的版本存的、还没留过,返回它的原文(存档原文,一个字不改),
+ * 新的存进去以后由 keepOriginal 另存;不用留 = null。同一个世界只留最早那份(以后再升级也不覆盖);读不出来的坏存档不留
+ */
+function originalToKeep(id: string, next: number): string | null {
+  const kv = store();
+  if (kv.get(ORIG + id) !== null) return null;
+  const text = kv.get(PREFIX + id);
+  if (text === null) return null;
+  const r = parseSave(text);
+  return r.ok && r.save.generator < next ? text : null;
+}
+
+/** 新的存进去了:把原来那份原样留着。写不下就算了:不为它删别的世界,也不拦着这次存 */
+function keepOriginal(id: string, text: string | null) {
+  if (text !== null) store().set(ORIG + id, text);
+}
+
+/**
  * 写一个世界的存档(和本地信息);新存一个超过上限就删最旧的。
  * 本地信息没写进去也算没存成:没有"还在新建"那一条,没建完的世界下次打开会被当成建好的、锁住。
  * 新存的就把存档也拿掉;原来就有的留着原来那份本地信息
@@ -589,7 +615,9 @@ function writeSave(id: string, save: SaveFile, meta?: Meta): boolean {
   const fresh = kv.get(PREFIX + id) === null;
   evicted = [];
   const text = JSON.stringify(save);
+  const orig = fresh ? null : originalToKeep(id, save.generator);
   let ok = put(PREFIX + id, text, id);
+  if (ok) keepOriginal(id, orig);
   if (ok && meta && !writeMeta(id, meta)) {
     if (fresh) kv.remove(PREFIX + id);
     ok = false;
@@ -632,7 +660,7 @@ export function setDeleteHook(f: ((id: string) => void) | null) {
 export function deleteWorld(id: string): DeletedWorld | null {
   const kv = store();
   const keys: [string, string][] = [];
-  for (const p of [PREFIX, THUMB, META, NOTES]) {
+  for (const p of [PREFIX, THUMB, META, NOTES, ORIG]) {
     const v = kv.get(p + id);
     if (v !== null) keys.push([p + id, v]);
   }
@@ -648,7 +676,7 @@ export function deleteWorld(id: string): DeletedWorld | null {
   return had ? { id, keys } : null;
 }
 
-/** 删掉的世界删之前的样子(撤销删除用):存档、缩略图、打开记录、AI 写的史书和名字由来,各自原来存的字符串 */
+/** 删掉的世界删之前的样子(撤销删除用):存档、缩略图、打开记录、AI 写的史书和名字由来、旧版本的原样,各自原来存的字符串 */
 export interface DeletedWorld {
   id: string;
   keys: [string, string][];
@@ -658,17 +686,17 @@ export interface DeletedWorld {
  * 撤销删除:把删之前的几样原样写回,"我的世界"里回到原来的位置(按最近打开 / 修改的时间排)。
  * 别的页面里还开着它、删了以后又自动存过的:以那边新存的为准,只补回现在没有的。
  * 存档、打开记录(没建完的世界靠它记着还在建)、AI 写的东西有一样写不下(浏览器存储满了)
- * = false,这次写回的都撤掉;缩略图写不下就算了(再打开会重画)
+ * = false,这次写回的都撤掉;缩略图(再打开会重画)、旧版本的原样写不下就算了,不为它们挡着世界放回来
  */
 export function restoreWorld(d: DeletedWorld): boolean {
   const kv = store();
   const wrote: string[] = [];
-  for (const p of [PREFIX, META, NOTES, THUMB]) {
+  for (const p of [PREFIX, META, NOTES, ORIG, THUMB]) {
     const k = p + d.id;
     const v = d.keys.find((e) => e[0] === k)?.[1];
     if (v === undefined || kv.get(k) !== null) continue;
     if (kv.set(k, v)) wrote.push(k);
-    else if (p !== THUMB) {
+    else if (p !== THUMB && p !== ORIG) {
       for (const w of wrote) kv.remove(w);
       changed();
       return false;
@@ -713,7 +741,7 @@ export function nextTitle(base: string): string {
   return root;
 }
 
-/** "我的世界"里复制一份(名字加"(二)",缩略图一起;AI 写的东西由 ai/library 的 copyNotes 复制);返回新编号,复制不了 = null */
+/** "我的世界"里复制一份(名字加"(二)",缩略图、旧版本的原样一起;AI 写的东西由 ai/library 的 copyNotes 复制);返回新编号,复制不了 = null */
 export function duplicateWorld(id: string): string | null {
   const w = loadWorld(id);
   if (!w) return null;
@@ -729,6 +757,8 @@ export function duplicateWorld(id: string): string | null {
       put(THUMB + nid, w.thumb, nid);
       reportEvicted('quota');
     }
+    // 原样写不下就不带(不为它删别的世界;原件那里还有)
+    keepOriginal(nid, store().get(ORIG + id));
   } finally {
     shield = null;
   }
@@ -1135,10 +1165,13 @@ export function rawWorld(id: string): RawWorld | null {
  * 正在看的就是它:先不再自动存它(App 重新打开)
  */
 export function putSyncedWorld(id: string, w: RawWorld, opened0?: string): boolean {
-  if (!ID_RE.test(id) || !parseSave(w.save).ok) return false;
+  const r = ID_RE.test(id) ? parseSave(w.save) : null;
+  if (!r?.ok) return false;
   const kv = store();
   const old = kv.get(PREFIX + id);
   const opened = readMeta(id).opened ?? opened0;
+  // 另一台设备在新版里重存过的旧世界:写成了以后,这里原来那份原样留着
+  const orig = old === null ? null : originalToKeep(id, r.save.generator);
   if (!kv.set(PREFIX + id, w.save)) return false;
   const m: Meta = { ...w.meta };
   if (opened) m.opened = opened;
@@ -1147,6 +1180,7 @@ export function putSyncedWorld(id: string, w: RawWorld, opened0?: string): boole
     else kv.set(PREFIX + id, old);
     return false;
   }
+  keepOriginal(id, orig);
   // 缩略图写不下就先不要(打开时再截一张)
   if (!w.thumb || !kv.set(THUMB + id, w.thumb)) kv.remove(THUMB + id);
   if (current?.id === id) {
@@ -1208,7 +1242,7 @@ export function removeSyncedWorld(id: string) {
  * 正在看的世界接着用
  */
 export function removeAllWorlds(): boolean {
-  const ours = (k: string) => [PREFIX, THUMB, META, NOTES, LEGACY].some((p) => k.startsWith(p));
+  const ours = (k: string) => [PREFIX, THUMB, META, NOTES, LEGACY, ORIG].some((p) => k.startsWith(p));
   if (!wipeBrowser(ours)) {
     // 正在看的那份没能放回去:马上再存一次
     if (current?.wrote != null && store().get(PREFIX + current.id) === null) saveCurrent(true);
