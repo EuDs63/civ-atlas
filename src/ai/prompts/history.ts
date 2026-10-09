@@ -149,10 +149,10 @@ export const NAME_FLAVOR: Record<string, { family: 'eastern' | 'western'; label:
   desert: { family: 'western', label: '沙洲(大食风)' },
   steppe: { family: 'western', label: '草原(突厥蒙古风)' },
   elven: { family: 'western', label: '于阗(玉国风)' },
-  central: { family: 'eastern', label: '关陇(汉风)' },
-  xianxia: { family: 'eastern', label: '河西(走廊风)' },
+  central: { family: 'eastern', label: '中原(古风)' },
+  xianxia: { family: 'eastern', label: '江南(仙侠风)' },
   frontier: { family: 'eastern', label: '边塞(西域风)' },
-  mythic: { family: 'eastern', label: '奇国(异闻风)' },
+  mythic: { family: 'eastern', label: '山海(神话风)' },
 };
 
 // ---------------------------------------------------------------------------

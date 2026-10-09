@@ -309,18 +309,19 @@ function stripGeneric(zh: string, generic: string | undefined): string {
  */
 const DYNASTY_CHARS: Record<string, string> = {
   central: '宁靖昭乾康安定兴隆昌景瑞雍顺嘉宣崇恒启承沂漳沁滦潍淄汝汾渭洛淮济漓湘',
+  xianxia: '乾玄景衍辰霄渊岳澜羽灵武',
 };
 /** 山海风:一半是"有" + 鸟兽草木("有熊""有桑",上古部族称"有某氏"),一半按语感另起("玄羽""千目") */
 const MYTHIC_DYNASTY = '鹿虎熊狐龙凤鹤雁鹊鸿鹰桑梧桂';
 const MYTHIC_YOU = 0.5;
 /**
- * 西幻城名、州名末尾的通名(借来做王朝名时去掉:"卡拉尔堡" → "卡拉尔王朝"、"赛音八里" → "赛音王朝"、
- * "科雷尔郡" → "科雷尔王朝"、"乌兰戈壁" → "乌兰王朝")
+ * western 城名、州名末尾的通名(借来做王朝名时去掉:"疏勒城" → "疏勒王朝"、"赛音八里" → "赛音王朝"、
+ * "康居原" → "康居王朝"、"乌兰戈壁" → "乌兰王朝")
  */
 const CITY_GENERICS = ['斡鲁朵', '库尔干', '布拉克', '沙赫尔', '浩特', '八里', '肯特', '苏木', '巴扎', '阿巴德', '坎德', '港', '堡', '城'];
-const REGION_GENERICS = ['戈壁', '塔拉', '乌拉', '塔格', '原', '川', '道'];
+const REGION_GENERICS = ['戈壁', '塔拉', '乌拉', '塔格', '峡湾', '郡', '原', '川', '道'];
 
-/** 西幻城名 / 州名 → 王朝名:去掉末尾的通名(剩下不到两个字就不去) */
+/** western 城名 / 州名 → 王朝名:去掉末尾的通名(剩下不到两个字就不去) */
 export function houseName(place: string, region = false): string {
   for (const g of region ? REGION_GENERICS : CITY_GENERICS) {
     if (place.endsWith(g) && [...place].length - [...g].length >= 2) return place.slice(0, place.length - g.length);

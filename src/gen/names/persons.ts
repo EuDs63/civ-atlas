@@ -1,8 +1,8 @@
 /**
  * 人名生成器:君主、统帅的名字,和地名用同一套语感。
  *
- * - western 族:先拼拉丁拟音(词根 + 可选中间音节 + 词尾),再落成西域译名式汉字(疏勒王一类的音译名)。
- * - eastern 族:关陇是"姓 + 名";边塞 / 河西是西域音译式的名(两三个字);奇国是上古式的两字名。
+ * - western 族(原西幻语感):拉丁拟音落成汉籍西域译名式汉字(疏勒、安息一路的音译名)。
+ * - eastern 族:中原、仙侠是"姓 + 名";边塞是西域音译式的名;山海是上古式的两字名(保持原东方语感)。
  *
  * 按键取:同一个 seed + 语感 + 用途 + 键 → 同一个名字,和调用先后无关(键 = 国家的位置锚、第几位……,见 gen/civ/people.ts)。
  * 不查重:调用方自己挑(同一朝的君主不重名时换下一个键)。
@@ -19,7 +19,7 @@ import { list, parts, pick, wpick, type Part, type Weighted } from './spec';
 export interface PersonNamer {
   readonly style: string;
   readonly family: 'western' | 'eastern';
-  /** 这种语感的人名带不带姓(中原、仙侠带;边塞、山海、西幻不带) */
+  /** 这种语感的人名带不带姓(中原、仙侠带;边塞、山海、western 不带) */
   readonly surnamed: boolean;
   /** 姓;不带姓的语感 = 空串 */
   surname(...key: number[]): string;
@@ -28,7 +28,7 @@ export interface PersonNamer {
 }
 
 // ---------------------------------------------------------------------------
-// 西幻:拉丁原形 + 音译
+// western 族:拉丁拟音 + 西域译名汉字
 
 interface WesternPersonStyle {
   stems: Part[];
@@ -165,20 +165,21 @@ const EASTERN_PERSONS: Record<string, EasternPersonStyle> = {
   central: {
     surnames: '李王张刘陈杨赵黄周吴徐孙胡朱高林何郭马罗梁宋郑谢韩唐冯董萧程曹袁邓许傅沈彭吕苏卢蒋蔡贾魏薛叶阎潘杜戴夏钟汪田任姜范方石姚谭邹熊陆孔白崔康秦江顾侯邵孟段雷钱汤尹易常乔贺',
     compound: ['司马', '欧阳', '上官', '慕容', '宇文', '长孙', '独孤', '皇甫', '令狐', '尉迟'],
-    compoundChance: 0.08,
+    compoundChance: 0.06,
     single: 0.45,
     chars: '昭恒怀煜晟珩琰瑾璋昱晖熙承弘宏泰康宁靖安定允恪慎谦敬晏曜旻晔炜烨焕桓楷栋渊泓澈涵洵濂浚湛润峻岳崇嵩修仪信俊佑德徽彰显景曦朗明晨昶睿哲彦毅勋骏骥驰鹏翔翊霆霖震鸿晋绍继统绪谟询遥逸远迪琮瑜琛璟钧铉锐镇',
   },
   xianxia: {
-    single: 0,
-    first: '贺康安石曹米何穆火罗末撒达骨耶勿',
-    chars: '密禄特斯浑设延德思居罗耶干连弥提',
-    third: 0.3,
+    surnames: '沈叶楚萧苏云白洛凌墨顾夜风林温谢江陆宁柳慕司君景燕裴晏',
+    compound: ['慕容', '南宫', '司空', '东方', '上官', '独孤', '端木', '百里'],
+    compoundChance: 0.15,
+    single: 0.5,
+    chars: '玄清尘寒渊霄羽澈墨离辰弦霜夜青冥珏曦霁弈遥衍霆渺沧溟曜烬月星岚雪云风尧泠琅瑶珩璃缈鸾翎昀',
   },
   frontier: {
     single: 0,
-    first: '阿伊苏尉莫贺骨吐伏拔达支失毕屈沙钵那罗摩提婆迦耶勒斤萨乌车鞠',
-    chars: '利达罗那支提斤勒设特毗婆尼斯延陀陵罕密拉兹宿',
+    first: '阿伊苏尉莫贺咄骨吐伏拔达支失毕屈沙钵那罗摩提婆迦耶勒斤颉曷萨乌车鞠',
+    chars: '苾啜利达罗那支伽提斤勒设特毗婆尼斯延陀陵鞬罕密迦拉',
     third: 0.35,
   },
   mythic: {
