@@ -1,8 +1,9 @@
 /**
  * 地名生成器:按不同语感生成中文的国名、城名、山名、海名、河名、地区名。
  *
- * 西幻风(western)先拼拉丁字母原形再音译(Aldoria → 阿尔多里亚);
- * 东方风(eastern)用意象字库 + 通名组合(落霞关、苍澜海),并照顾平仄。
+ * western 族(原西幻语感):拉丁拟音落成汉籍西域译名式汉字(Shule → 疏勒、Anxi → 安息),
+ *   不再走阿尔多里亚那路欧洲音译;草原(steppe)仍用突厥蒙古写法。
+ * eastern 族:保持原东方多样性 —— 中原州郡、江南仙侠、边塞、山海神话(意象字 + 通名,照顾平仄)。
  *
  * 纯计算、不碰 DOM;所有随机数来自 subSeed(seed, 'names:风格') + mulberry32。两种取法:
  * - 逐个取 name(kind):同 seed + styleId + 调用顺序 → 同样的名字,同一个 Namer 内不重名;
@@ -29,9 +30,9 @@ export interface NameStyle {
 }
 
 export interface GeneratedName {
-  /** 完整中文名,如 "阿尔多里亚"、"卡斯特维尔港"、"苍澜海" */
+  /** 完整中文名,如 "疏勒"、"落霞关"、"喀拉郭勒" */
   zh: string;
-  /** 西幻风的拉丁字母原形,如 "Aldoria"、"Aldor Mountains";东方风没有 */
+  /** western 族的拉丁拟音原形,如 "Shule"、"Anxi";东方风没有 */
   latin?: string;
   /** zh 末尾的通名(山脉 / 海 / 河 / 关 / 州…),没有就不给;地图标注可以拿它换行或换字号 */
   generic?: string;

@@ -1,8 +1,8 @@
 /**
  * 人名生成器:君主、统帅的名字,和地名用同一套语感。
  *
- * - 西幻风:先拼拉丁字母原形(词根 + 可选的中间音节 + 词尾),再按这种语感的译音表转成中文(Aldric → 阿尔德里克)。
- * - 东方风:中原、仙侠是"姓 + 名"(名一两个字);边塞是西域音译式的名(两三个字);山海是上古式的两字名。都不带姓的语感,姓为空串。
+ * - western 族(原西幻语感):拉丁拟音落成汉籍西域译名式汉字(疏勒、安息一路的音译名)。
+ * - eastern 族:中原、仙侠是"姓 + 名";边塞是西域音译式的名;山海是上古式的两字名(保持原东方语感)。
  *
  * 按键取:同一个 seed + 语感 + 用途 + 键 → 同一个名字,和调用先后无关(键 = 国家的位置锚、第几位……,见 gen/civ/people.ts)。
  * 不查重:调用方自己挑(同一朝的君主不重名时换下一个键)。
@@ -19,7 +19,7 @@ import { list, parts, pick, wpick, type Part, type Weighted } from './spec';
 export interface PersonNamer {
   readonly style: string;
   readonly family: 'western' | 'eastern';
-  /** 这种语感的人名带不带姓(中原、仙侠带;边塞、山海、西幻不带) */
+  /** 这种语感的人名带不带姓(中原、仙侠带;边塞、山海、western 不带) */
   readonly surnamed: boolean;
   /** 姓;不带姓的语感 = 空串 */
   surname(...key: number[]): string;
@@ -28,7 +28,7 @@ export interface PersonNamer {
 }
 
 // ---------------------------------------------------------------------------
-// 西幻:拉丁原形 + 音译
+// western 族:拉丁拟音 + 西域译名汉字
 
 interface WesternPersonStyle {
   stems: Part[];
@@ -38,55 +38,55 @@ interface WesternPersonStyle {
   ends: Weighted<Part>[];
 }
 
-/** 各语感的人名构词表(词根、中间音节、词尾都是自拟的,不照搬真实的名人、他人作品里的角色) */
+/** 各语感的人名构词表(自拟音译音节,不照搬真实名人) */
 const WESTERN_PERSONS: Record<string, WesternPersonStyle> = {
   imperial: {
-    stems: list('aur fab flav jul luc marc max oct sev tib val vesp cass corn drus gall hadr quint serv tit aem anton aquil camil clem decim'),
-    mids: list('el en ar il in'),
-    mid: 0.3,
-    ends: parts('ius:4 ian:2 us:2 inus:2 ianus:1 or:1 ens:1'),
+    stems: list('an=安 xi=息 da=大 xia=夏 li=黎 zhi=支 ju=居 kang=康'),
+    mids: list('-'),
+    mid: 0.05,
+    ends: parts('xi=息:2 xia=夏:1 zhi=支:2 ju=居:2 lu=禄:1 mi=弥:1'),
   },
   kingdom: {
-    stems: list('ald ed wil rich rob hen ger wal gil theo os al ber her gal leo ray rod tris per lan ste bald arn em od'),
-    mids: list('er el an'),
-    mid: 0.15,
-    ends: parts('ric:3 bert:3 win:2 mund:2 ward:2 wald:1 frid:1 an:1 ard:2 gar:1 ulf:1 ain:1 old:1'),
+    stems: list('shu=疏 wen=温 gu=姑 yu=于 wei=尉 qu=渠 jing=精 lou=楼 yi=伊 bi=卑'),
+    mids: list('-'),
+    mid: 0.05,
+    ends: parts('le=勒:2 ci=兹:2 su=宿:1 mo=末:1 lan=兰:1 li=犁:1 zhi=支:1'),
   },
   nordic: {
-    stems: list('har sig ulf bjor ragn tor ein gunn ol hal ket arn ing sven vid sten erl hrol as eyv thor'),
-    mids: list('e a'),
-    mid: 0.1,
-    ends: parts('ald:3 urd:2 var:2 ulf:2 mund:1 ar:2 ir:1 grim:1 vald:1 ketil:1 leif:1 dan:1'),
+    stems: list('jian=坚 ding=丁 hu=呼 gu=骨 hun=浑 he=贺 mo=莫 yan=延'),
+    mids: list('-'),
+    mid: 0.05,
+    ends: parts('kun=昆:2 ling=零:1 lu=禄:2 hun=浑:1 li=利:1 tuo=陀:1'),
   },
   slavic: {
-    stems: list('vlad yaro svyato msti bor rad mir stan bole vela dobro lyub sudi miro rosti ole bogu zdeno vito'),
-    mids: list('o e'),
-    mid: 0.1,
-    ends: parts('slav:5 mir:3 polk:1 dan:1 gost:1 voj:1 bor:1 mil:1'),
+    stems: list('kang=康 an=安 shi=石 mu=穆 mi=米 he=何 luo=罗'),
+    mids: list('-'),
+    mid: 0.05,
+    ends: parts('ju=居:2 mi=密:2 lu=禄:2 luo=罗:1 ye=耶:1'),
   },
   hellenic: {
-    stems: list('ari kle the dem nik kal per lys phil hip xan eu ant tim arch dio her pol sos ast meg'),
-    mids: list('o a i'),
-    mid: 0.25,
-    ends: parts('as:2 es:3 on:2 os:2 ides:3 ander:1 ippos:1 kles:2 menes:1 stratos:1 machos:1'),
+    stems: list('da=大 li=黎 qin=秦 an=安 du=都 si=斯'),
+    mids: list('-'),
+    mid: 0.05,
+    ends: parts('qin=秦:1 xuan=轩:2 si=斯:2 du=都:1 luo=罗:1'),
   },
   desert: {
-    stems: list('rash khal sal mus jaf zay tar nas ham kar mah far sul has bas mun qas hak ab wal'),
-    mids: list('a i'),
+    stems: list('sa=撒 mo=末 luo=逻 bu=布 ha=哈 ka=喀 za=扎'),
+    mids: list('- a='),
     mid: 0.1,
-    ends: parts('id:3 il:2 im:3 an:2 ud:1 ir:2 af:1 un:1 ar:1 ad:1'),
+    ends: parts('mo=末:2 mi=密:2 la=拉:1 ha=哈:1 si=斯:1'),
   },
   steppe: {
-    stems: list('bat tog kub men ok ar bor kai qut yes tem chag jo ol sub mun bil tol al alt ur bek'),
-    mids: list('a u i'),
-    mid: 0.1,
-    ends: parts('u:3 ul:2 ai:1 ar:2 ei:1 an:2 gul:1 dai:1 tai:1 lun:1 tur:1'),
+    stems: list('bat=巴 tog=托 kub=库 men=门 bor=博 kai=凯 tem=铁 tol=托 bek=别 gu=骨 he=贺'),
+    mids: list('a= u='),
+    mid: 0.15,
+    ends: parts('u:1 ul=兀:1 lu=禄:3 ai=艾:1 ar=尔:1 an=安:1 dai=歹:1 tur=突:1'),
   },
   elven: {
-    stems: list('ael sil thal cael ith mir nim fael lir aer vael ser tir fin eir lith nar len myr sael aen ior'),
-    mids: list('a e i an el'),
-    mid: 0.3,
-    ends: parts('ion:3 iel:2 orin:2 is:1 ar:2 en:1 ethil:1 wyn:1 as:2 andir:1 aen:1 or:2'),
+    stems: list('yu=于 pi=毗 sha=沙 ni=尼 ju=拘 mi=弥 tuo=陀 bo=钵'),
+    mids: list('-'),
+    mid: 0.05,
+    ends: parts('mi=弥:2 sha=沙:2 luo=罗:1 ni=尼:1 ye=耶:1 ti=提:1'),
   },
 };
 
@@ -120,13 +120,25 @@ function latinShapeOk(l: string): boolean {
 }
 
 function westernPerson(st: WesternPersonStyle, tr: TranscribeOptions, link: string, r: Rng): string | null {
-  let l = pick(r, st.stems).l;
-  if (r() < st.mid) l = join(l, pick(r, st.mids).l, link);
-  l = join(l, wpick(r, st.ends).l, link);
-  if (!latinShapeOk(l) || WESTERN_FAMOUS.has(l) || latinBlocked(l)) return null;
-  const zh = transcribe(l, tr);
+  const stem = pick(r, st.stems);
+  const mid = r() < st.mid ? pick(r, st.mids) : null;
+  const end = wpick(r, st.ends);
+  const useMid = !!(mid && mid.l);
+  const segs = useMid ? [stem, mid!, end] : [stem, end];
+  let l = stem.l;
+  if (useMid) l = join(l, mid!.l, link);
+  l = join(l, end.l, link);
+  if (WESTERN_FAMOUS.has(l) || latinBlocked(l)) return null;
+  let zh: string;
+  if (segs.every((p) => p.zh !== undefined)) {
+    zh = segs.map((p) => p.zh!).join('');
+  } else {
+    if (!latinShapeOk(l)) return null;
+    zh = transcribe(l, tr);
+  }
   const n = [...zh].length;
-  if (n < 3 || n > 6 || zhBlocked(zh)) return null;
+  // 西域译名人名两到四字(骨禄、安居弥);过短过长都不要
+  if (n < 2 || n > 5 || zhBlocked(zh)) return null;
   return zh;
 }
 
@@ -217,7 +229,7 @@ function keyRng(base: number, use: number, key: number[]): Rng {
 }
 
 /** 抽不出合格的名字时(极少见)的兜底 */
-const FALLBACK_WEST = '阿尔德';
+const FALLBACK_WEST = '安居';
 const FALLBACK_EAST = '昭';
 const TRIES = 60;
 

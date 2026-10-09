@@ -8,7 +8,7 @@ import { generateCiv } from '../src/gen/civ';
 import { rasterize } from '../src/gen/raster';
 import { NAME_STYLES } from '../src/gen/names';
 import { worldNameStyle } from '../src/gen/civ/places';
-import { applyNames } from '../src/gen/edits';
+import { applyNames, cleanName } from '../src/gen/edits';
 import { polityName } from '../src/gen/civ/growth';
 import { aiChat, setActiveProvider, setMockResponder } from '../src/ai/client';
 import { AiError, type AiRequest } from '../src/ai/types';
@@ -175,29 +175,29 @@ describe('起名 JSON 的解析与兜底', () => {
   it('约定的格式:5 个名字 + 含义 + 拉丁原形', () => {
     const text = JSON.stringify({
       names: [
-        { name: '阿尔瑟维尔', meaning: 'Alsaville:高地上的城镇', latin: 'Alsaville' },
-        { name: '洛兰堡', meaning: '洛兰人的堡寨' },
-        { name: '塞伦福德', meaning: '塞伦河上的渡口' },
-        { name: '维斯特港', meaning: '西边的港口' },
-        { name: '卡雷诺纳', meaning: '古语"卡雷"是岩石' },
+        { name: '疏勒城', meaning: 'Shule:绿洲城邦对音', latin: 'Shule' },
+        { name: '温宿城', meaning: '温宿人的城' },
+        { name: '渠勒', meaning: '塔里木南缘城邦' },
+        { name: '安居城', meaning: '西国译名' },
+        { name: '精绝', meaning: '古语"精"是绿洲' },
       ],
     });
     const r = parseSuggestions(text, cityInfo());
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.list.map((x) => x.name)).toEqual(['阿尔瑟维尔', '洛兰堡', '塞伦福德', '维斯特港', '卡雷诺纳']);
-    expect(r.list[0].latin).toBe('Alsaville');
-    expect(r.list[1].meaning).toBe('洛兰人的堡寨');
+    expect(r.list.map((x) => x.name)).toEqual(['疏勒城', '温宿城', '渠勒', '安居城', '精绝']);
+    expect(r.list[0].latin).toBe('Shule');
+    expect(r.list[1].meaning).toBe('温宿人的城');
   });
 
   it('多要的两个补上被丢掉的:7 个里有 2 个和已有名字重复,作者看到的还是 5 个', () => {
     const info = cityInfo();
-    const taken = new Set(['洛兰堡', '维斯特港']);
-    const names = ['阿尔瑟维尔', '洛兰堡', '塞伦福德', '维斯特港', '卡雷诺纳', '奥斯特伦', '米拉福德'];
+    const taken = new Set(['温宿城', '安居城']);
+    const names = ['疏勒城', '温宿城', '渠勒', '安居城', '精绝', '于弥', '毗沙城'];
     const r = parseSuggestions(JSON.stringify({ names: names.map((name) => ({ name, meaning: '含义' })) }), info, taken);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.list.map((x) => x.name)).toEqual(['阿尔瑟维尔', '塞伦福德', '卡雷诺纳', '奥斯特伦', '米拉福德']);
+    expect(r.list.map((x) => x.name)).toEqual(['疏勒城', '渠勒', '精绝', '于弥', '毗沙城']);
     expect(r.list).toHaveLength(SUGGEST_SHOW);
     expect(userText(suggestRequest(nameMaterial(raw, { kind: 'settlement', id: westCity.id }, raster)!))).toContain(`起 ${SUGGEST_SHOW + 2} 个新名字`);
   });
@@ -208,29 +208,29 @@ describe('起名 JSON 的解析与兜底', () => {
   });
 
   it('宽松:代码围栏、直接一个数组、别的键名、"名字:含义"字符串', () => {
-    const fenced = '好的,给你:\n```json\n{"candidates":[{"名字":"洛兰堡","含义":"堡寨"}]}\n```';
+    const fenced = '好的,给你:\n```json\n{"candidates":[{"名字":"温宿城","含义":"绿洲城"}]}\n```';
     const a = parseSuggestions(fenced, cityInfo());
-    expect(a.ok && a.list[0].name).toBe('洛兰堡');
-    const arr = parseSuggestions('[{"name":"「塞伦福德」","desc":"渡口"}]', cityInfo());
-    expect(arr.ok && arr.list[0]).toEqual({ name: '塞伦福德', meaning: '渡口' });
-    const strs = parseSuggestions('{"names":["维斯特港:西边的港口","卡雷诺纳 —— 岩石之城"]}', cityInfo());
+    expect(a.ok && a.list[0].name).toBe('温宿城');
+    const arr = parseSuggestions('[{"name":"「渠勒」","desc":"南缘城邦"}]', cityInfo());
+    expect(arr.ok && arr.list[0]).toEqual({ name: '渠勒', meaning: '南缘城邦' });
+    const strs = parseSuggestions('{"names":["安居城:西国译名","精绝 —— 绿洲之城"]}', cityInfo());
     expect(strs.ok && strs.list.map((x) => [x.name, x.meaning])).toEqual([
-      ['维斯特港', '西边的港口'],
-      ['卡雷诺纳', '岩石之城'],
+      ['安居城', '西国译名'],
+      ['精绝', '绿洲之城'],
     ]);
   });
 
   it('JSON 坏了(收尾引号写成中文引号、后面跟一大段废话)也能一条条捞出来', () => {
     // 某个模型回过的样子(名字换成了测试用的)
     const broken =
-      '{"names":[{"name":"洛兰堡","latin":"Lorenburg","meaning":"洛兰人的堡寨"},{"name":"塞伦福德","meaning":"塞伦河上的渡口"},' +
-      '{"name":"维斯特港","meaning":"西边的港口”}]}   按要求生成5个名字。已完成。 ```json {"  }';
+      '{"names":[{"name":"温宿城","latin":"Wensu","meaning":"温宿人的城"},{"name":"渠勒","meaning":"塔里木南缘城邦"},' +
+      '{"name":"安居城","meaning":"西国译名”}]}   按要求生成5个名字。已完成。 ```json {"  }';
     const r = parseSuggestions(broken, cityInfo());
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.list.map((x) => x.name)).toEqual(['洛兰堡', '塞伦福德', '维斯特港']);
-    expect(r.list[0]).toMatchObject({ latin: 'Lorenburg', meaning: '洛兰人的堡寨' });
-    expect(r.list[2].meaning).toBe('西边的港口');
+    expect(r.list.map((x) => x.name)).toEqual(['温宿城', '渠勒', '安居城']);
+    expect(r.list[0]).toMatchObject({ latin: 'Wensu', meaning: '温宿人的城' });
+    expect(r.list[2].meaning).toBe('西国译名');
   });
 
   it('中式名字不留拉丁字母(模型常顺手给拼音)', () => {
@@ -241,7 +241,8 @@ describe('起名 JSON 的解析与兜底', () => {
   it('东方国号:去掉顺手打上的"国""王朝",超过两个字、带拉丁字母、重名、和现在一样的丢掉', () => {
     const info = polInfo();
     const taken = takenNames(raw, { kind: 'polity', id: eastPolity.id });
-    const someTaken = [...taken][0];
+    // 挑一个清理后仍落在 taken 里的单字根(Set 迭代顺序不保证,不能取 [0])
+    const someTaken = [...taken].find((n) => n !== info.name && [...cleanName('polity', n, true)].length >= 1 && taken.has(cleanName('polity', n, true)))!;
     const text = JSON.stringify({
       names: [
         { name: `${FRESH}国`, meaning: '' },
@@ -277,7 +278,7 @@ describe('起名 JSON 的解析与兜底', () => {
 
   it('测试用假 AI 的默认回复 → 占位候选', () => {
     expect(isMockReply('{"mock":true,"feature":"起名"}')).toBe(true);
-    expect(isMockReply('{"names":[{"name":"洛兰堡"}]}')).toBe(false);
+    expect(isMockReply('{"names":[{"name":"温宿城"}]}')).toBe(false);
     const list = mockSuggestions(raw, { kind: 'settlement', id: westCity.id }, cityInfo());
     expect(list.length).toBeGreaterThanOrEqual(3);
     for (const c of list) expect(raw.settlements.some((s) => s.name === c.name)).toBe(false);
@@ -290,7 +291,7 @@ describe('经 aiChat 走一遍(测试用假 AI)', () => {
     let seen: AiRequest | null = null;
     setMockResponder((req) => {
       seen = req;
-      return JSON.stringify({ names: [{ name: '洛兰堡', meaning: '洛兰人的堡寨' }, { name: '塞伦福德', meaning: '渡口' }] });
+      return JSON.stringify({ names: [{ name: '温宿城', meaning: '温宿人的城' }, { name: '渠勒', meaning: '南缘城邦' }] });
     });
     const t: NameTarget = { kind: 'settlement', id: westCity.id };
     const m = nameMaterial(raw, t, raster)!;
@@ -304,7 +305,7 @@ describe('经 aiChat 走一遍(测试用假 AI)', () => {
     const e = suggestionEdit(m.info, p.list[0].name, defaultName(raw, t, m.info));
     setName(e.key, e.value);
     const civ = applyNames(raw, getEdits().names);
-    expect(civ.settlements[westCity.id].name).toBe('洛兰堡');
+    expect(civ.settlements[westCity.id].name).toBe('温宿城');
     // 选回生成时的名字 = 从改名表里去掉
     const back = suggestionEdit(nameInfo(civ, t)!, westCity.name, defaultName(raw, t, m.info));
     expect(back.value).toBeNull();
