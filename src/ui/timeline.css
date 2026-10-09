@@ -3,7 +3,7 @@
  *
  * 颜色一律用界面主题变量(浅 / 深两套,theme.css 定义):
  *   --ink --ink-2 --panel --panel-solid --line --line-strong --btn --link --accent --accent-hover --void
- *   --ev-war --ev-dynasty --ev-found --ev-empire --ev-assim --ev-faith --halo
+ *   --ev-war --ev-dynasty --ev-found --ev-empire --ev-assim --ev-faith --ev-tech --halo
  * 没定义时用浅色主题的值(下面 var() 的第二个参数)。
  * .tb-compat:主题还没加载、页面 :root 里的 --panel / --line / --accent 可能是别的样式表定的深色值时(组件自己查,见 CivTimeline.tsx 的
  * useThemeCompat),在组件里把这三个换成浅色主题的值。
@@ -47,6 +47,9 @@
 }
 [data-ev='faith'] {
   --c: var(--ev-faith, #1b97a6);
+}
+[data-ev='tech'] {
+  --c: var(--ev-tech, #9a6b2f);
 }
 [data-ev='order'] {
   --c: var(--accent, #b8432f);

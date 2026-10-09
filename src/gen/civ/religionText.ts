@@ -3,7 +3,8 @@
  *
  * 宗教大事(faithEntries):创教、立国教、传入一国、教派分立、圣城易主,和现有纪事一样用半角逗号。
  *   创教、教派分立是大事(重要度 3);当年州数前五的国家立国教是 2;小国立国教、传入是 1。
- *   不放进 buildChronicle(那里只有史事,AI 的材料用它);编年史、时间轴、卡片里的大事用 fullChronicle(史事 + 继位以外的宗教大事)。
+ *   不放进 buildChronicle(那里只有史事,AI 的材料用它);编年史、时间轴、卡片里的大事用 fullChronicle
+ *   (史事 + 宗教大事 + 技术大事,见 techText.ts)。
  */
 import type { Civ, Faith, FaithEvent, FaithEventKind, FaithForm, Year } from './types';
 import { polityName } from './growth';
@@ -11,6 +12,7 @@ import { ownersAt, type Owners } from './timeline';
 import { rulerRef } from './peopleText';
 import { buildChronicle, mergeChronicle, type ChronicleEntry, type Importance } from './chronicle';
 import { faithCounts, faithRoot, FOLK_COLOR } from './religion';
+import { techEntries } from './techText';
 
 /** 类型的说明(宗教卡片「类型」一行的小字) */
 export const FORM_NOTE: Record<FaithForm, string> = {
@@ -109,12 +111,12 @@ export function faithEntries(civ: Civ): ChronicleEntry[] {
 
 const fullCache = new WeakMap<Civ, ChronicleEntry[]>();
 
-/** 史事 + 宗教大事(编年史、时间轴、最近大事、卡片里的大事用这一份;不含君主继位)。按 civ 缓存;地图在更早一段时按整段历史(Civ.history)算 */
+/** 史事 + 宗教大事 + 技术大事(编年史、时间轴、最近大事、卡片里的大事用这一份;不含君主继位)。按 civ 缓存;地图在更早一段时按整段历史(Civ.history)算 */
 export function fullChronicle(civ: Civ): ChronicleEntry[] {
   if (civ.history) return fullChronicle(civ.history);
   const hit = fullCache.get(civ);
   if (hit) return hit;
-  const out = mergeChronicle(buildChronicle(civ), faithEntries(civ));
+  const out = mergeChronicle(mergeChronicle(buildChronicle(civ), faithEntries(civ)), techEntries(civ));
   fullCache.set(civ, out);
   return out;
 }

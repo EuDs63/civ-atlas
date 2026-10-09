@@ -20,8 +20,8 @@ import { nearX, wrapOf } from '../render/common';
 // ---------------------------------------------------------------------------
 // 事件类型
 
-/** 五类事件 + 宗教(faith)+ 干预(order);CSS 里 [data-ev=war] 等配色 */
-export type EvType = 'war' | 'dynasty' | 'found' | 'empire' | 'assim' | 'faith' | 'order';
+/** 五类事件 + 宗教(faith)+ 技术(tech)+ 干预(order);CSS 里 [data-ev=war] 等配色 */
+export type EvType = 'war' | 'dynasty' | 'found' | 'empire' | 'assim' | 'faith' | 'tech' | 'order';
 
 const KIND_TYPE: Readonly<Record<string, EvType>> = {
   war: 'war',
@@ -44,6 +44,7 @@ const KIND_TYPE: Readonly<Record<string, EvType>> = {
   migrate: 'assim',
   vanish: 'assim',
   faith: 'faith',
+  tech: 'tech',
   intervene: 'order',
   upheaval: 'order',
 };
@@ -84,6 +85,8 @@ const TAG_LABEL: Readonly<Record<string, string>> = {
   传: '传入',
   派: '教派',
   圣: '圣城',
+  技: '发明',
+  播: '传艺',
 };
 
 /** 卡片 / 最近事件 / 提示里的类型名:"战争""改朝""称帝"…… */

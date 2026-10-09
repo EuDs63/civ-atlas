@@ -151,7 +151,9 @@ describe.each([7, 2024])('信仰 · seed=%i', (seed) => {
     expect(new Set(fe.map((e) => e.id)).size).toBe(fe.length);
     const all = fullChronicle(civ).flatMap((e) => [e, ...(e.children ?? [])]);
     expect(all.filter((e) => e.kind === 'faith')).toHaveLength(fe.length);
-    expect(all.length).toBe(base.flatMap((e) => [e, ...(e.children ?? [])]).length + fe.length);
+    // fullChronicle = 史事 + 宗教大事 + 技术大事(techText.ts)
+    const techN = all.filter((e) => e.kind === 'tech').length;
+    expect(all.length).toBe(base.flatMap((e) => [e, ...(e.children ?? [])]).length + fe.length + techN);
   });
 
   it('侧栏的信仰列表:大教按(自己 + 教派)州数排,教派紧跟本教,民间信仰最后;州数加起来 = 有人住的州', () => {

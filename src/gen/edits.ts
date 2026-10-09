@@ -171,6 +171,8 @@
  *      只是继位时年纪对不上的"其弟 / 其兄"改成了"其侄 / 叔父"这类(每个世界几十句)。
  *   10:western 族(原西幻)地名 / 族名 / 人名词库改成汉籍西域译名一路(疏勒、安息、康居);
  *      东方语感(中原 / 仙侠 / 边塞 / 山海)保持原样。地形、历史不变,默认的名字换了一遍。
+ *   11:技术层(tech.ts):各国气质标签、相对文明摇篮的时代领先 / 落后、冶铁 / 火器等技术发明与传播的编年史;
+ *      疆域、兴亡不变,编年史多了技术大事,国家面板多了气质和时代。
  */
 import type { Civ, Culture, Faith, Place, Polity, Regions, Settlement } from './civ/types';
 import type { AuthorCharacter } from './characters';
@@ -179,7 +181,7 @@ import { TERRAIN_H, TERRAIN_W } from './terrainEdits';
 import type { SketchEdit } from './sketch';
 
 /** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对);加一时在 GENERATOR_CHANGES 里补一条 */
-export const GENERATOR_VERSION = 10;
+export const GENERATOR_VERSION = 11;
 
 /**
  * 一版生成器的改动有多大(从小到大):打开旧存档、旧链接时,按跨过的几版里最大的那一种说清变了什么(savefile.ts 的 versionNote)
@@ -203,6 +205,7 @@ export const GENERATOR_CHANGES: Readonly<Record<number, { change: GeneratorChang
   8: { change: 'history', edited: true },
   9: { change: 'chronicle' },
   10: { change: 'names' },
+  11: { change: 'chronicle' },
 };
 
 /** 干预的种类(见文件头的表) */

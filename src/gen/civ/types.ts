@@ -385,6 +385,11 @@ export interface Civ {
    */
   religion?: Religion;
   /**
+   * 技术层(tech.ts):各国的技术气质、相对文明摇篮的时代领先 / 落后、冶铁 / 火器等技术的发明与传播。
+   * 推演结束后按历史"贴"上去,国界、兴亡、战争一个都不变。没有文明 = 不给
+   */
+  tech?: Tech;
+  /**
    * 地形大事(upheaval.ts;gen/edits.ts 文件头"地形大事"):按年份排,同一年的合成一件。下标 = 史事 upheaval 的 a。
    * 没有 = 不给。regions、places、routes 是最后一件大事以后的;更早的各段见 eras
    */
@@ -506,6 +511,65 @@ export interface Religion {
   log: { size: number; year: Float32Array; region: Int32Array; value: Int16Array };
   /** 每 100 年一份各州的信仰(按年份递增;那一年的变化已经算进去) */
   checkpoints: { year: Year; faith: Int16Array }[];
+}
+
+/** 一国的技术气质标签(不是科技树,只是口吻) */
+export type TechTemperament = '守成' | '好战' | '开疆' | '商路发达' | '孤悬一方' | '兼收并蓄' | '雄踞一方' | '短促';
+
+/** 会写进编年史的技术 */
+export type TechKind = 'iron' | 'stirrup' | 'compass' | 'gunpowder' | 'print';
+
+/** 世界技术时代(摇篮年表上的一段) */
+export interface TechEraDef {
+  /** 0 起,和 TECH_ERAS 下标一致 */
+  id: number;
+  /** 中文名:金石 / 铁器 / 火药 / 刊印 */
+  name: string;
+  /** 摇篮进入这一时代的年份 */
+  from: Year;
+}
+
+/** 一国的技术概况 */
+export interface TechPolity {
+  polity: number;
+  /** 一两枚气质标签 */
+  temperaments: TechTemperament[];
+  /** 国都到最近文明摇篮的州图步数 */
+  cradleDist: number;
+  /**
+   * 相对摇篮进入同一时代的年差:正 = 落后,负 = 领先。
+   * 主要由路程决定,气质和发明略作加减
+   */
+  lagYears: number;
+  /** 到结束年份为止已经掌握的技术 */
+  known: TechKind[];
+}
+
+/** 技术发明或传入 */
+export interface TechEvent {
+  year: Year;
+  kind: 'invent' | 'spread';
+  tech: TechKind;
+  /** 发明 / 学会的国家 */
+  polity: number;
+  /** 传入时的来源国(发明 = 不给) */
+  from?: number;
+  /** 起源 / 战争缴获 / 商路 */
+  via: 'origin' | 'war' | 'trade';
+  region: number;
+  /** 编年史重要度(1–3,和现有纪事同一套) */
+  importance: 1 | 2 | 3;
+}
+
+/** 技术层(贴在 Civ.tech 上) */
+export interface Tech {
+  eras: TechEraDef[];
+  /** 文明摇篮:最早几个民族的发源州 */
+  cradles: number[];
+  /** 下标 = 国家编号 */
+  polities: TechPolity[];
+  /** 按年份排好 */
+  events: TechEvent[];
 }
 
 /**

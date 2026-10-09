@@ -11,7 +11,7 @@
  *   --line 分隔线 / --line-strong 强线 / --btn 次按钮底 / --link 可点的名字
  *   --accent 主色(主按钮、开关、当前选中)/ --accent-hover 主色悬停 / --accent-soft 主色的浅底 / --void 投影外空白
  *   --map-mark 地图上的标记(选中国家国都的圆环)
- *   --ev-war 战争 / --ev-dynasty 改朝 / --ev-found 立国 / --ev-empire 称帝 / --ev-assim 同化 / --ev-faith 宗教
+ *   --ev-war 战争 / --ev-dynasty 改朝 / --ev-found 立国 / --ev-empire 称帝 / --ev-assim 同化 / --ev-faith 宗教 / --ev-tech 技术
  *   --halo 地图上文字的描边(text-shadow 的值)
  * 另有几项辅助值(--hover-bg 文字按钮悬停底、--field 输入框底、阴影、字体)。
  */
@@ -38,6 +38,7 @@
   --ev-empire: #c4870f;
   --ev-assim: #8d5bcc;
   --ev-faith: #1b97a6;
+  --ev-tech: #9a6b2f;
   --map-mark: #d4392b;
   --halo: 0 0 2px rgba(247, 242, 231, 1), 0 0 8px rgba(247, 242, 231, 0.9);
 
@@ -69,6 +70,7 @@
   --ev-empire: #f0b33e;
   --ev-assim: #c39af5;
   --ev-faith: #45c6d4;
+  --ev-tech: #d4a05a;
   --map-mark: #ff5a4c;
   --halo: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.6);
 
