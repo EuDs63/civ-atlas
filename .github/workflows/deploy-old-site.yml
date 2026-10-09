@@ -84,7 +84,9 @@ jobs:
         env:
           VITE_AI_SERVER: ''
         run: pnpm build
-      - name: 确认没有和主站共用的存储名,加上不收录
+      - name: 确认没有和主站共用的存储名,加上不收录、补结尾斜杠
+        env:
+          DIR: ${{ steps.check.outputs.dir }}
         run: |
           if grep -rlE "wenming-ditu:|civ-atlas:|[\"'\`]civ-atlas-ai[\"'\`]" dist; then
             echo "构建结果里还有和主站共用的存储名(见上面的文件)" >&2
@@ -92,6 +94,9 @@ jobs:
           fi
           sed -i 's#<meta charset="UTF-8" />#&\n    <meta name="robots" content="noindex" />#' dist/index.html
           grep -q 'name="robots" content="noindex"' dist/index.html
+          # 有人手敲 /v9(少了结尾的斜杠)时,有的服务器配置直接给出页面、不跳到 /v9/,页面里的相对路径就指错了地方:先补上斜杠再加载
+          sed -i "s#<meta charset=\"UTF-8\" />#&\n    <script>if (location.pathname.endsWith('/$DIR')) location.replace(location.pathname + '/' + location.search + location.hash);</script>#" dist/index.html
+          grep -qF "endsWith('/$DIR')" dist/index.html
       - name: 准备 SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -143,3 +148,6 @@ jobs:
             exit 1
           fi
           echo "$url 能打开(主程序 ${js#./assets/},$type)" >> "$GITHUB_STEP_SUMMARY"
+          # 少了结尾斜杠的网址:服务器跳到 /v9/(3xx)或直接给出页面(200,页面自己补斜杠)都行,记下是哪种
+          nos=$(curl -sS -o /dev/null --max-time 30 -w '%{http_code} %{redirect_url}' "https://atlas.gerdor.top/$DIR" || true)
+          echo "https://atlas.gerdor.top/$DIR(不带斜杠):$nos" | tee -a "$GITHUB_STEP_SUMMARY"
