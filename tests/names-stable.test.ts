@@ -94,8 +94,8 @@ function counterpart(k: Case, p: Place): Place | null {
 const styleOf = (civ: Civ, p: Place) => (p.culture >= 0 ? civ.cultures[p.culture].style : '');
 const ratio = (xs: boolean[]) => xs.filter(Boolean).length / Math.max(1, xs.length);
 
-/** 除名字以外的世界 + 历史的指纹(名字、语感、东方 / 西幻、拉丁原形、改名前的名字不算;小数按 64 位原样) */
-const NAME_FIELDS = new Set(['name', 'style', 'eastern', 'latin', 'defaultName']);
+/** 除名字以外的世界 + 历史的指纹(名字、语感、东方 / 西幻、拉丁原形、由名字决定的称号、改名前的名字不算;小数按 64 位原样) */
+const NAME_FIELDS = new Set(['name', 'style', 'eastern', 'latin', 'defaultName', 'title']);
 const f64 = new Float64Array(1);
 const f64b = new Uint8Array(f64.buffer);
 function historyPrint(world: World, civ: Civ): string {
@@ -132,8 +132,8 @@ function historyPrint(world: World, civ: Civ): string {
 
 describe('起名不碰推演', () => {
   it('没有改地形时,除名字外的世界、历史钉住指纹;同种子两次连名字都一样', () => {
-    // 期望值是 GENERATOR_VERSION 9(球面世界 + 人物、战役 + 洋流 + 君主世系,加上推演后贴上去的信仰)算的。推演、地形有意改了的话更新它,并把 GENERATOR_VERSION 加一
-    const expected: Record<number, string> = { 7: '5be0a80ef10413ba', 2024: '70c94f17993d6bf2' };
+    // 期望值是 GENERATOR_VERSION 10(西域译名语感;人物 title 由名字决定,不进指纹)算的。推演、地形有意改了的话更新它,并把 GENERATOR_VERSION 加一
+    const expected: Record<number, string> = { 7: '7624cd21ebf4b40b', 2024: '2b80eb5321f830d0' };
     for (const seed of [7, 2024]) {
       const P = { ...DEFAULT_PARAMS, cells: 12000, seed };
       const w = generateWorld(P);

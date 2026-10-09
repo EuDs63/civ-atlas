@@ -169,6 +169,8 @@
  *      没改地形的世界和 7 逐字节相同;改过地形的世界历史换了一遍。
  *   9:君主有了世系(谁是谁的父亲,civ/lineage.ts),补上没即位的宗室;疆域、兴亡、君主和将领都和 8 一样,
  *      只是继位时年纪对不上的"其弟 / 其兄"改成了"其侄 / 叔父"这类(每个世界几十句)。
+ *   10:地名 / 族名 / 人名语感改成汉籍西域译名一路(疏勒、安息、康居),不再偏拉丁西幻或中原州郡;
+ *      地形、历史不变,默认的名字换了一遍。
  */
 import type { Civ, Culture, Faith, Place, Polity, Regions, Settlement } from './civ/types';
 import type { AuthorCharacter } from './characters';
@@ -177,7 +179,7 @@ import { TERRAIN_H, TERRAIN_W } from './terrainEdits';
 import type { SketchEdit } from './sketch';
 
 /** 生成器版本:生成算法有改动、同种子会得到不同世界时加一(存档读档时核对);加一时在 GENERATOR_CHANGES 里补一条 */
-export const GENERATOR_VERSION = 9;
+export const GENERATOR_VERSION = 10;
 
 /**
  * 一版生成器的改动有多大(从小到大):打开旧存档、旧链接时,按跨过的几版里最大的那一种说清变了什么(savefile.ts 的 versionNote)
@@ -200,6 +202,7 @@ export const GENERATOR_CHANGES: Readonly<Record<number, { change: GeneratorChang
   7: { change: 'climate' },
   8: { change: 'history', edited: true },
   9: { change: 'chronicle' },
+  10: { change: 'names' },
 };
 
 /** 干预的种类(见文件头的表) */

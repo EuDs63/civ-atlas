@@ -8,7 +8,7 @@ import { generateCiv } from '../src/gen/civ';
 import { rasterize } from '../src/gen/raster';
 import { NAME_STYLES } from '../src/gen/names';
 import { worldNameStyle } from '../src/gen/civ/places';
-import { applyNames } from '../src/gen/edits';
+import { applyNames, cleanName } from '../src/gen/edits';
 import { polityName } from '../src/gen/civ/growth';
 import { aiChat, setActiveProvider, setMockResponder } from '../src/ai/client';
 import { AiError, type AiRequest } from '../src/ai/types';
@@ -241,7 +241,8 @@ describe('起名 JSON 的解析与兜底', () => {
   it('东方国号:去掉顺手打上的"国""王朝",超过两个字、带拉丁字母、重名、和现在一样的丢掉', () => {
     const info = polInfo();
     const taken = takenNames(raw, { kind: 'polity', id: eastPolity.id });
-    const someTaken = [...taken][0];
+    // 挑一个清理后仍落在 taken 里的单字根(Set 迭代顺序不保证,不能取 [0])
+    const someTaken = [...taken].find((n) => n !== info.name && [...cleanName('polity', n, true)].length >= 1 && taken.has(cleanName('polity', n, true)))!;
     const text = JSON.stringify({
       names: [
         { name: `${FRESH}国`, meaning: '' },

@@ -141,18 +141,18 @@ export const PREV_CONTEXT = 6000;
  * 抄一份在这里是为了不把地名词库打进主页面的包
  */
 export const NAME_FLAVOR: Record<string, { family: 'eastern' | 'western'; label: string }> = {
-  imperial: { family: 'western', label: '帝国(拉丁风)' },
-  kingdom: { family: 'western', label: '王国(英法风)' },
-  nordic: { family: 'western', label: '北境(北欧风)' },
-  slavic: { family: 'western', label: '雪原(斯拉夫风)' },
-  hellenic: { family: 'western', label: '群岛(希腊风)' },
-  desert: { family: 'western', label: '沙海(阿拉伯风)' },
+  imperial: { family: 'western', label: '安息(西国风)' },
+  kingdom: { family: 'western', label: '绿洲(城邦风)' },
+  nordic: { family: 'western', label: '北庭(漠北风)' },
+  slavic: { family: 'western', label: '康居(粟特风)' },
+  hellenic: { family: 'western', label: '大秦(远西风)' },
+  desert: { family: 'western', label: '沙洲(大食风)' },
   steppe: { family: 'western', label: '草原(突厥蒙古风)' },
-  elven: { family: 'western', label: '林语(精灵风)' },
-  central: { family: 'eastern', label: '中原(古风)' },
-  xianxia: { family: 'eastern', label: '江南(仙侠风)' },
+  elven: { family: 'western', label: '于阗(玉国风)' },
+  central: { family: 'eastern', label: '关陇(汉风)' },
+  xianxia: { family: 'eastern', label: '河西(走廊风)' },
   frontier: { family: 'eastern', label: '边塞(西域风)' },
-  mythic: { family: 'eastern', label: '山海(神话风)' },
+  mythic: { family: 'eastern', label: '奇国(异闻风)' },
 };
 
 // ---------------------------------------------------------------------------

@@ -55,7 +55,7 @@ if (mdPath) {
     '# 地名生成器样品',
     '',
     `> 由 \`npx tsx scripts/names-demo.ts --seed ${seed} --n ${n} --md ${mdPath}\` 生成,同一个种子每次结果一样。`,
-    `> 共 ${NAME_STYLES.length} 种语感:西幻 ${west} 种(先拼拉丁字母原形,再按新华社译名习惯音译),东方 ${east} 种(意象字 + 通名,照顾平仄)。`,
+    `> 共 ${NAME_STYLES.length} 种语感:西域译名 ${west} 种(拉丁拟音 → 汉籍式汉字),东方 ${east} 种(音译字 / 边地意象 + 通名,照顾平仄)。`,
     '',
     '## 一眼总览(每类前 3 个)',
     '',

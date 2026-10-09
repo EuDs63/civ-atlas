@@ -1000,12 +1000,13 @@ function findDeserts(world: World, ctx: Ctx, ns: Namers): Place[] {
       else if (world.biome[k] === Biome.ColdDesert) cold++;
     }
     const other = c.cells.length - hot - cold;
-    const suffix = hot >= other && hot >= cold ? '沙漠' : cold > other ? '荒原' : '荒漠';
+    // 通名用单字(漠 / 荒):专名两字时整名三字,比「XX沙漠」更容易在图上放下
+    const suffix = hot >= other && hot >= cold ? '漠' : cold > other ? '荒' : '漠';
     const rank = c.area >= DESERT.tier1Area ? 1 : c.area >= DESERT.tier2Area ? 2 : 3;
     const r = Math.sqrt((c.area * ctx.cellA) / Math.PI);
     const ax = principalAxis(world, c.cells, (k) => ctx.area[k]);
     const path = axisPath(ctx, dist, a, ax, r, world.mesh);
-    return later(ns, place('desert', UNNAMED, path, rank, r, a), { t: 'derived', from: 'region', suffix, keep: ['漠', '荒', '原'] });
+    return later(ns, place('desert', UNNAMED, path, rank, r, a), { t: 'derived', from: 'region', suffix, keep: ['漠', '荒', '原'], shortest: true });
   });
 }
 
