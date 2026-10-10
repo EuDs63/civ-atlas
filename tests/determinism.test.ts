@@ -58,7 +58,7 @@ function fingerprint(seed: number): Record<string, string> {
 }
 
 /**
- * 期望值是 GENERATOR_VERSION 10 算的(western 族改汉籍西域译名;东方语感保持原样:地形 / 推演不变,名字与由名字带出的字段换了)。
+ * 期望值是 GENERATOR_VERSION 11 算的(技术层贴上 Civ.tech;疆域 / 兴亡 / 名字与 10 相同,多了气质、时代、技术扩散)。
  * 经纬度换算、沿大圆走、球面三角形面积这些三角函数都舍入到 24 位,推演里的超越函数也一样,所以各 CPU、各浏览器逐位一致
  */
 const EXPECTED: Record<number, Record<string, string>> = {
@@ -101,6 +101,7 @@ const EXPECTED: Record<number, Record<string, string>> = {
     'civ.seed': '3ff6de7b7854',
     'civ.settlements': 'ce041643a22e',
     'civ.spreadYears': 'c6823047ce89',
+    'civ.tech': '7be0becb1cb7',
     'civ.viable': '139cfad50334',
   },
   7: {
@@ -142,6 +143,7 @@ const EXPECTED: Record<number, Record<string, string>> = {
     'civ.seed': '0096064c9137',
     'civ.settlements': '2888d667b61e',
     'civ.spreadYears': 'd7a11af211a1',
+    'civ.tech': '8356472f0d3d',
     'civ.viable': '139cfad50334',
   },
 };

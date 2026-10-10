@@ -6,7 +6,8 @@
  *   按钮  干预历史(主操作;窄屏点了底部抽屉展开)/ 设为中心 / 改名 / 更多(在编年史中查看、让 AI 写国史、让 AI 讲名字由来;
  *         有主体民族时还有讲它的族名由来、给它起族名)
  *   概况  国都、君主(这一年在位的那位,点了看他;共和国写"执政")、疆域(历年州数的小柱图,和概览"国家"表同一份)、
- *         人口(境内城镇)、主体民族、国教(可点,"某年起";没有写"没有")、邻国(可点),来历 / 结局 / 历任国都(有才写)
+ *         人口(境内城镇)、主体民族、国教(可点,"某年起";没有写"没有")、时代(技术时代 + 相对摇篮领先 / 落后)、
+ *         气质(守成 / 好战……)、邻国(可点),来历 / 结局 / 历任国都(有才写)
  *   历代君主  当前这位和前后各两位(新的在上;遇弑、被废这类结局写在名字后面),点一行看这个人;
  *         "全部 N 位"打开概览的人物页、只看这国的君主;"世系图"(不是共和国才有)打开这国的世系图,停在时间轴那一年的那一朝
  *   朝代  改朝换代过才有:一朝一行(新的在上),当前那一朝标"当前";点一行 = 时间轴跳到它开始的那年
@@ -28,6 +29,7 @@ import { ownersAt, type Owners } from '../gen/civ/timeline';
 import { filterChronicle, polityChronicle } from '../gen/civ/chronicle';
 import { fullChronicle } from '../gen/civ/religionText';
 import { stateFaithAt } from '../gen/civ/religion';
+import { polityTechAt } from '../gen/civ/tech';
 import { dynastyKey, polityKey } from '../gen/edits';
 import { setCivTime, setSelection } from './civView';
 import { peopleIndex, rulerAt } from '../gen/civ/peopleInfo';
@@ -235,6 +237,7 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
     return null;
   }, [civ, id]);
   const stateFaith = stateFaithAt(civ.religion, id, shownYear);
+  const techInfo = polityTechAt(civ, id, shownYear);
   const other = (q: number, y: number) => (civ.polities[q] ? <Link to={{ kind: 'polity', id: q }}>{polityName(civ.polities[q], y)}</Link> : null);
   const capitals = p.capitals?.length ? p.capitals : [{ year: p.founded, settlement: p.capital }];
   const popText = pop > 0 ? populationLabel(pop) : '—';
@@ -311,6 +314,21 @@ function InfoPage({ civ, raw, raster, world, id, year, p, shared }: CountryPanel
               ) : (
                 <span className="cp-none">没有</span>
               )}
+            </Row>
+          )}
+          {techInfo && (
+            <Row k="时代">
+              {techInfo.eraName}
+              <em className="cp-num-note">{techInfo.lagText}</em>
+            </Row>
+          )}
+          {techInfo && techInfo.temperaments.length > 0 && (
+            <Row k="气质" className="cp-links">
+              {techInfo.temperaments.map((t) => (
+                <span key={t} className="cp-temper">
+                  {t}
+                </span>
+              ))}
             </Row>
           )}
           <Row k="邻国" className="cp-links">

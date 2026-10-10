@@ -398,6 +398,15 @@
   color: var(--ink-2);
   margin-left: 3px;
 }
+.cp-temper {
+  font-size: 13px;
+  color: var(--ink);
+}
+.cp-temper + .cp-temper::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--ink-2);
+}
 .cp-now .ins-link {
   font-weight: 700;
 }

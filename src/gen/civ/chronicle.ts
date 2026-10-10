@@ -106,9 +106,10 @@ export const MIGRATE_MAJOR = 5;
 
 /**
  * 纪事的种类:史事的种类,加上按人物排出来的君主继位(reign,不是史事,见 reignEntries)、
- * 信仰的大事(faith,不是史事,见 religionText.ts 的 faithEntries)
+ * 信仰的大事(faith,不是史事,见 religionText.ts 的 faithEntries)、
+ * 技术发明 / 传播(tech,不是史事,见 techText.ts 的 techEntries)
  */
-export type EntryKind = AnnalKind | 'reign' | 'faith';
+export type EntryKind = AnnalKind | 'reign' | 'faith' | 'tech';
 
 export interface ChronicleEntry {
   /** 这一条(第一条)史事在 civ.annals 里的下标;列表里唯一,当 key 用(君主继位 = civ.annals.length + 新君的 Person.id) */
@@ -120,7 +121,7 @@ export interface ChronicleEntry {
   end: Year;
   /** 纪事正文(不带年份) */
   text: string;
-  /** 一个字的标签(界面上的小印章):立 升 降 战 占 征 和 割 亡 迁 分 复 合 朝 徙 化 湮 掠 毁 建 衰 干 役 变 没 嗣;信仰:创 皈 传 派 圣 */
+  /** 一个字的标签(界面上的小印章):立 升 降 战 占 征 和 割 亡 迁 分 复 合 朝 徙 化 湮 掠 毁 建 衰 干 役 变 没 嗣;信仰:创 皈 传 派 圣;技术:技 播 */
   tag: string;
   importance: Importance;
   /** 相关国家(按国家筛选、地图高亮用;先主后次,不含 −1) */
